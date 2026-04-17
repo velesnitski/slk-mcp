@@ -1,43 +1,60 @@
 # slk-mcp
 
-Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client. Get morning recaps, search messages, and track decisions across channels.
+Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
+
+**What it does:** morning recaps across channels, smart unread summaries, mentions tracking, decision detection, message search, thread reading, and posting.
+
+**Written in Go** — single ~10 MB binary, ~15 MB Docker image, no runtime, no zombie processes.
 
 ## Quick start
 
 ### 1. Create a Slack App
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
-2. Add **Bot Token Scopes** under **OAuth & Permissions**:
-   - `channels:history` — read public channel messages
-   - `channels:read` — list channels
-   - `groups:history` — read private channel messages
-   - `groups:read` — list private channels
-   - `users:read` — resolve user names
-   - `search:read` — search messages
-   - `chat:write` — post messages (optional)
-   - `reactions:write` — add reactions (optional)
-3. **Install to Workspace** and copy the **Bot User OAuth Token** (`xoxb-...`)
-4. Invite the bot to channels: `/invite @your-bot-name`
+2. Under **OAuth & Permissions**, add scopes:
+   - **Bot Token Scopes** (required):
+     - `channels:history`, `channels:read`
+     - `groups:history`, `groups:read`
+     - `users:read`
+     - `chat:write` (optional — for `post_message`)
+     - `reactions:write` (optional — for `add_reaction`)
+   - **User Token Scopes** (optional, unlocks unread/mentions):
+     - `channels:history`, `groups:history`, `im:history`, `mpim:history`
+     - `users.profile:read`
+     - `search:read`
+3. **Install to Workspace**, then copy:
+   - `xoxb-...` — Bot User OAuth Token → `SLACK_TOKEN`
+   - `xoxp-...` — User OAuth Token → `SLACK_USER_TOKEN` (optional)
+4. Invite the bot to the channels you care about: `/invite @your-bot`
 
 ### 2. Install in Claude Code
 
 ```bash
 claude mcp add slack \
   -e SLACK_TOKEN=xoxb-your-bot-token \
+  -e SLACK_USER_TOKEN=xoxp-your-user-token \
   -e SLACK_CHANNELS=general,announcements \
-  -- uvx --from git+https://github.com/velesnitski/slk-mcp slk-mcp
+  -- docker run --rm -i \
+     -e SLACK_TOKEN -e SLACK_USER_TOKEN -e SLACK_CHANNELS \
+     velesnitski/slk-mcp -transport stdio
 ```
 
-Or manually in `~/.claude.json`:
+Or via config file (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "slack": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/velesnitski/slk-mcp", "slk-mcp"],
+      "command": "docker",
+      "args": ["run", "--rm", "-i",
+               "-e", "SLACK_TOKEN",
+               "-e", "SLACK_USER_TOKEN",
+               "-e", "SLACK_CHANNELS",
+               "velesnitski/slk-mcp",
+               "-transport", "stdio"],
       "env": {
         "SLACK_TOKEN": "xoxb-your-bot-token",
+        "SLACK_USER_TOKEN": "xoxp-your-user-token",
         "SLACK_CHANNELS": "general,announcements"
       }
     }
@@ -47,69 +64,66 @@ Or manually in `~/.claude.json`:
 
 ### 3. Try it
 
-- *"Give me a morning recap"*
-- *"What happened in #devops in the last 24 hours?"*
-- *"What decisions were made this week?"*
-- *"What did John say about the deployment?"*
+- *"Summarise my unread messages"*
+- *"What happened in #general overnight?"*
+- *"Morning recap"*
+- *"Any mentions of me in the last 24 hours?"*
+- *"What decisions were made this week across my channels?"*
 - *"Search for messages about database migration"*
+- *"What did alex say about the deployment?"*
 
-## Available tools (10)
+## Tools
 
-### Channels (2)
-
-| Tool | Description |
-|---|---|
-| `list_channels` | List accessible channels with member counts and topics |
-| `get_channel_info` | Detailed info about a channel |
-
-### Digest & Recap (3)
+### Without user token (bot-token only)
 
 | Tool | Description |
 |---|---|
-| `get_channel_digest` | Recent messages from a single channel |
-| `get_multi_channel_digest` | Digest across multiple channels in one call |
-| `get_morning_recap` | Morning recap: digest + decisions + action items |
+| `list_channels` | List channels the bot can see, ordered by member count |
+| `get_channel_info` | Topic, purpose, member count, created date |
+| `get_channel_digest` | Compact digest of one channel |
+| `get_multi_channel_digest` | Digest across multiple channels |
+| `get_morning_recap` | Decisions + activity across channels |
+| `search_messages` | Workspace search (Slack syntax) |
+| `find_decisions` | Messages that look like decisions (keywords + reactions) |
+| `get_thread` | Full thread replies |
+| `get_user_messages` | Recent messages from a specific user |
+| `post_message` | Post a message (disabled in `SLACK_READ_ONLY`) |
+| `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |
 
-### Search (2)
+### With user token (`SLACK_USER_TOKEN`)
 
 | Tool | Description |
 |---|---|
-| `search_messages` | Search messages across all channels (Slack search syntax) |
-| `find_decisions` | Find messages that look like decisions (keywords + reactions) |
-
-### Threads & Messages (3)
-
-| Tool | Description |
-|---|---|
-| `get_thread` | Get all replies in a thread |
-| `get_user_messages` | Get recent messages from a specific user |
-| `post_message` | Post a message to a channel |
-| `add_reaction` | Add a reaction to a message |
+| `get_unread_summary` | Unread messages across all joined channels, sorted by volume |
+| `get_mentions` | Messages that mention you |
+| `mark_read` | Mark a channel read through a given timestamp |
 
 ## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `SLACK_TOKEN` | Yes | Bot User OAuth Token (`xoxb-...`) |
+| `SLACK_USER_TOKEN` | No | User OAuth Token (`xoxp-...`). Enables unread/mentions. |
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated) |
-| `SLACK_READ_ONLY` | No | Set to `true` to disable post_message and add_reaction |
+| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `mark_read` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
-| `DISABLED_TOOLS` | No | Comma-separated list of tools to disable |
-| `SENTRY_DSN` | No | Sentry DSN for error tracking |
-| `SLACK_LOG_FILE` | No | Error log path (default: `~/.slk-mcp/slk-mcp.log`) |
-| `SLACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.slk-mcp/analytics.log`) |
+| `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
+| `SLACK_COMPACT` | No | `false` to disable compact output (default: `true`) |
+| `SLACK_LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
+| `DISABLED_TOOLS` | No | Comma-separated list of tool names to hide |
 
 ## Docker
 
 ```bash
 docker run -d --name slack-mcp \
   -e SLACK_TOKEN=xoxb-your-bot-token \
+  -e SLACK_USER_TOKEN=xoxp-your-user-token \
   -e SLACK_CHANNELS=general,announcements \
   -p 8001:8000 \
   velesnitski/slk-mcp
 ```
 
-Connect Claude Code to Docker:
+Connect Claude Code over the network:
 
 ```json
 {
@@ -122,23 +136,53 @@ Connect Claude Code to Docker:
 }
 ```
 
+## Architecture
+
+```
+slk-mcp/
+├── main.go                          # Entry, flags, transport, graceful shutdown
+├── internal/
+│   ├── config/                      # Env-driven configuration + validation
+│   ├── logger/                      # slog JSON logger (stderr)
+│   ├── format/                      # Compact LLM-friendly output
+│   ├── slack/
+│   │   ├── client.go                # Composition root
+│   │   ├── channels.go              # ChannelService — list, resolve, info
+│   │   ├── messages.go              # MessageService — history, threads, post
+│   │   ├── users.go                 # UserService — cached name resolution
+│   │   ├── search.go                # SearchService — workspace search
+│   │   ├── unread.go                # UnreadService — user-token-only
+│   │   └── ratelimit/               # 429 retry with Retry-After
+│   └── tools/                       # MCP tool handlers (one file per domain)
+└── Dockerfile                       # Multi-stage, non-root, Alpine
+```
+
+Services are composed on `slack.Client`; each tool handler depends only on what it needs. Rate-limiting wraps every API call. `context.Context` propagates from tool handlers to the Slack SDK.
+
 ## Decision detection
 
-The `find_decisions` and `get_morning_recap` tools detect decisions by:
+`find_decisions` and `get_morning_recap` detect decisions by:
 
-**Keywords** in message text:
-- "decided", "approved", "let's go with", "agreed", "confirmed", "moving forward", "final answer"
+**Keywords in text:** "decided", "approved", "let's go with", "agreed", "confirmed", "moving forward", "final answer"
 
-**Reactions** on messages:
-- :white_check_mark:, :heavy_check_mark:, :eyes:, :thumbsup:
+**Reactions on messages:** :white_check_mark:, :heavy_check_mark:, :eyes:, :thumbsup:
 
 ## Security
 
-- Bot token passed via environment variable — never hardcoded
-- In stdio mode, no network exposure (local pipes only)
-- Read-only mode available (`SLACK_READ_ONLY=true`)
-- The bot can only see channels it's been invited to
-- No message content is logged — only tool names, channel names, and timing
+- Tokens passed via environment variables — never hardcoded.
+- Stdio transport has zero network exposure.
+- Read-only mode available (`SLACK_READ_ONLY=true`).
+- Bot only sees channels it's invited to.
+- User token only needed for personal workflow features (unread/mentions) — bot token covers everything else.
+- No message content is logged, only tool names, channel names, and timings.
+
+## Development
+
+```bash
+go build -o slk-mcp .
+go test ./...
+go vet ./...
+```
 
 ## License
 

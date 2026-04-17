@@ -1,67 +1,100 @@
+// Package tools wires MCP tool handlers to the Slack service layer.
 package tools
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/config"
-	slk "github.com/velesnitski/slk-mcp/internal/slack"
+	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func RegisterAll(s *server.MCPServer, client *slk.Client, cfg *config.Config) {
-	registerChannelTools(s, client)
-	registerDigestTools(s, client)
-	registerSearchTools(s, client)
-	registerThreadTools(s, client, cfg.ReadOnly)
+// Deps is the surface every tool module needs.
+type Deps struct {
+	Client *slack.Client
+	Cfg    *config.Config
+	Log    *slog.Logger
 }
 
-func resolveUsers(client *slk.Client, messages []goslack.Message) map[string]string {
-	names := make(map[string]string)
-	for _, msg := range messages {
-		if msg.User != "" {
-			if _, ok := names[msg.User]; !ok {
-				names[msg.User] = client.ResolveUserName(msg.User)
-			}
+// RegisterAll wires every tool module onto s. Tools that require a user
+// token register themselves conditionally.
+func RegisterAll(s *server.MCPServer, deps Deps) {
+	registerChannelTools(s, deps)
+	registerDigestTools(s, deps)
+	registerSearchTools(s, deps)
+	registerThreadTools(s, deps)
+	registerUnreadTools(s, deps)
+}
+
+// parseChannelList splits a comma-separated input, falling back to defaults.
+func parseChannelList(input string, defaults []string) []string {
+	if strings.TrimSpace(input) == "" {
+		return defaults
+	}
+	var result []string
+	for _, ch := range strings.Split(input, ",") {
+		ch = strings.TrimSpace(strings.TrimPrefix(ch, "#"))
+		if ch != "" {
+			result = append(result, ch)
 		}
 	}
-	return names
+	return result
 }
 
-func detectDecisions(client *slk.Client, chName string, messages []goslack.Message, userNames map[string]string) []string {
-	cfg := client.Config()
-	var decisions []string
-
+// detectDecisions returns decision lines for messages matching configured
+// keywords or reactions.
+func detectDecisions(cfg *config.Config, channel string, messages []goslack.Message, users map[string]string, render func(goslack.Message, string, string, string) string) []string {
+	var out []string
 	for _, msg := range messages {
-		textLower := strings.ToLower(msg.Text)
-		userName := userNames[msg.User]
-		if userName == "" {
-			userName = msg.User
-		}
-
-		found := false
-		for _, keyword := range cfg.DecisionKeywords {
-			if strings.Contains(textLower, keyword) {
-				decisions = append(decisions, slk.FormatDecision(msg, chName, userName, "keyword: "+keyword))
-				found = true
-				break
-			}
-		}
-		if found {
+		reason, ok := matchDecision(cfg, msg)
+		if !ok {
 			continue
 		}
-
-		reactions := make(map[string]bool)
-		for _, r := range msg.Reactions {
-			reactions[r.Name] = true
+		name := users[msg.User]
+		if name == "" {
+			name = msg.User
 		}
-		for _, reaction := range cfg.DecisionReactions {
-			if reactions[reaction] {
-				decisions = append(decisions, slk.FormatDecision(msg, chName, userName, "reaction: :"+reaction+":"))
-				break
+		out = append(out, render(msg, channel, name, reason))
+	}
+	return out
+}
+
+func matchDecision(cfg *config.Config, msg goslack.Message) (string, bool) {
+	text := strings.ToLower(msg.Text)
+	for _, kw := range cfg.DecisionKeywords {
+		if strings.Contains(text, kw) {
+			return "keyword:" + kw, true
+		}
+	}
+	if len(msg.Reactions) > 0 {
+		wanted := make(map[string]struct{}, len(cfg.DecisionReactions))
+		for _, r := range cfg.DecisionReactions {
+			wanted[r] = struct{}{}
+		}
+		for _, r := range msg.Reactions {
+			if _, ok := wanted[r.Name]; ok {
+				return "reaction::" + r.Name + ":", true
 			}
 		}
 	}
+	return "", false
+}
 
-	return decisions
+// collectUserIDs returns the unique set of user IDs in a message slice.
+func collectUserIDs(messages []goslack.Message) []string {
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.User == "" {
+			continue
+		}
+		if _, ok := seen[m.User]; ok {
+			continue
+		}
+		seen[m.User] = struct{}{}
+		ids = append(ids, m.User)
+	}
+	return ids
 }

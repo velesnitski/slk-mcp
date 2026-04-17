@@ -9,75 +9,82 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	slk "github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerChannelTools(s *server.MCPServer, client *slk.Client) {
-	s.AddTool(
-		mcp.NewTool("list_channels",
-			mcp.WithDescription("List accessible Slack channels with member counts and topics."),
-			mcp.WithNumber("limit", mcp.Description("Max channels to return (default: 100)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			limit := req.GetFloat("limit", 100)
-
-			channels, err := client.ListChannels(int(limit))
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			sort.Slice(channels, func(i, j int) bool {
-				return channels[i].NumMembers > channels[j].NumMembers
-			})
-
-			var b strings.Builder
-			fmt.Fprintf(&b, "**%d channels**\n\n", len(channels))
-			for _, ch := range channels {
-				topic := ch.Topic.Value
-				if len(topic) > 80 {
-					topic = topic[:80]
+func registerChannelTools(s *server.MCPServer, d Deps) {
+	if !d.Cfg.IsDisabled("list_channels") {
+		s.AddTool(
+			mcp.NewTool("list_channels",
+				mcp.WithDescription("List Slack channels the bot can see, ordered by member count."),
+				mcp.WithNumber("limit", mcp.Description("Max channels to return (default: 100)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				limit := int(req.GetFloat("limit", 100))
+				channels, err := d.Client.Channels.List(ctx, limit)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("list channels: %v", err)), nil
 				}
-				topicStr := ""
-				if topic != "" {
-					topicStr = " — " + topic
+				sort.Slice(channels, func(i, j int) bool {
+					return channels[i].NumMembers > channels[j].NumMembers
+				})
+
+				var b strings.Builder
+				fmt.Fprintf(&b, "%d channels\n", len(channels))
+				for _, ch := range channels {
+					topic := strings.TrimSpace(ch.Topic.Value)
+					if len(topic) > 80 {
+						topic = topic[:80] + "..."
+					}
+					if topic != "" {
+						fmt.Fprintf(&b, "- #%s (%d) %s\n", ch.Name, ch.NumMembers, topic)
+					} else {
+						fmt.Fprintf(&b, "- #%s (%d)\n", ch.Name, ch.NumMembers)
+					}
 				}
-				fmt.Fprintf(&b, "- **#%s** (%d members)%s\n", ch.Name, ch.NumMembers, topicStr)
-			}
+				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+			},
+		)
+	}
 
-			return mcp.NewToolResultText(b.String()), nil
-		},
-	)
+	if !d.Cfg.IsDisabled("get_channel_info") {
+		s.AddTool(
+			mcp.NewTool("get_channel_info",
+				mcp.WithDescription("Get a channel's topic, purpose, member count and created date."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops or devops)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				name, err := req.RequireString("channel")
+				if err != nil {
+					return mcp.NewToolResultError("channel is required"), nil
+				}
+				channelID, err := d.Client.Channels.ResolveID(ctx, name)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				ch, err := d.Client.Channels.Info(ctx, channelID)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
 
-	s.AddTool(
-		mcp.NewTool("get_channel_info",
-			mcp.WithDescription("Get detailed info about a channel (topic, purpose, member count, created date)."),
-			mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			channel, err := req.RequireString("channel")
-			if err != nil {
-				return mcp.NewToolResultError("Missing channel"), nil
-			}
+				created := time.Unix(int64(ch.Created), 0).Format("2006-01-02")
+				out := fmt.Sprintf(
+					"#%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
+					ch.Name, ch.NumMembers, created,
+					firstLine(ch.Topic.Value), firstLine(ch.Purpose.Value), ch.IsArchived,
+				)
+				return mcp.NewToolResultText(out), nil
+			},
+		)
+	}
+}
 
-			channelID, err := client.ResolveChannelID(channel)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			ch, err := client.GetChannelInfo(channelID)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			created := time.Unix(int64(ch.Created), 0).Format("2006-01-02")
-
-			result := fmt.Sprintf(
-				"**#%s**\n- Members: %d\n- Created: %s\n- Topic: %s\n- Purpose: %s\n- Archived: %v",
-				ch.Name, ch.NumMembers, created,
-				ch.Topic.Value, ch.Purpose.Value, ch.IsArchived,
-			)
-
-			return mcp.NewToolResultText(result), nil
-		},
-	)
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "(none)"
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
