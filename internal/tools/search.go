@@ -8,93 +8,90 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	slk "github.com/velesnitski/slk-mcp/internal/slack"
+	"github.com/velesnitski/slk-mcp/internal/format"
+	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerSearchTools(s *server.MCPServer, client *slk.Client) {
-	s.AddTool(
-		mcp.NewTool("search_messages",
-			mcp.WithDescription("Search messages across all channels. Supports Slack search syntax: from:@user, in:#channel, has:link, before:/after: dates."),
-			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
-			mcp.WithNumber("limit", mcp.Description("Max results (default: 20)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			query, err := req.RequireString("query")
-			if err != nil {
-				return mcp.NewToolResultError("Missing query"), nil
-			}
-			limit := req.GetFloat("limit", 20)
-
-			matches, err := client.SearchMessages(query, int(limit))
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			if len(matches) == 0 {
-				return mcp.NewToolResultText(fmt.Sprintf("No messages found for: %s", query)), nil
-			}
-
-			var b strings.Builder
-			fmt.Fprintf(&b, "**%d results for:** %s\n\n", len(matches), query)
-
-			for _, m := range matches {
-				text := m.Text
-				if len(text) > 200 {
-					text = text[:200]
-				}
-				ts := slk.ParseTS(m.Timestamp)
-				dateStr := ts.Format("2006-01-02 15:04")
-
-				fmt.Fprintf(&b, "**#%s** %s (%s)\n%s\n\n", m.Channel.Name, dateStr, m.Username, text)
-			}
-
-			return mcp.NewToolResultText(b.String()), nil
-		},
-	)
-
-	s.AddTool(
-		mcp.NewTool("find_decisions",
-			mcp.WithDescription("Find messages that look like decisions across channels. Detects decision keywords and reactions."),
-			mcp.WithString("channels", mcp.Description("Comma-separated channel names. Uses SLACK_CHANNELS if empty.")),
-			mcp.WithNumber("hours", mcp.Description("How far back to look (default: 72)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			channelsStr := req.GetString("channels", "")
-			hours := req.GetFloat("hours", 72)
-
-			channelList := parseChannelList(channelsStr, client.Config().Channels)
-			if len(channelList) == 0 {
-				return mcp.NewToolResultError("No channels specified. Pass channels or set SLACK_CHANNELS env var."), nil
-			}
-
-			oldest := time.Now().Add(-time.Duration(int(hours)) * time.Hour)
-			var decisions []string
-
-			for _, chName := range channelList {
-				channelID, err := client.ResolveChannelID(chName)
+func registerSearchTools(s *server.MCPServer, d Deps) {
+	if !d.Cfg.IsDisabled("search_messages") {
+		s.AddTool(
+			mcp.NewTool("search_messages",
+				mcp.WithDescription("Workspace search (Slack syntax: from:@user, in:#channel, has:link, before:/after:DATE)."),
+				mcp.WithString("query", mcp.Required(), mcp.Description("Slack search query")),
+				mcp.WithNumber("limit", mcp.Description("Max hits (default: 20)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				q, err := req.RequireString("query")
 				if err != nil {
-					decisions = append(decisions, fmt.Sprintf("- **#%s**: Error: %v", chName, err))
-					continue
+					return mcp.NewToolResultError("query is required"), nil
 				}
+				limit := int(req.GetFloat("limit", 20))
 
-				messages, err := client.GetChannelHistory(channelID, oldest, 200)
+				matches, err := d.Client.Search.Messages(ctx, q, limit)
 				if err != nil {
-					decisions = append(decisions, fmt.Sprintf("- **#%s**: Error: %v", chName, err))
-					continue
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				if len(matches) == 0 {
+					return mcp.NewToolResultText(fmt.Sprintf("no hits for: %s", q)), nil
 				}
 
-				userNames := resolveUsers(client, messages)
-				found := detectDecisions(client, chName, messages, userNames)
-				decisions = append(decisions, found...)
-			}
+				var b strings.Builder
+				fmt.Fprintf(&b, "%d hits for: %s\n", len(matches), q)
+				for _, m := range matches {
+					b.WriteString(format.SearchResult(m))
+					b.WriteByte('\n')
+				}
+				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+			},
+		)
+	}
 
-			if len(decisions) == 0 {
-				return mcp.NewToolResultText(fmt.Sprintf("No decisions found in the last %dh.", int(hours))), nil
-			}
+	if !d.Cfg.IsDisabled("find_decisions") {
+		s.AddTool(
+			mcp.NewTool("find_decisions",
+				mcp.WithDescription("Scan channels for messages that look like decisions (keywords + reactions)."),
+				mcp.WithString("channels", mcp.Description("Comma-separated channel names; uses SLACK_CHANNELS if empty")),
+				mcp.WithNumber("hours", mcp.Description("Lookback window (default: 72)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				list := parseChannelList(req.GetString("channels", ""), d.Cfg.Channels)
+				if len(list) == 0 {
+					return mcp.NewToolResultError("no channels — pass channels or set SLACK_CHANNELS"), nil
+				}
+				hours := int(req.GetFloat("hours", 72))
+				oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
 
-			return mcp.NewToolResultText(
-				fmt.Sprintf("**%d decisions found (%dh)**\n\n%s", len(decisions), int(hours), strings.Join(decisions, "\n")),
-			), nil
-		},
-	)
+				var decisions []string
+				for _, ch := range list {
+					channelID, err := d.Client.Channels.ResolveID(ctx, ch)
+					if err != nil {
+						decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
+						continue
+					}
+					msgs, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+						ChannelID: channelID,
+						OldestTS:  float64(oldest.Unix()),
+						Limit:     d.Cfg.MaxMessagesPerChannel,
+					})
+					if err != nil {
+						decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
+						continue
+					}
+					users := d.Client.Users.NamesFor(ctx, collectUserIDs(msgs))
+					decisions = append(decisions, detectDecisions(d.Cfg, ch, msgs, users, format.DecisionLine)...)
+				}
+
+				if len(decisions) == 0 {
+					return mcp.NewToolResultText(fmt.Sprintf("no decisions found in last %dh", hours)), nil
+				}
+				var b strings.Builder
+				fmt.Fprintf(&b, "%d decisions (last %dh)\n", len(decisions), hours)
+				for _, d := range decisions {
+					b.WriteString(d)
+					b.WriteByte('\n')
+				}
+				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+			},
+		)
+	}
 }

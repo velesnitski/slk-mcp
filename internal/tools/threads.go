@@ -7,118 +7,129 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	slk "github.com/velesnitski/slk-mcp/internal/slack"
+	"github.com/velesnitski/slk-mcp/internal/format"
 )
 
-func registerThreadTools(s *server.MCPServer, client *slk.Client, readOnly bool) {
-	s.AddTool(
-		mcp.NewTool("get_thread",
-			mcp.WithDescription("Get all replies in a thread."),
-			mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
-			mcp.WithString("thread_ts", mcp.Required(), mcp.Description("Thread timestamp")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			channel, _ := req.RequireString("channel")
-			threadTS, _ := req.RequireString("thread_ts")
-
-			channelID, err := client.ResolveChannelID(channel)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			replies, err := client.GetThreadReplies(channelID, threadTS)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			var b strings.Builder
-			fmt.Fprintf(&b, "**Thread in #%s** (%d messages)\n\n", channel, len(replies))
-
-			for _, msg := range replies {
-				name := client.ResolveUserName(msg.User)
-				b.WriteString(slk.FormatMessage(msg, name))
-				b.WriteString("\n\n")
-			}
-
-			return mcp.NewToolResultText(b.String()), nil
-		},
-	)
-
-	s.AddTool(
-		mcp.NewTool("get_user_messages",
-			mcp.WithDescription("Get recent messages from a specific user."),
-			mcp.WithString("user", mcp.Required(), mcp.Description("Username or display name")),
-			mcp.WithString("channel", mcp.Description("Optional channel to limit search")),
-			mcp.WithNumber("hours", mcp.Description("How far back (default: 24)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			user, _ := req.RequireString("user")
-			channel := req.GetString("channel", "")
-
-			query := fmt.Sprintf("from:@%s", user)
-			if channel != "" {
-				query += fmt.Sprintf(" in:#%s", strings.TrimPrefix(channel, "#"))
-			}
-
-			matches, err := client.SearchMessages(query, 50)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-
-			if len(matches) == 0 {
-				return mcp.NewToolResultText(fmt.Sprintf("No messages from %s.", user)), nil
-			}
-
-			var b strings.Builder
-			fmt.Fprintf(&b, "**Messages from %s** (%d found)\n\n", user, len(matches))
-
-			for _, m := range matches {
-				text := m.Text
-				if len(text) > 300 {
-					text = text[:300]
+func registerThreadTools(s *server.MCPServer, d Deps) {
+	if !d.Cfg.IsDisabled("get_thread") {
+		s.AddTool(
+			mcp.NewTool("get_thread",
+				mcp.WithDescription("Fetch all replies in a thread."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
+				mcp.WithString("thread_ts", mcp.Required(), mcp.Description("Thread timestamp (ts of the root message)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				channel, err := req.RequireString("channel")
+				if err != nil {
+					return mcp.NewToolResultError("channel is required"), nil
 				}
-				ts := slk.ParseTS(m.Timestamp)
-				dateStr := ts.Format("2006-01-02 15:04")
+				threadTS, err := req.RequireString("thread_ts")
+				if err != nil {
+					return mcp.NewToolResultError("thread_ts is required"), nil
+				}
 
-				fmt.Fprintf(&b, "**#%s** %s\n%s\n\n", m.Channel.Name, dateStr, text)
-			}
+				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				replies, err := d.Client.Messages.ThreadReplies(ctx, channelID, threadTS)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				users := d.Client.Users.NamesFor(ctx, collectUserIDs(replies))
 
-			return mcp.NewToolResultText(b.String()), nil
-		},
-	)
+				var b strings.Builder
+				fmt.Fprintf(&b, "thread #%s (%d msgs)\n", channel, len(replies))
+				for _, m := range replies {
+					b.WriteString(format.MessageLine(m, users[m.User]))
+					b.WriteByte('\n')
+				}
+				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+			},
+		)
+	}
 
-	if !readOnly {
+	if !d.Cfg.IsDisabled("get_user_messages") {
+		s.AddTool(
+			mcp.NewTool("get_user_messages",
+				mcp.WithDescription("Recent messages from a user. Uses workspace search."),
+				mcp.WithString("user", mcp.Required(), mcp.Description("Username or display name")),
+				mcp.WithString("channel", mcp.Description("Optional channel name to restrict search")),
+				mcp.WithNumber("limit", mcp.Description("Max hits (default: 30)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				user, err := req.RequireString("user")
+				if err != nil {
+					return mcp.NewToolResultError("user is required"), nil
+				}
+				channel := req.GetString("channel", "")
+				limit := int(req.GetFloat("limit", 30))
+
+				query := "from:@" + user
+				if channel != "" {
+					query += " in:#" + strings.TrimPrefix(channel, "#")
+				}
+				matches, err := d.Client.Search.Messages(ctx, query, limit)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				if len(matches) == 0 {
+					return mcp.NewToolResultText(fmt.Sprintf("no messages from %s", user)), nil
+				}
+
+				var b strings.Builder
+				fmt.Fprintf(&b, "%d msgs from %s\n", len(matches), user)
+				for _, m := range matches {
+					b.WriteString(format.SearchResult(m))
+					b.WriteByte('\n')
+				}
+				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+			},
+		)
+	}
+
+	if d.Cfg.ReadOnly {
+		return
+	}
+
+	if !d.Cfg.IsDisabled("post_message") {
 		s.AddTool(
 			mcp.NewTool("post_message",
-				mcp.WithDescription("Post a message to a channel."),
+				mcp.WithDescription("Post a message to a channel. Supports thread replies."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
 				mcp.WithString("text", mcp.Required(), mcp.Description("Message text (Slack markdown)")),
 				mcp.WithString("thread_ts", mcp.Description("Optional thread timestamp to reply in thread")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				channel, _ := req.RequireString("channel")
-				text, _ := req.RequireString("text")
+				channel, err := req.RequireString("channel")
+				if err != nil {
+					return mcp.NewToolResultError("channel is required"), nil
+				}
+				text, err := req.RequireString("text")
+				if err != nil {
+					return mcp.NewToolResultError("text is required"), nil
+				}
 				threadTS := req.GetString("thread_ts", "")
 
-				channelID, err := client.ResolveChannelID(channel)
+				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+					return mcp.NewToolResultError(err.Error()), nil
 				}
-
-				ts, err := client.PostMessage(channelID, text, threadTS)
+				ts, err := d.Client.Messages.Post(ctx, channelID, text, threadTS)
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+					return mcp.NewToolResultError(err.Error()), nil
 				}
-
-				return mcp.NewToolResultText(fmt.Sprintf("Message posted to #%s (ts: %s)", channel, ts)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("posted to #%s (ts: %s)", channel, ts)), nil
 			},
 		)
+	}
 
+	if !d.Cfg.IsDisabled("add_reaction") {
 		s.AddTool(
 			mcp.NewTool("add_reaction",
-				mcp.WithDescription("Add a reaction emoji to a message."),
+				mcp.WithDescription("Add an emoji reaction to a message."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
-				mcp.WithString("timestamp", mcp.Required(), mcp.Description("Message timestamp")),
+				mcp.WithString("timestamp", mcp.Required(), mcp.Description("Message ts")),
 				mcp.WithString("emoji", mcp.Required(), mcp.Description("Emoji name without colons (e.g. thumbsup)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -126,16 +137,14 @@ func registerThreadTools(s *server.MCPServer, client *slk.Client, readOnly bool)
 				timestamp, _ := req.RequireString("timestamp")
 				emoji, _ := req.RequireString("emoji")
 
-				channelID, err := client.ResolveChannelID(channel)
+				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+					return mcp.NewToolResultError(err.Error()), nil
 				}
-
-				if err := client.AddReaction(channelID, timestamp, emoji); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				if err := d.Client.Messages.AddReaction(ctx, channelID, timestamp, emoji); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
-
-				return mcp.NewToolResultText(fmt.Sprintf("Added :%s: to message in #%s", emoji, channel)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s", emoji, channel)), nil
 			},
 		)
 	}

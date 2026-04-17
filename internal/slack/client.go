@@ -1,165 +1,65 @@
+// Package slack provides a service-oriented Slack client for slk-mcp.
+//
+// The Client composes narrow services (Channels, Messages, Users, Search,
+// Unread) so tool handlers can depend on just what they need. Each service
+// shares a retry-aware transport and a user-name cache.
 package slack
 
 import (
-	"fmt"
-	"strings"
-	"time"
+	"log/slog"
 
-	"github.com/slack-go/slack"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/config"
 )
 
+// Client aggregates all Slack services behind a single handle.
 type Client struct {
-	api           *slack.Client
-	cfg           *config.Config
-	channelCache  map[string]string // name -> id
-	userCache     map[string]string // id -> display name
+	cfg *config.Config
+	log *slog.Logger
+
+	bot  *goslack.Client
+	user *goslack.Client
+
+	Channels *ChannelService
+	Messages *MessageService
+	Users    *UserService
+	Search   *SearchService
+	Unread   *UnreadService
 }
 
-func NewClient(cfg *config.Config) *Client {
-	return &Client{
-		api:          slack.New(cfg.Token),
-		cfg:          cfg,
-		channelCache: make(map[string]string),
-		userCache:    make(map[string]string),
+// New constructs a Client. The bot token is required; the user token is
+// optional and enables unread/mentions features.
+func New(cfg *config.Config, log *slog.Logger) *Client {
+	bot := goslack.New(cfg.BotToken)
+
+	var user *goslack.Client
+	if cfg.HasUserToken() {
+		user = goslack.New(cfg.UserToken)
 	}
+
+	c := &Client{cfg: cfg, log: log, bot: bot, user: user}
+
+	c.Users = newUserService(bot, log)
+	c.Channels = newChannelService(bot, c.Users, log)
+	c.Messages = newMessageService(bot, c.Channels, c.Users, log)
+	c.Search = newSearchService(c.searchAPI(), log)
+	c.Unread = newUnreadService(user, c.Channels, c.Users, log)
+
+	return c
 }
 
-func (c *Client) ResolveChannelID(name string) (string, error) {
-	name = strings.TrimPrefix(name, "#")
-	if id, ok := c.channelCache[name]; ok {
-		return id, nil
-	}
+// Config returns the configuration this client was built with.
+func (c *Client) Config() *config.Config { return c.cfg }
 
-	cursor := ""
-	for {
-		params := &slack.GetConversationsParameters{
-			Types:  []string{"public_channel", "private_channel"},
-			Limit:  200,
-			Cursor: cursor,
-		}
-		channels, nextCursor, err := c.api.GetConversations(params)
-		if err != nil {
-			return "", fmt.Errorf("list channels: %w", err)
-		}
-		for _, ch := range channels {
-			c.channelCache[ch.Name] = ch.ID
-			if ch.Name == name {
-				return ch.ID, nil
-			}
-		}
-		if nextCursor == "" {
-			break
-		}
-		cursor = nextCursor
-	}
+// HasUserToken reports whether a user token is available.
+func (c *Client) HasUserToken() bool { return c.user != nil }
 
-	return "", fmt.Errorf("channel #%s not found", name)
-}
-
-func (c *Client) ResolveUserName(userID string) string {
-	if name, ok := c.userCache[userID]; ok {
-		return name
+// searchAPI returns the API handle to use for search: user token if
+// available (search.messages is gated on user tokens in newer Slack apps),
+// falling back to the bot token otherwise.
+func (c *Client) searchAPI() *goslack.Client {
+	if c.user != nil {
+		return c.user
 	}
-	user, err := c.api.GetUserInfo(userID)
-	if err != nil {
-		c.userCache[userID] = userID
-		return userID
-	}
-	name := user.RealName
-	if name == "" {
-		name = user.Profile.DisplayName
-	}
-	if name == "" {
-		name = user.Name
-	}
-	c.userCache[userID] = name
-	return name
-}
-
-func (c *Client) GetChannelHistory(channelID string, oldest time.Time, limit int) ([]slack.Message, error) {
-	params := &slack.GetConversationHistoryParameters{
-		ChannelID: channelID,
-		Oldest:    fmt.Sprintf("%d", oldest.Unix()),
-		Limit:     limit,
-	}
-	resp, err := c.api.GetConversationHistory(params)
-	if err != nil {
-		return nil, fmt.Errorf("channel history: %w", err)
-	}
-	return resp.Messages, nil
-}
-
-func (c *Client) GetThreadReplies(channelID, threadTS string) ([]slack.Message, error) {
-	params := &slack.GetConversationRepliesParameters{
-		ChannelID: channelID,
-		Timestamp: threadTS,
-		Limit:     200,
-	}
-	msgs, _, _, err := c.api.GetConversationReplies(params)
-	if err != nil {
-		return nil, fmt.Errorf("thread replies: %w", err)
-	}
-	return msgs, nil
-}
-
-func (c *Client) SearchMessages(query string, count int) ([]slack.SearchMessage, error) {
-	params := slack.SearchParameters{
-		Sort:          "timestamp",
-		SortDirection: "desc",
-		Count:         count,
-	}
-	msgs, err := c.api.SearchMessages(query, params)
-	if err != nil {
-		return nil, fmt.Errorf("search: %w", err)
-	}
-	return msgs.Matches, nil
-}
-
-func (c *Client) PostMessage(channelID, text, threadTS string) (string, error) {
-	opts := []slack.MsgOption{slack.MsgOptionText(text, false)}
-	if threadTS != "" {
-		opts = append(opts, slack.MsgOptionTS(threadTS))
-	}
-	_, ts, err := c.api.PostMessage(channelID, opts...)
-	return ts, err
-}
-
-func (c *Client) AddReaction(channelID, timestamp, emoji string) error {
-	return c.api.AddReaction(emoji, slack.ItemRef{
-		Channel:   channelID,
-		Timestamp: timestamp,
-	})
-}
-
-func (c *Client) ListChannels(limit int) ([]slack.Channel, error) {
-	var all []slack.Channel
-	cursor := ""
-	for {
-		params := &slack.GetConversationsParameters{
-			Types:  []string{"public_channel", "private_channel"},
-			Limit:  200,
-			Cursor: cursor,
-		}
-		channels, nextCursor, err := c.api.GetConversations(params)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, channels...)
-		if nextCursor == "" || len(all) >= limit {
-			break
-		}
-		cursor = nextCursor
-	}
-	return all, nil
-}
-
-func (c *Client) GetChannelInfo(channelID string) (*slack.Channel, error) {
-	return c.api.GetConversationInfo(&slack.GetConversationInfoInput{
-		ChannelID: channelID,
-	})
-}
-
-func (c *Client) Config() *config.Config {
-	return c.cfg
+	return c.bot
 }
