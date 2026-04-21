@@ -26,7 +26,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "0.2.0"
+var version = "0.2.1"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -58,9 +58,15 @@ func run() error {
 	}
 
 	client := slack.New(cfg, log)
-	if !client.HasUserToken() {
-		log.Info("starting without user token",
-			"hint", "set SLACK_USER_TOKEN=xoxp-... for unread/mentions tools")
+	switch {
+	case cfg.PostsAsUser():
+		log.Info("token mode: user-only",
+			"note", "posts and reactions will appear as the authenticated user")
+	case !client.HasUserToken():
+		log.Info("token mode: bot-only",
+			"hint", "set SLACK_USER_TOKEN=xoxp-... to enable unread/mentions tools")
+	default:
+		log.Info("token mode: bot + user")
 	}
 
 	mcpServer := server.NewMCPServer(
@@ -78,6 +84,7 @@ func run() error {
 	log.Info("slk-mcp ready",
 		"version", version,
 		"transport", *transport,
+		"bot_token", cfg.HasBotToken(),
 		"user_token", client.HasUserToken(),
 		"read_only", cfg.ReadOnly,
 		"channels_configured", len(cfg.Channels),

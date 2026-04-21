@@ -10,8 +10,15 @@ import (
 
 // Config is the loaded runtime configuration for slk-mcp.
 //
-// BotToken is used for channel reads, posts and reactions (works with xoxb-).
-// UserToken is optional and required only for unread / mentions tools (xoxp-).
+// At least one of BotToken or UserToken is required.
+//   - BotToken (xoxb-): acts as the bot identity; posts appear as the bot.
+//   - UserToken (xoxp-): acts as the authenticated user; required for
+//     unread/mentions/mark_read and for search.messages in modern apps.
+//
+// When both are set, BotToken is used for general reads and writes while
+// UserToken is used for the personal-workflow tools. When only UserToken
+// is set, it is used for everything (user tokens are a functional superset
+// of bot tokens).
 type Config struct {
 	BotToken  string
 	UserToken string
@@ -28,8 +35,10 @@ type Config struct {
 	CompactOutput         bool
 }
 
-// ErrMissingBotToken is returned when no bot token is configured.
-var ErrMissingBotToken = errors.New("SLACK_TOKEN is required (xoxb-... Bot User OAuth Token)")
+// ErrMissingToken is returned when neither bot nor user token is configured.
+var ErrMissingToken = errors.New(
+	"at least one of SLACK_TOKEN (xoxb-...) or SLACK_USER_TOKEN (xoxp-...) is required",
+)
 
 // Load reads configuration from environment variables.
 // Validation is the caller's responsibility (use Validate).
@@ -56,16 +65,37 @@ func Load() *Config {
 
 // Validate returns an error if required fields are missing.
 func (c *Config) Validate() error {
-	if c.BotToken == "" {
-		return ErrMissingBotToken
+	if c.BotToken == "" && c.UserToken == "" {
+		return ErrMissingToken
 	}
 	return nil
 }
 
+// HasBotToken reports whether a bot token is configured.
+func (c *Config) HasBotToken() bool { return c.BotToken != "" }
+
 // HasUserToken reports whether a user token is configured.
 // User-token-only tools must guard with this.
-func (c *Config) HasUserToken() bool {
-	return c.UserToken != ""
+func (c *Config) HasUserToken() bool { return c.UserToken != "" }
+
+// PrimaryToken returns the best available token for general API calls.
+//
+// Prefers the bot token (posts appear as the bot, preserves bot identity).
+// Falls back to the user token when no bot token is configured, in which
+// case API calls act AS the user — posts will appear as the authenticated
+// user, not as a bot.
+func (c *Config) PrimaryToken() string {
+	if c.BotToken != "" {
+		return c.BotToken
+	}
+	return c.UserToken
+}
+
+// PostsAsUser reports whether posts/reactions will appear as the
+// authenticated user rather than as a bot. True when only a user token is
+// configured. Useful for surfacing the current identity mode in logs.
+func (c *Config) PostsAsUser() bool {
+	return c.BotToken == "" && c.UserToken != ""
 }
 
 // IsDisabled reports whether a tool is in the DISABLED_TOOLS set.

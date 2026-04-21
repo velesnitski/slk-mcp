@@ -10,22 +10,52 @@ Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copi
 
 ### 1. Create a Slack App
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
-2. Under **OAuth & Permissions**, add scopes:
-   - **Bot Token Scopes** (required):
-     - `channels:history`, `channels:read`
-     - `groups:history`, `groups:read`
-     - `users:read`
-     - `chat:write` (optional — for `post_message`)
-     - `reactions:write` (optional — for `add_reaction`)
-   - **User Token Scopes** (optional, unlocks unread/mentions):
-     - `channels:history`, `groups:history`, `im:history`, `mpim:history`
-     - `users.profile:read`
-     - `search:read`
-3. **Install to Workspace**, then copy:
-   - `xoxb-...` — Bot User OAuth Token → `SLACK_TOKEN`
-   - `xoxp-...` — User OAuth Token → `SLACK_USER_TOKEN` (optional)
-4. Invite the bot to the channels you care about: `/invite @your-bot`
+Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**.
+Pick **one** of the setups below depending on how you want slk-mcp to act.
+
+#### Setup A — user token only (recommended for personal use)
+
+Use this if you want slk-mcp to act as **you**: posts appear under your name,
+DMs and private channels work out of the box, full unread/mentions support.
+You don't need to invite anything to channels.
+
+Under **OAuth & Permissions → User Token Scopes**, add:
+
+- `channels:history`, `channels:read`
+- `groups:history`, `groups:read`
+- `im:history`, `im:read`, `mpim:history`, `mpim:read`
+- `users:read`
+- `search:read`
+- `chat:write` (optional — for `post_message`)
+- `reactions:write` (optional — for `add_reaction`)
+
+**Install to Workspace**, copy the **User OAuth Token** (`xoxp-...`) → `SLACK_USER_TOKEN`.
+
+#### Setup B — bot token (shared team use)
+
+Use this if you want slk-mcp to act as a **bot**: posts appear as the bot,
+the bot must be invited to channels. Unread/mentions tools stay hidden
+unless you also add a user token.
+
+Under **OAuth & Permissions → Bot Token Scopes**, add:
+
+- `channels:history`, `channels:read`
+- `groups:history`, `groups:read`
+- `users:read`
+- `chat:write` (optional — for `post_message`)
+- `reactions:write` (optional — for `add_reaction`)
+
+Optional — add **User Token Scopes** to unlock `get_unread_summary`, `get_mentions`, `mark_read`:
+
+- `channels:history`, `groups:history`, `im:history`, `mpim:history`
+- `users.profile:read`, `search:read`
+
+**Install to Workspace**, copy:
+
+- `xoxb-...` — Bot User OAuth Token → `SLACK_TOKEN`
+- `xoxp-...` — User OAuth Token → `SLACK_USER_TOKEN` (optional)
+
+Invite the bot to channels: `/invite @your-bot`.
 
 ### 2. Install in Claude Code
 
@@ -102,8 +132,8 @@ Or via config file (`~/.claude.json`):
 
 | Variable | Required | Description |
 |---|---|---|
-| `SLACK_TOKEN` | Yes | Bot User OAuth Token (`xoxb-...`) |
-| `SLACK_USER_TOKEN` | No | User OAuth Token (`xoxp-...`). Enables unread/mentions. |
+| `SLACK_TOKEN` | one of | Bot User OAuth Token (`xoxb-...`). |
+| `SLACK_USER_TOKEN` | one of | User OAuth Token (`xoxp-...`). Required for unread/mentions. At least one of `SLACK_TOKEN` / `SLACK_USER_TOKEN` must be set. |
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated) |
 | `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `mark_read` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
