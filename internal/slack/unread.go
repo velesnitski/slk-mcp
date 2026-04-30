@@ -169,9 +169,9 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 		go func() {
 			defer wg.Done()
 			for ch := range jobs {
-				if ch.UnreadCount == 0 && ch.UnreadCountDisplay == 0 {
-					continue
-				}
+				// users.conversations does not populate unread_count;
+				// Unread() fetches conversations.info and short-circuits
+				// when the channel is actually caught up.
 				cu, err := s.Unread(ctx, ch.ID, maxPerChannel)
 				results <- result{cu, err}
 			}
