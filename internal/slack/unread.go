@@ -95,7 +95,11 @@ func (s *UnreadService) JoinedChannels(ctx context.Context) ([]goslack.Channel, 
 	cursor := ""
 	for {
 		params := &goslack.GetConversationsForUserParameters{
-			Types:           []string{"public_channel", "private_channel"},
+			// im + mpim cover direct messages and group DMs. Without
+			// them, conversations the operator sees in their Slack
+			// sidebar (DMs, multi-party chats) are silently dropped
+			// from the unread sweep.
+			Types:           []string{"public_channel", "private_channel", "mpim", "im"},
 			Limit:           200,
 			Cursor:          cursor,
 			ExcludeArchived: true,

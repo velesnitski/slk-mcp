@@ -54,14 +54,15 @@ type LogBand struct {
 // dominance order (caller-chosen). Empty bands are omitted from
 // both the histogram and the body.
 //
-// channelName is used as the heading; total is the full unread
+// channelLabel is used as the heading verbatim — caller is
+// responsible for any "#"/"@" prefix. Total is the full unread
 // count (so the header reflects the entire channel even when most
 // messages are histogram-only). Pass an empty users map if user
 // resolution failed — the underlying MessageLine renderer falls
 // back to user IDs.
-func LogChannelDigest(channelName string, total int, bands []LogBand, users map[string]string) string {
+func LogChannelDigest(channelLabel string, total int, bands []LogBand, users map[string]string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## #%s [LOG MODE — %d msgs]\n", channelName, total)
+	fmt.Fprintf(&b, "## %s [LOG MODE — %d msgs]\n", channelLabel, total)
 
 	var hist []string
 	for _, band := range bands {
@@ -214,24 +215,26 @@ func MessageLine(msg goslack.Message, userName string) string {
 
 // ChannelDigest renders all messages for a channel with a header.
 //
-// Reserves maxShow messages for detailed rendering; extras collapse to
-// "+N more". Optional behaviour (mention highlighting, thread replies)
-// is configured via DigestOption.
-func ChannelDigest(channelName string, messages []goslack.Message, users map[string]string, maxShow int, opts ...DigestOption) string {
+// channelLabel is the heading verbatim — caller picks the prefix
+// ("#general" for channels, "@alex" for DMs, "mpdm-..." for group
+// DMs). Reserves maxShow messages for detailed rendering; extras
+// collapse to "+N more". Optional behaviour (mention highlighting,
+// thread replies) is configured via DigestOption.
+func ChannelDigest(channelLabel string, messages []goslack.Message, users map[string]string, maxShow int, opts ...DigestOption) string {
 	cfg := digestOpts{}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	if len(messages) == 0 {
-		return fmt.Sprintf("## #%s\n(no activity)", channelName)
+		return fmt.Sprintf("## %s\n(no activity)", channelLabel)
 	}
 	if maxShow <= 0 {
 		maxShow = len(messages)
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "## #%s (%d msgs)\n", channelName, len(messages))
+	fmt.Fprintf(&b, "## %s (%d msgs)\n", channelLabel, len(messages))
 
 	show := messages
 	var hidden int

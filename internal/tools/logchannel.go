@@ -80,8 +80,8 @@ func containsAny(s string, terms ...string) bool {
 //     channel is treated as machine-driven regardless of name.
 //  2. Channel name pattern — fallback for human-relayed feeds where
 //     a real user account is posting through a webhook (so BotID is
-//     empty). Catches names like "*-alerts", "monitoring-*",
-//     "endpoint-monitoring", etc.
+//     empty). Catches names like "*-alerts", "*-monitoring",
+//     "*-cron", "*-incident", etc.
 //
 // Returns false on empty channels (nothing to classify).
 func detectLogChannel(cu *slack.ChannelUnread) bool {
