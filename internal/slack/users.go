@@ -72,6 +72,26 @@ func (s *UserService) NamesFor(ctx context.Context, userIDs []string) map[string
 	return out
 }
 
+// List returns all non-deleted workspace users. Pagination is
+// handled internally; one users.list call per 200-user page.
+func (s *UserService) List(ctx context.Context) ([]goslack.User, error) {
+	var out []goslack.User
+	err := ratelimit.Do(ctx, s.log, 0, func() error {
+		us, err := s.api.GetUsersContext(ctx, goslack.GetUsersOptionLimit(200))
+		if err != nil {
+			return err
+		}
+		for _, u := range us {
+			if u.Deleted {
+				continue
+			}
+			out = append(out, u)
+		}
+		return nil
+	})
+	return out, err
+}
+
 // formatUserDisplay renders a user as "Real Name (handle)" so the
 // LLM can correlate Slack usernames with the human names. Falls
 // through to whichever fields are present.

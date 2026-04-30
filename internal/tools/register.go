@@ -27,6 +27,7 @@ func RegisterAll(s *server.MCPServer, deps Deps) {
 	registerSearchTools(s, deps)
 	registerThreadTools(s, deps)
 	registerUnreadTools(s, deps)
+	registerUserTools(s, deps)
 }
 
 // parseChannelList splits a comma-separated input. Returns nil if input is empty.
