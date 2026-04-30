@@ -5,25 +5,72 @@ import (
 	"testing"
 )
 
-func TestValidate_RequiresBotToken(t *testing.T) {
+func TestValidate_RequiresAtLeastOneToken(t *testing.T) {
 	c := &Config{}
-	if err := c.Validate(); !errors.Is(err, ErrMissingBotToken) {
-		t.Fatalf("expected ErrMissingBotToken, got %v", err)
+	if err := c.Validate(); !errors.Is(err, ErrMissingToken) {
+		t.Fatalf("expected ErrMissingToken when no tokens set, got %v", err)
 	}
+
 	c.BotToken = "xoxb-test"
 	if err := c.Validate(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("bot-only should be valid: %v", err)
+	}
+
+	c.BotToken = ""
+	c.UserToken = "xoxp-test"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("user-only should be valid: %v", err)
+	}
+
+	c.BotToken = "xoxb-test"
+	c.UserToken = "xoxp-test"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("both tokens should be valid: %v", err)
 	}
 }
 
-func TestHasUserToken(t *testing.T) {
-	c := &Config{BotToken: "xoxb-test"}
-	if c.HasUserToken() {
-		t.Fatal("expected false without user token")
+func TestHasBotAndUserToken(t *testing.T) {
+	c := &Config{}
+	if c.HasBotToken() || c.HasUserToken() {
+		t.Fatal("expected false for both on empty config")
+	}
+	c.BotToken = "xoxb-test"
+	if !c.HasBotToken() || c.HasUserToken() {
+		t.Fatal("expected bot-only")
 	}
 	c.UserToken = "xoxp-test"
-	if !c.HasUserToken() {
-		t.Fatal("expected true with user token")
+	if !c.HasBotToken() || !c.HasUserToken() {
+		t.Fatal("expected both")
+	}
+}
+
+func TestPrimaryToken_PrefersBot(t *testing.T) {
+	c := &Config{BotToken: "xoxb-test", UserToken: "xoxp-test"}
+	if got := c.PrimaryToken(); got != "xoxb-test" {
+		t.Fatalf("expected bot token, got %q", got)
+	}
+
+	c.BotToken = ""
+	if got := c.PrimaryToken(); got != "xoxp-test" {
+		t.Fatalf("expected user token as fallback, got %q", got)
+	}
+}
+
+func TestPostsAsUser(t *testing.T) {
+	cases := []struct {
+		bot, user string
+		want      bool
+	}{
+		{"xoxb", "", false},
+		{"xoxb", "xoxp", false},
+		{"", "xoxp", true},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		c := &Config{BotToken: tc.bot, UserToken: tc.user}
+		if got := c.PostsAsUser(); got != tc.want {
+			t.Fatalf("bot=%q user=%q: PostsAsUser()=%v want %v", tc.bot, tc.user, got, tc.want)
+		}
 	}
 }
 
@@ -51,6 +98,6 @@ func TestParseIntDefault(t *testing.T) {
 		t.Fatalf("non-positive -> default: got %d", v)
 	}
 	if v := parseIntDefault("42", 24); v != 42 {
-		t.Fatalf("valid: got %d", v)
+		t.Fatalf("valid: got %d, want 42", v)
 	}
 }

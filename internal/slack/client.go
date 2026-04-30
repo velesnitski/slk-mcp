@@ -27,21 +27,39 @@ type Client struct {
 	Unread   *UnreadService
 }
 
-// New constructs a Client. The bot token is required; the user token is
-// optional and enables unread/mentions features.
+// New constructs a Client from a validated config.
+//
+// Token model:
+//   - If a bot token is set, it is the primary API for reads/posts.
+//   - If only a user token is set, the user token acts as primary. In that
+//     mode posts/reactions appear as the authenticated user, not as a bot.
+//   - The user token — when present — is additionally used for the Unread
+//     service (unread/mentions/mark_read) and preferred for Search.
+//
+// The caller must have run cfg.Validate() first.
 func New(cfg *config.Config, log *slog.Logger) *Client {
-	bot := goslack.New(cfg.BotToken)
+	primary := goslack.New(cfg.PrimaryToken())
 
+	// Reuse the primary client when the user token IS the primary token,
+	// so we don't open two HTTP connection pools for the same credential.
 	var user *goslack.Client
-	if cfg.HasUserToken() {
+	switch {
+	case cfg.HasBotToken() && cfg.HasUserToken():
 		user = goslack.New(cfg.UserToken)
+	case cfg.HasUserToken():
+		user = primary
+	}
+
+	var bot *goslack.Client
+	if cfg.HasBotToken() {
+		bot = primary
 	}
 
 	c := &Client{cfg: cfg, log: log, bot: bot, user: user}
 
-	c.Users = newUserService(bot, log)
-	c.Channels = newChannelService(bot, c.Users, log)
-	c.Messages = newMessageService(bot, c.Channels, c.Users, log)
+	c.Users = newUserService(primary, log)
+	c.Channels = newChannelService(primary, c.Users, log)
+	c.Messages = newMessageService(primary, c.Channels, c.Users, log)
 	c.Search = newSearchService(c.searchAPI(), log)
 	c.Unread = newUnreadService(user, c.Channels, c.Users, log)
 

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-14
+
+### Changed
+- **Token model is now flexible** — at least one of `SLACK_TOKEN` (`xoxb-`) or `SLACK_USER_TOKEN` (`xoxp-`) is required, not both. A user-only setup is now fully supported and acts as the authenticated user for all API calls (posts appear under the user's name).
+- `slack.Client` picks the primary API from `Config.PrimaryToken()`; when the user token is primary, the bot HTTP client pool is not allocated.
+- Startup log now reports the active token mode (`bot-only`, `user-only`, `bot + user`).
+- `ErrMissingBotToken` → `ErrMissingToken`.
+- README: split "Create a Slack App" into user-only (Setup A) and bot (Setup B) recipes.
+
 ## [0.2.0] - 2026-04-14
 
 ### Added
