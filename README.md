@@ -134,7 +134,8 @@ Or via config file (`~/.claude.json`):
 |---|---|---|
 | `SLACK_TOKEN` | one of | Bot User OAuth Token (`xoxb-...`). |
 | `SLACK_USER_TOKEN` | one of | User OAuth Token (`xoxp-...`). Required for unread/mentions. At least one of `SLACK_TOKEN` / `SLACK_USER_TOKEN` must be set. |
-| `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated) |
+| `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
+| `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
 | `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `mark_read` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |

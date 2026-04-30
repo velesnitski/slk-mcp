@@ -2,6 +2,7 @@
 package tools
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -28,10 +29,10 @@ func RegisterAll(s *server.MCPServer, deps Deps) {
 	registerUnreadTools(s, deps)
 }
 
-// parseChannelList splits a comma-separated input, falling back to defaults.
-func parseChannelList(input string, defaults []string) []string {
+// parseChannelList splits a comma-separated input. Returns nil if input is empty.
+func parseChannelList(input string) []string {
 	if strings.TrimSpace(input) == "" {
-		return defaults
+		return nil
 	}
 	var result []string
 	for _, ch := range strings.Split(input, ",") {
@@ -41,6 +42,35 @@ func parseChannelList(input string, defaults []string) []string {
 		}
 	}
 	return result
+}
+
+// resolveTargetChannels picks the list of channels for a tool call, in
+// priority order:
+//
+//  1. explicit input (the tool's `channels` argument);
+//  2. SLACK_CHANNELS configured at startup;
+//  3. auto-discovery — every channel the active identity has joined,
+//     capped at SLACK_AUTODISCOVER_LIMIT (default 50).
+//
+// Returns the resolved list, the source label ("input"/"config"/"auto"),
+// and any error encountered during auto-discovery.
+func resolveTargetChannels(ctx context.Context, d Deps, input string) ([]string, string, error) {
+	if list := parseChannelList(input); len(list) > 0 {
+		return list, "input", nil
+	}
+	if len(d.Cfg.Channels) > 0 {
+		return d.Cfg.Channels, "config", nil
+	}
+
+	names, err := d.Client.JoinedChannelNames(ctx, d.Cfg.AutodiscoverLimit)
+	if err != nil {
+		return nil, "auto", err
+	}
+	d.Log.Info("auto-discovered channels",
+		"count", len(names),
+		"limit", d.Cfg.AutodiscoverLimit,
+	)
+	return names, "auto", nil
 }
 
 // detectDecisions returns decision lines for messages matching configured
