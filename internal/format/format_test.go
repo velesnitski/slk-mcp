@@ -192,6 +192,53 @@ func TestChannelDigest_TruncatesExtraReplies(t *testing.T) {
 	}
 }
 
+func TestChannelDigest_OverridesReplyCap(t *testing.T) {
+	parent := goslack.Message{}
+	parent.Timestamp = "1700000100.000000"
+	parent.User = "U002"
+	parent.Text = "thread"
+
+	var replies []goslack.Message
+	for i := 0; i < 10; i++ {
+		m := goslack.Message{}
+		m.Timestamp = "1700000200.000000"
+		m.User = "U003"
+		m.Text = "reply"
+		replies = append(replies, m)
+	}
+
+	cases := []struct {
+		name        string
+		cap         int
+		wantHidden  string
+		wantVisible int
+	}{
+		{"override to 1", 1, "+9 more replies", 1},
+		{"override to 7", 7, "+3 more replies", 7},
+		{"override to 0 falls back to default", 0, "+7 more replies", ThreadPreviewReplies},
+		{"override to negative falls back to default", -5, "+7 more replies", ThreadPreviewReplies},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := ChannelDigest("dev", []goslack.Message{parent}, nil, 10,
+				WithThreadReplies(map[string][]goslack.Message{parent.Timestamp: replies}),
+				WithThreadPreviewReplies(c.cap),
+			)
+			if !strings.Contains(out, c.wantHidden) {
+				t.Fatalf("cap=%d: expected %q, got:\n%s", c.cap, c.wantHidden, out)
+			}
+			gotVisible := strings.Count(out, ReplyIndent)
+			// One indent prefix per visible reply, plus one for the
+			// "+N more replies" line itself.
+			wantIndents := c.wantVisible + 1
+			if gotVisible != wantIndents {
+				t.Fatalf("cap=%d: visible reply lines = %d; want %d. Output:\n%s",
+					c.cap, gotVisible, wantIndents, out)
+			}
+		})
+	}
+}
+
 func TestChannelDigest_RepliesWithoutOptionStillRenders(t *testing.T) {
 	// Backwards compatibility: existing callers that don't pass any
 	// options must still render unchanged output.
