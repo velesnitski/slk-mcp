@@ -41,22 +41,36 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					return mcp.NewToolResultText("all caught up — 0 unread"), nil
 				}
 
+				// Best-effort self-resolution for mention markers; a
+				// failure here just disables highlighting.
+				selfID, err := d.Client.Unread.Self(ctx)
+				if err != nil {
+					d.Log.Warn("auth.test failed; mention highlighting disabled", "err", err)
+				}
+
 				sort.Slice(results, func(i, j int) bool {
-					return len(results[i].Messages) > len(results[j].Messages)
+					return rankUnread(results[i], selfID) > rankUnread(results[j], selfID)
 				})
 
-				total := 0
+				totalMsgs, totalReplies := 0, 0
 				for _, r := range results {
-					total += len(r.Messages)
+					totalMsgs += len(r.Messages)
+					for _, rs := range r.Replies {
+						totalReplies += len(rs)
+					}
 				}
 
 				var b strings.Builder
-				fmt.Fprintf(&b, "# Unread summary\n%d channels, %d unread messages\n\n",
-					len(results), total)
+				fmt.Fprintf(&b, "# Unread summary\n%d channels, %d top-level + %d thread replies\n\n",
+					len(results), totalMsgs, totalReplies)
 
 				for _, r := range results {
-					users := d.Client.Users.NamesFor(ctx, collectUserIDs(r.Messages))
-					b.WriteString(format.ChannelDigest(r.Channel.Name, r.Messages, users, maxPer))
+					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
+					b.WriteString(format.ChannelDigest(
+						r.Channel.Name, r.Messages, users, maxPer,
+						format.WithMentionHighlight(selfID),
+						format.WithThreadReplies(r.Replies),
+					))
 					b.WriteString("\n\n")
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
@@ -124,4 +138,64 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 			},
 		)
 	}
+}
+
+// rankUnread orders ChannelUnread results so channels with a direct
+// mention of selfID surface first; among non-mention channels, busier
+// ones rank higher.
+func rankUnread(cu *slack.ChannelUnread, selfID string) int {
+	rank := len(cu.Messages)
+	for _, rs := range cu.Replies {
+		rank += len(rs)
+	}
+	if channelMentions(cu, selfID) {
+		// Large enough that any mention beats any volume.
+		rank += 1_000_000
+	}
+	return rank
+}
+
+func channelMentions(cu *slack.ChannelUnread, selfID string) bool {
+	if selfID == "" {
+		return false
+	}
+	for _, m := range cu.Messages {
+		if format.MentionsUser(m, selfID) {
+			return true
+		}
+	}
+	for _, rs := range cu.Replies {
+		for _, r := range rs {
+			if format.MentionsUser(r, selfID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// collectUserIDsWithReplies returns unique user IDs across both the
+// channel's top-level unread messages and any inlined thread replies.
+func collectUserIDsWithReplies(cu *slack.ChannelUnread) []string {
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(cu.Messages))
+	add := func(uid string) {
+		if uid == "" {
+			return
+		}
+		if _, ok := seen[uid]; ok {
+			return
+		}
+		seen[uid] = struct{}{}
+		ids = append(ids, uid)
+	}
+	for _, m := range cu.Messages {
+		add(m.User)
+	}
+	for _, rs := range cu.Replies {
+		for _, r := range rs {
+			add(r.User)
+		}
+	}
+	return ids
 }

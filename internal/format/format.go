@@ -22,6 +22,47 @@ const MessageLineLimit = 280
 // ThreadPreviewReplies is the max replies we inline in a digest.
 const ThreadPreviewReplies = 3
 
+// MentionMarker prefixes messages that mention the authenticated user
+// in a channel digest. Chosen to be conspicuous to LLMs without
+// disturbing humans skim-reading the output.
+const MentionMarker = "🏷️ "
+
+// ReplyIndent prefixes inlined thread replies under their parent.
+const ReplyIndent = "    ↳ "
+
+// digestOpts holds optional behaviour for ChannelDigest, populated via
+// DigestOption functions so existing callers stay source-compatible.
+type digestOpts struct {
+	selfID  string
+	replies map[string][]goslack.Message
+}
+
+// DigestOption configures ChannelDigest output.
+type DigestOption func(*digestOpts)
+
+// WithMentionHighlight prepends MentionMarker to messages whose body
+// contains "<@selfID>". Pass an empty string to disable.
+func WithMentionHighlight(selfID string) DigestOption {
+	return func(o *digestOpts) { o.selfID = selfID }
+}
+
+// WithThreadReplies attaches reply chains to the digest, keyed by
+// thread_ts of the parent message. Replies are rendered indented
+// beneath their parent. Up to ThreadPreviewReplies are shown per
+// thread; the rest collapse to "+N more replies".
+func WithThreadReplies(replies map[string][]goslack.Message) DigestOption {
+	return func(o *digestOpts) { o.replies = replies }
+}
+
+// MentionsUser reports whether msg.Text contains a Slack-style
+// "<@userID>" mention of userID. Returns false for empty userID.
+func MentionsUser(msg goslack.Message, userID string) bool {
+	if userID == "" {
+		return false
+	}
+	return strings.Contains(msg.Text, "<@"+userID+">")
+}
+
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.
 func ParseTS(ts string) time.Time {
 	if ts == "" {
@@ -74,8 +115,15 @@ func MessageLine(msg goslack.Message, userName string) string {
 
 // ChannelDigest renders all messages for a channel with a header.
 //
-// Reserves n messages for detailed rendering; extras collapse to "+N more".
-func ChannelDigest(channelName string, messages []goslack.Message, users map[string]string, maxShow int) string {
+// Reserves maxShow messages for detailed rendering; extras collapse to
+// "+N more". Optional behaviour (mention highlighting, thread replies)
+// is configured via DigestOption.
+func ChannelDigest(channelName string, messages []goslack.Message, users map[string]string, maxShow int, opts ...DigestOption) string {
+	cfg := digestOpts{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	if len(messages) == 0 {
 		return fmt.Sprintf("## #%s\n(no activity)", channelName)
 	}
@@ -93,13 +141,43 @@ func ChannelDigest(channelName string, messages []goslack.Message, users map[str
 		show = show[:maxShow]
 	}
 	for _, m := range show {
+		if MentionsUser(m, cfg.selfID) {
+			b.WriteString(MentionMarker)
+		}
 		b.WriteString(MessageLine(m, users[m.User]))
 		b.WriteByte('\n')
+
+		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
+			writeReplies(&b, replies, users, cfg.selfID)
+		}
 	}
 	if hidden > 0 {
 		fmt.Fprintf(&b, "... +%d more messages\n", hidden)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeReplies renders up to ThreadPreviewReplies indented under the
+// thread parent. Mentions are highlighted using selfID just like the
+// parent message.
+func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, selfID string) {
+	show := replies
+	var hidden int
+	if len(show) > ThreadPreviewReplies {
+		hidden = len(show) - ThreadPreviewReplies
+		show = show[:ThreadPreviewReplies]
+	}
+	for _, r := range show {
+		b.WriteString(ReplyIndent)
+		if MentionsUser(r, selfID) {
+			b.WriteString(MentionMarker)
+		}
+		b.WriteString(MessageLine(r, users[r.User]))
+		b.WriteByte('\n')
+	}
+	if hidden > 0 {
+		fmt.Fprintf(b, "%s+%d more replies\n", ReplyIndent, hidden)
+	}
 }
 
 // DecisionLine renders a single decision entry for a recap.

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-04-30
+
+### Added
+- **Thread context in `get_unread_summary`.** Top-level unread messages that are thread parents now have their post-`last_read` replies fetched and rendered indented (`↳ ...`) under the parent. Capped at 3 replies per thread with a `+N more replies` collapse for the rest. See `docs/adr/0003-unread-summary-thread-context-and-mention-marker.md`.
+- **Mention markers (`🏷️`) in the unread digest.** Messages whose body contains `<@U_OPERATOR>` are prefixed with a marker character so the LLM (and the human) can spot direct asks at a glance. The operator's user ID is resolved once via `auth.test` and cached.
+- **Mention-aware channel ranking.** `get_unread_summary` now sorts channels with at least one direct mention ahead of busier-but-impersonal channels.
+- `UnreadService.Self(ctx)` — cached self-user resolution for tools that need to know who "you" are (Slack-side).
+- `format.WithMentionHighlight` / `format.WithThreadReplies` — variadic `DigestOption` API; existing `ChannelDigest` callers unchanged.
+
+### Limits
+- Replies on threads whose parent is *already* read are not surfaced by `get_unread_summary` (would require a per-channel `latest_reply > last_read` scan). Use `get_mentions` for that case — it hits `search.messages` and catches the mention regardless of thread state.
+
 ## [0.2.4] - 2026-04-30
 
 ### Fixed
