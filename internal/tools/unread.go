@@ -10,6 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
@@ -98,14 +99,15 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				logChannels := 0
 				for _, r := range results {
 					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
+					label := channelDisplayLabel(ctx, r.Channel, d.Client.Users)
 					if logMode != "off" && detectLogChannel(r) {
 						logChannels++
 						bands := buildLogBands(r.Messages, logSamples)
 						b.WriteString(format.LogChannelDigest(
-							r.Channel.Name, len(r.Messages), bands, users))
+							label, len(r.Messages), bands, users))
 					} else {
 						b.WriteString(format.ChannelDigest(
-							r.Channel.Name, r.Messages, users, maxPer,
+							label, r.Messages, users, maxPer,
 							format.WithMentionHighlight(selfID),
 							format.WithThreadReplies(r.Replies),
 							format.WithThreadPreviewReplies(replyCap),
@@ -180,6 +182,37 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				return mcp.NewToolResultText(fmt.Sprintf("marked #%s read up to %s", channel, ts)), nil
 			},
 		)
+	}
+}
+
+// channelDisplayLabel returns the human-friendly heading used in
+// digest output:
+//
+//   - "#name" for public/private channels.
+//   - "@peer" for direct messages (1:1) — peer ID resolved via
+//     UserService for a friendly handle.
+//   - the raw channel name (typically "mpdm-a--b--c-1") for
+//     multi-party DMs, since Slack's mpim names already convey
+//     who's in the conversation.
+//
+// Falls back to "#?" when nothing usable is available.
+func channelDisplayLabel(ctx context.Context, ch goslack.Channel, users *slack.UserService) string {
+	switch {
+	case ch.IsIM:
+		if ch.User != "" {
+			return "@" + users.Name(ctx, ch.User)
+		}
+		return "@?"
+	case ch.IsMpIM:
+		if ch.Name != "" {
+			return ch.Name
+		}
+		return "mpdm-?"
+	default:
+		if ch.Name != "" {
+			return "#" + ch.Name
+		}
+		return "#?"
 	}
 }
 

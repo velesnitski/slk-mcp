@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-04-30
+
+### Fixed
+- **`get_unread_summary` now covers direct messages and group DMs.** Previously, `JoinedChannels` only requested `public_channel` and `private_channel` types from `users.conversations`, silently dropping every DM. Operators saw "all caught up — 0 unread" while `get_mentions` showed dozens of hits in DMs. Types list now includes `im` and `mpim`. See `docs/adr/0009-include-direct-messages-in-unread-sweep.md`.
+
+### Changed
+- **Digest headers are now caller-prefixed.** `format.ChannelDigest` and `format.LogChannelDigest` previously hardcoded a `#` prefix in the heading (`## #channelname`). They now take a verbatim `channelLabel` so callers can pick the right prefix per channel kind: `#` for channels, `@peer` for IMs, `mpdm-...` for group DMs. New helper `tools.channelDisplayLabel(ctx, ch, users)` does the routing. LLM consumers that pattern-match on `## #` should relax to `## ` followed by the label.
+- README and docker-compose example `SLACK_CHANNELS` switched to generic placeholders.
+
+### Added
+- 6 new unit tests in `internal/tools/unread_dm_test.go` covering each branch of `channelDisplayLabel` (regular channel, empty-name channel, mpim with name, mpim without name, im without user, im with user).
+
 ## [0.3.1] - 2026-04-30
 
 ### Changed

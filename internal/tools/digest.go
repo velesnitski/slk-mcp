@@ -110,7 +110,7 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 						continue
 					}
 					users := d.Client.Users.NamesFor(ctx, collectUserIDs(msgs))
-					digests = append(digests, format.ChannelDigest(ch, msgs, users, maxShow))
+					digests = append(digests, format.ChannelDigest("#"+ch, msgs, users, maxShow))
 					decisions = append(decisions, detectDecisions(d.Cfg, ch, msgs, users, format.DecisionLine)...)
 				}
 
@@ -147,5 +147,5 @@ func channelDigest(ctx context.Context, d Deps, channel string, hours, maxShow i
 		return "", err
 	}
 	users := d.Client.Users.NamesFor(ctx, collectUserIDs(msgs))
-	return format.ChannelDigest(channel, msgs, users, maxShow), nil
+	return format.ChannelDigest("#"+channel, msgs, users, maxShow), nil
 }

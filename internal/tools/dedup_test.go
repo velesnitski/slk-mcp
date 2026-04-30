@@ -247,7 +247,7 @@ func TestLogChannelDigest_RendersPatternCounts(t *testing.T) {
 			},
 		},
 	}
-	out := format.LogChannelDigest("metrics-feed-alerts", 12, bands, nil)
+	out := format.LogChannelDigest("#metrics-feed-alerts", 12, bands, nil)
 
 	for _, want := range []string{
 		"## #metrics-feed-alerts [LOG MODE — 12 msgs]",
@@ -278,7 +278,7 @@ func TestLogChannelDigest_PatternsOverflow(t *testing.T) {
 			},
 		},
 	}
-	out := format.LogChannelDigest("alerts", 20, bands, nil)
+	out := format.LogChannelDigest("#alerts", 20, bands, nil)
 	want := "+11 other"
 	if !strings.Contains(out, want) {
 		t.Fatalf("expected %q (Total 20 - rendered 9), got:\n%s", want, out)
@@ -297,7 +297,7 @@ func TestLogChannelDigest_LegacySamplesStillWork(t *testing.T) {
 			},
 		},
 	}
-	out := format.LogChannelDigest("storage-alerts", 4, bands, nil)
+	out := format.LogChannelDigest("#storage-alerts", 4, bands, nil)
 	for _, want := range []string{
 		"recent WARN:",
 		"disk usage 78%",

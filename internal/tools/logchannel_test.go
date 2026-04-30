@@ -90,22 +90,21 @@ func TestIsBotMessage(t *testing.T) {
 // ----------------------- isLogChannelName -----------------------
 
 func TestIsLogChannelName(t *testing.T) {
+	// Synthetic names exercising each keyword in logChannelNameKeywords.
+	// Keep these generic so the test fixtures don't accidentally
+	// document a real workspace's channel inventory.
 	positive := []string{
-		"logs",
-		"infra-monitor-low",
-		"infra-monitor-critical",
-		"registry-alerts",
-		"cloud-alarm",
-		"service-alerts",
-		"app-monitoring",
-		"snapshot-alerts",
-		"region-watch-monitoring",
-		"probe_tests_alerts",
-		"reports",
-		"team-reports",
-		"app-alerts",
-		"metrics-feed-alerts",
-		"team-cron-reports",
+		"app-logs",            // log
+		"team-alerts",         // alert
+		"infra-alarm-feed",    // alarm
+		"infra-monitor-low",   // monitor
+		"perf-monitoring",     // monitoring
+		"metric-feed",         // metric
+		"metrics-stream",      // metrics
+		"weekly-report",       // report
+		"daily-reports",       // reports
+		"build-cron-feed",     // cron
+		"team-incident-room",  // incident
 	}
 	for _, n := range positive {
 		t.Run(n, func(t *testing.T) {
@@ -117,10 +116,10 @@ func TestIsLogChannelName(t *testing.T) {
 
 	negative := []string{
 		"general",
-		"dev-backend",
-		"qa-frontend",
-		"meetings",
+		"team-room",
 		"random",
+		"announcements",
+		"meeting-notes",
 	}
 	for _, n := range negative {
 		t.Run("neg/"+n, func(t *testing.T) {
@@ -277,7 +276,7 @@ func TestLogChannelDigest_RendersHistogramAndSamples(t *testing.T) {
 		{Label: "WARN", Total: 1, Samples: []goslack.Message{mkLogMsg("WARN c")}},
 		{Label: "INFO", Total: 8, Samples: []goslack.Message{mkLogMsg("info pipe")}},
 	}
-	out := format.LogChannelDigest("metrics-feed-alerts", 16, bands, nil)
+	out := format.LogChannelDigest("#metrics-feed-alerts", 16, bands, nil)
 
 	for _, want := range []string{
 		"## #metrics-feed-alerts [LOG MODE — 16 msgs]",
@@ -306,7 +305,7 @@ func TestLogChannelDigest_AllInfo(t *testing.T) {
 	bands := []format.LogBand{
 		{Label: "INFO", Total: 3, Samples: []goslack.Message{mkLogMsg("ok")}},
 	}
-	out := format.LogChannelDigest("team-reports", 3, bands, nil)
+	out := format.LogChannelDigest("#team-reports", 3, bands, nil)
 	if !strings.Contains(out, "INFO=3") {
 		t.Fatalf("INFO band should appear in histogram: %s", out)
 	}
@@ -319,7 +318,7 @@ func TestLogChannelDigest_NoClassifiedMessages(t *testing.T) {
 		{Label: "ERROR", Total: 0},
 		{Label: "INFO", Total: 0},
 	}
-	out := format.LogChannelDigest("team-cron-reports", 0, bands, nil)
+	out := format.LogChannelDigest("#team-cron-reports", 0, bands, nil)
 	if !strings.Contains(out, "(no classified messages)") {
 		t.Fatalf("expected placeholder line, got: %s", out)
 	}
