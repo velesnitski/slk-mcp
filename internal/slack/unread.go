@@ -154,7 +154,7 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	}
 
 	cu := &ChannelUnread{Channel: *info, LastRead: info.LastRead}
-	if info.LastRead == "" || info.UnreadCount == 0 {
+	if info.LastRead == "" {
 		return cu, nil
 	}
 

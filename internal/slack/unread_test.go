@@ -142,27 +142,34 @@ func TestUnread_RequiresUserToken(t *testing.T) {
 
 // ----------------------- Unread (single channel) -----------------------
 
-func TestUnread_ShortCircuitsWhenZeroUnread(t *testing.T) {
+func TestUnread_DoesNotTrustZeroUnreadCount(t *testing.T) {
 	f := newFakeSlack(t)
 	f.on("conversations.info", func(r *http.Request) any {
 		return okInfoResponse(channelInfo{
-			ID:          "C1",
-			Name:        "general",
+			ID: "C1", Name: "general",
 			LastRead:    "1700000000.000000",
 			UnreadCount: 0,
 		})
 	})
-	s := newTestUnreadService(t, f)
+	f.on("conversations.history", func(r *http.Request) any {
+		return map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"type": "message", "user": "U1", "text": "muted-channel update", "ts": "1700000100.000000"},
+			},
+		}
+	})
 
+	s := newTestUnreadService(t, f)
 	cu, err := s.Unread(context.Background(), "C1", 10)
 	if err != nil {
 		t.Fatalf("Unread err: %v", err)
 	}
-	if len(cu.Messages) != 0 {
-		t.Fatalf("expected 0 messages on caught-up channel, got %d", len(cu.Messages))
+	if len(cu.Messages) != 1 {
+		t.Fatalf("muted channels (unread_count=0 with new messages) must surface, got %d", len(cu.Messages))
 	}
-	if got := f.callCount("conversations.history"); got != 0 {
-		t.Fatalf("expected no history call when unread=0, got %d", got)
+	if got := f.callCount("conversations.history"); got != 1 {
+		t.Fatalf("history call count = %d; want 1 (last_read drives the fetch)", got)
 	}
 }
 
@@ -378,6 +385,9 @@ func TestUnreadAll_OmitsCaughtUpChannels(t *testing.T) {
 			ID: id, Name: id, LastRead: "1700000000.000000", UnreadCount: 0,
 		})
 	})
+	f.on("conversations.history", func(r *http.Request) any {
+		return map[string]any{"ok": true, "messages": []any{}}
+	})
 
 	s := newTestUnreadService(t, f)
 	results, err := s.UnreadAll(context.Background(), 10)
@@ -386,9 +396,6 @@ func TestUnreadAll_OmitsCaughtUpChannels(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("all channels caught up → expected 0 results, got %d", len(results))
-	}
-	if got := f.callCount("conversations.history"); got != 0 {
-		t.Fatalf("expected no history calls for caught-up channels, got %d", got)
 	}
 }
 
