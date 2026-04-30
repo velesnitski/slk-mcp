@@ -19,6 +19,59 @@ import (
 // MessageLineLimit caps a single message body before truncation.
 const MessageLineLimit = 280
 
+// LogBand is one severity slice rendered by LogChannelDigest. Samples
+// are typically the most-recent messages in the band; Total may exceed
+// len(Samples) when more existed than the caller chose to keep.
+type LogBand struct {
+	Label   string
+	Samples []goslack.Message
+	Total   int
+}
+
+// LogChannelDigest renders a bot-driven log / alert channel as a
+// severity histogram followed by per-band sample listings, in
+// dominance order (caller-chosen). Empty bands are omitted from
+// both the histogram and the body.
+//
+// channelName is used as the heading; total is the full unread
+// count (so the header reflects the entire channel even when most
+// messages are histogram-only). Pass an empty users map if user
+// resolution failed — the underlying MessageLine renderer falls
+// back to user IDs.
+func LogChannelDigest(channelName string, total int, bands []LogBand, users map[string]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## #%s [LOG MODE — %d msgs]\n", channelName, total)
+
+	var hist []string
+	for _, band := range bands {
+		if band.Total == 0 {
+			continue
+		}
+		hist = append(hist, fmt.Sprintf("%s=%d", band.Label, band.Total))
+	}
+	if len(hist) == 0 {
+		b.WriteString("severity: (no classified messages)\n")
+	} else {
+		fmt.Fprintf(&b, "severity: %s\n", strings.Join(hist, " "))
+	}
+
+	for _, band := range bands {
+		if len(band.Samples) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\nrecent %s:\n", band.Label)
+		for _, m := range band.Samples {
+			b.WriteString("  ")
+			b.WriteString(MessageLine(m, users[m.User]))
+			b.WriteByte('\n')
+		}
+		if hidden := band.Total - len(band.Samples); hidden > 0 {
+			fmt.Fprintf(&b, "  ... +%d more\n", hidden)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // ThreadPreviewReplies is the max replies we inline in a digest.
 const ThreadPreviewReplies = 3
 

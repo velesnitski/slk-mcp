@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-30
+
+### Added
+- **Log-channel mode in `get_unread_summary`.** Bot-driven channels (monitoring, ci, registry, cloud, etc.) are auto-detected and rendered as a severity histogram (`FATAL=2 ERROR=12 WARN=3 INFO=8`) followed by sample messages per band, instead of the per-message digest used for human conversations. Saves ~70% of the tokens these channels used to consume. See `docs/adr/0007-log-channel-mode.md`.
+- **Auto-detection heuristic** — channels are classified as logs when ≥50% of unread messages are bot-authored (`bot_id` set or `bot_message` subtype) OR when the channel name contains `log`, `alert`, `alarm`, `monitor`, `monitoring`, `metric`/`metrics`, `report`/`reports`, `cron`, or `incident`. Name fallback catches webhook-style integrations that post under real user accounts.
+- **`log_mode` parameter** (`auto` | `off`, default `auto`) — escape hatch when auto-detection misclassifies.
+- **`log_samples_per_band` parameter** (number, default `3`) — cap on the "recent X" sample list per severity band.
+- New types: `format.LogBand`, `format.LogChannelDigest`, `tools.LogSeverity` with five bands (FATAL > ERROR > ALERT > WARN > INFO).
+
+### Notes
+- Log mode does NOT inline thread replies or mention markers in the rendered output. Bot channels rarely thread, and humans following up on an alert are low-volume; if needed, drop to `log_mode=off` for the full digest.
+- Severity classification reuses the same English log-vocabulary as the v0.2.8 urgency keyword block, so a message that bumps urgency for channel ranking will also classify into the matching band.
+
 ## [0.2.8] - 2026-04-30
 
 ### Added
