@@ -26,20 +26,62 @@ type UnreadService struct {
 	channels *ChannelService
 	users    *UserService
 	log      *slog.Logger
+
+	selfMu sync.RWMutex
+	selfID string
 }
 
 func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, log *slog.Logger) *UnreadService {
 	return &UnreadService{api: api, channels: channels, users: users, log: log}
 }
 
+// Self returns the authenticated user's Slack ID, calling auth.test on
+// first use and caching the result for the lifetime of the service.
+// Used by tools that highlight messages mentioning the operator.
+func (s *UnreadService) Self(ctx context.Context) (string, error) {
+	if !s.Enabled() {
+		return "", ErrNoUserToken
+	}
+
+	s.selfMu.RLock()
+	id := s.selfID
+	s.selfMu.RUnlock()
+	if id != "" {
+		return id, nil
+	}
+
+	var resp *goslack.AuthTestResponse
+	err := ratelimit.Do(ctx, s.log, 0, func() error {
+		r, err := s.api.AuthTestContext(ctx)
+		if err != nil {
+			return err
+		}
+		resp = r
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("auth.test: %w", err)
+	}
+
+	s.selfMu.Lock()
+	s.selfID = resp.UserID
+	s.selfMu.Unlock()
+	return resp.UserID, nil
+}
+
 // Enabled reports whether a user token is available.
 func (s *UnreadService) Enabled() bool { return s.api != nil }
 
 // ChannelUnread summarizes the unread state of a single channel.
+//
+// Replies maps a thread parent's timestamp to replies posted after
+// LastRead, exclusive of the parent itself. A parent with no new
+// replies is absent from the map.
 type ChannelUnread struct {
 	Channel  goslack.Channel
 	LastRead string
 	Messages []goslack.Message
+	Replies  map[string][]goslack.Message
 }
 
 // JoinedChannels returns channels the user is a member of, useful for
@@ -140,7 +182,65 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 		}
 		cu.Messages = append(cu.Messages, msg)
 	}
+
+	if err := s.fetchReplies(ctx, channelID, oldest, cu); err != nil {
+		// Replies are best-effort context; a failure here should not
+		// block the rest of the digest. Log and continue.
+		s.log.Warn("fetch thread replies failed", "channel", channelID, "err", err)
+	}
 	return cu, nil
+}
+
+// fetchReplies populates cu.Replies for every top-level message in
+// cu.Messages that is itself a thread parent with reply_count > 0.
+// Only replies strictly newer than oldest (the channel's last_read)
+// are kept.
+func (s *UnreadService) fetchReplies(ctx context.Context, channelID string, oldest float64, cu *ChannelUnread) error {
+	for _, m := range cu.Messages {
+		// A thread parent has thread_ts == ts and reply_count > 0.
+		// A reply has thread_ts != ts; replies do not appear in
+		// conversations.history so we never see them at this layer.
+		if m.ThreadTimestamp == "" || m.ThreadTimestamp != m.Timestamp || m.ReplyCount == 0 {
+			continue
+		}
+
+		var replies []goslack.Message
+		err := ratelimit.Do(ctx, s.log, 0, func() error {
+			params := &goslack.GetConversationRepliesParameters{
+				ChannelID: channelID,
+				Timestamp: m.Timestamp,
+				Oldest:    m.Timestamp,
+				Inclusive: false,
+				Limit:     100,
+			}
+			r, _, _, err := s.api.GetConversationRepliesContext(ctx, params)
+			if err != nil {
+				return err
+			}
+			replies = r
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("conversations.replies %s: %w", m.Timestamp, err)
+		}
+
+		var newer []goslack.Message
+		for _, r := range replies {
+			ts, _ := strconv.ParseFloat(r.Timestamp, 64)
+			if ts <= oldest || r.Timestamp == m.Timestamp {
+				continue
+			}
+			newer = append(newer, r)
+		}
+		if len(newer) == 0 {
+			continue
+		}
+		if cu.Replies == nil {
+			cu.Replies = make(map[string][]goslack.Message)
+		}
+		cu.Replies[m.Timestamp] = newer
+	}
+	return nil
 }
 
 // UnreadAll returns unread state for all channels the user joined.
@@ -190,7 +290,7 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 			s.log.Warn("unread fetch failed", "err", r.err)
 			continue
 		}
-		if r.cu != nil && len(r.cu.Messages) > 0 {
+		if r.cu != nil && (len(r.cu.Messages) > 0 || len(r.cu.Replies) > 0) {
 			out = append(out, r.cu)
 		}
 	}

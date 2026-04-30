@@ -463,6 +463,144 @@ func TestJoinedChannels_PaginatesAcrossCursors(t *testing.T) {
 	}
 }
 
+// ----------------------- Self -----------------------
+
+func TestSelf_CachesAuthTest(t *testing.T) {
+	f := newFakeSlack(t)
+	f.on("auth.test", func(r *http.Request) any {
+		return map[string]any{
+			"ok":      true,
+			"user_id": "U_SELF",
+			"user":    "tester",
+		}
+	})
+
+	s := newTestUnreadService(t, f)
+	for i := 0; i < 3; i++ {
+		uid, err := s.Self(context.Background())
+		if err != nil {
+			t.Fatalf("Self err: %v", err)
+		}
+		if uid != "U_SELF" {
+			t.Fatalf("Self() = %q; want U_SELF", uid)
+		}
+	}
+	if got := f.callCount("auth.test"); got != 1 {
+		t.Fatalf("auth.test called %d times; want 1 (cache miss only on first call)", got)
+	}
+}
+
+func TestSelf_RequiresUserToken(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := newUnreadService(nil, nil, nil, log)
+	if _, err := s.Self(context.Background()); !errors.Is(err, ErrNoUserToken) {
+		t.Fatalf("Self err = %v; want ErrNoUserToken", err)
+	}
+}
+
+// ----------------------- Thread replies -----------------------
+
+func TestUnread_FetchesRepliesForThreadParents(t *testing.T) {
+	f := newFakeSlack(t)
+	f.on("conversations.info", func(r *http.Request) any {
+		return okInfoResponse(channelInfo{
+			ID:          "C1",
+			Name:        "general",
+			LastRead:    "1700000000.000000",
+			UnreadCount: 2,
+		})
+	})
+	f.on("conversations.history", func(r *http.Request) any {
+		return map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				// Thread parent — should trigger conversations.replies.
+				{
+					"type":         "message",
+					"user":         "U2",
+					"text":         "thread starts here",
+					"ts":           "1700000100.000000",
+					"thread_ts":    "1700000100.000000",
+					"reply_count":  2,
+				},
+				// Plain top-level message — must NOT trigger replies fetch.
+				{"type": "message", "user": "U2", "text": "plain", "ts": "1700000150.000000"},
+			},
+		}
+	})
+
+	var repliesParams []string
+	f.on("conversations.replies", func(r *http.Request) any {
+		_ = r.ParseForm()
+		repliesParams = append(repliesParams, r.Form.Get("ts"))
+		return map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				// Slack returns the parent first, replies after.
+				{"type": "message", "user": "U2", "text": "thread starts here", "ts": "1700000100.000000"},
+				// One reply older than last_read (must be filtered out).
+				{"type": "message", "user": "U3", "text": "old reply", "ts": "1699999000.000000"},
+				// One reply newer than last_read.
+				{"type": "message", "user": "U4", "text": "new reply", "ts": "1700000200.000000"},
+			},
+			"has_more": false,
+		}
+	})
+
+	s := newTestUnreadService(t, f)
+	cu, err := s.Unread(context.Background(), "C1", 50)
+	if err != nil {
+		t.Fatalf("Unread err: %v", err)
+	}
+
+	if len(repliesParams) != 1 || repliesParams[0] != "1700000100.000000" {
+		t.Fatalf("conversations.replies should be called once for the thread parent, got params=%v", repliesParams)
+	}
+
+	got := cu.Replies["1700000100.000000"]
+	if len(got) != 1 {
+		t.Fatalf("expected 1 reply newer than last_read, got %d (%v)", len(got), got)
+	}
+	if got[0].Text != "new reply" {
+		t.Fatalf("expected the post-last_read reply, got %q", got[0].Text)
+	}
+	if _, ok := cu.Replies["1700000150.000000"]; ok {
+		t.Fatalf("plain message must not have a Replies entry")
+	}
+}
+
+func TestUnread_NoRepliesCallWhenZeroReplyCount(t *testing.T) {
+	f := newFakeSlack(t)
+	f.on("conversations.info", func(r *http.Request) any {
+		return okInfoResponse(channelInfo{
+			ID: "C1", Name: "general", LastRead: "1700000000.000000", UnreadCount: 1,
+		})
+	})
+	f.on("conversations.history", func(r *http.Request) any {
+		return map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				// Thread parent but no replies yet.
+				{
+					"type": "message", "user": "U1", "text": "x", "ts": "1700000100.000000",
+					"thread_ts": "1700000100.000000", "reply_count": 0,
+				},
+			},
+		}
+	})
+	// No conversations.replies handler — fakeSlack.serve() will t.Errorf
+	// if it gets called. That's the assertion.
+
+	s := newTestUnreadService(t, f)
+	cu, err := s.Unread(context.Background(), "C1", 50)
+	if err != nil {
+		t.Fatalf("Unread err: %v", err)
+	}
+	if len(cu.Replies) != 0 {
+		t.Fatalf("expected no Replies entries, got %d", len(cu.Replies))
+	}
+}
+
 // ----------------------- MarkRead -----------------------
 
 func TestMarkRead_PostsExpectedParams(t *testing.T) {
