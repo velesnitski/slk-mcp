@@ -52,16 +52,7 @@ func (s *UserService) Name(ctx context.Context, userID string) string {
 		return userID
 	}
 
-	name := user.RealName
-	if name == "" {
-		name = user.Profile.DisplayName
-	}
-	if name == "" {
-		name = user.Name
-	}
-	if name == "" {
-		name = userID
-	}
+	name := formatUserDisplay(user, userID)
 	s.mu.Lock()
 	s.cache[userID] = name
 	s.mu.Unlock()
@@ -79,4 +70,32 @@ func (s *UserService) NamesFor(ctx context.Context, userIDs []string) map[string
 		out[id] = s.Name(ctx, id)
 	}
 	return out
+}
+
+// formatUserDisplay renders a user as "Real Name (handle)" so the
+// LLM can correlate Slack usernames with the human names. Falls
+// through to whichever fields are present.
+func formatUserDisplay(u *goslack.User, fallbackID string) string {
+	real := u.RealName
+	if real == "" {
+		real = u.Profile.RealName
+	}
+	if real == "" {
+		real = u.Profile.DisplayName
+	}
+	handle := u.Name
+	if handle == "" {
+		handle = u.Profile.DisplayName
+	}
+
+	switch {
+	case real == "" && handle == "":
+		return fallbackID
+	case real == "":
+		return handle
+	case handle == "" || handle == real:
+		return real
+	default:
+		return real + " (" + handle + ")"
+	}
 }
