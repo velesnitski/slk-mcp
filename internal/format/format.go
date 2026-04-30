@@ -33,8 +33,9 @@ const ReplyIndent = "    ↳ "
 // digestOpts holds optional behaviour for ChannelDigest, populated via
 // DigestOption functions so existing callers stay source-compatible.
 type digestOpts struct {
-	selfID  string
-	replies map[string][]goslack.Message
+	selfID            string
+	replies           map[string][]goslack.Message
+	threadPreviewCap  int // 0 means use ThreadPreviewReplies default
 }
 
 // DigestOption configures ChannelDigest output.
@@ -49,9 +50,17 @@ func WithMentionHighlight(selfID string) DigestOption {
 // WithThreadReplies attaches reply chains to the digest, keyed by
 // thread_ts of the parent message. Replies are rendered indented
 // beneath their parent. Up to ThreadPreviewReplies are shown per
-// thread; the rest collapse to "+N more replies".
+// thread by default (see WithThreadPreviewReplies to override); the
+// rest collapse to "+N more replies".
 func WithThreadReplies(replies map[string][]goslack.Message) DigestOption {
 	return func(o *digestOpts) { o.replies = replies }
+}
+
+// WithThreadPreviewReplies overrides the per-thread inline-reply cap
+// for this call. Pass <= 0 to fall back to the ThreadPreviewReplies
+// default.
+func WithThreadPreviewReplies(n int) DigestOption {
+	return func(o *digestOpts) { o.threadPreviewCap = n }
 }
 
 // MentionsUser reports whether msg.Text contains a Slack-style
@@ -148,7 +157,7 @@ func ChannelDigest(channelName string, messages []goslack.Message, users map[str
 		b.WriteByte('\n')
 
 		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
-			writeReplies(&b, replies, users, cfg.selfID)
+			writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap)
 		}
 	}
 	if hidden > 0 {
@@ -157,15 +166,18 @@ func ChannelDigest(channelName string, messages []goslack.Message, users map[str
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// writeReplies renders up to ThreadPreviewReplies indented under the
-// thread parent. Mentions are highlighted using selfID just like the
-// parent message.
-func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, selfID string) {
+// writeReplies renders replies indented under the thread parent, up
+// to a cap (cap <= 0 means use ThreadPreviewReplies default). Mentions
+// are highlighted using selfID just like the parent message.
+func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, selfID string, cap int) {
+	if cap <= 0 {
+		cap = ThreadPreviewReplies
+	}
 	show := replies
 	var hidden int
-	if len(show) > ThreadPreviewReplies {
-		hidden = len(show) - ThreadPreviewReplies
-		show = show[:ThreadPreviewReplies]
+	if len(show) > cap {
+		hidden = len(show) - cap
+		show = show[:cap]
 	}
 	for _, r := range show {
 		b.WriteString(ReplyIndent)

@@ -26,9 +26,13 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 			mcp.NewTool("get_unread_summary",
 				mcp.WithDescription("Smart summary of all unread messages across joined channels. Requires SLACK_USER_TOKEN."),
 				mcp.WithNumber("max_per_channel", mcp.Description("Max unread messages to inline per channel (default: 20)")),
+				mcp.WithBoolean("mentions_only", mcp.Description("If true, return only channels that contain a direct mention of the authenticated user (default: false)")),
+				mcp.WithNumber("thread_preview_replies", mcp.Description("Max thread replies inlined per parent (default: 3)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				maxPer := int(req.GetFloat("max_per_channel", 20))
+				mentionsOnly := req.GetBool("mentions_only", false)
+				replyCap := int(req.GetFloat("thread_preview_replies", float64(format.ThreadPreviewReplies)))
 
 				results, err := d.Client.Unread.UnreadAll(ctx, maxPer)
 				if err != nil {
@@ -37,15 +41,27 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					}
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if len(results) == 0 {
-					return mcp.NewToolResultText("all caught up — 0 unread"), nil
-				}
 
 				// Best-effort self-resolution for mention markers; a
-				// failure here just disables highlighting.
+				// failure here disables highlighting AND mentions_only
+				// filtering (we can't filter what we can't identify).
 				selfID, err := d.Client.Unread.Self(ctx)
 				if err != nil {
 					d.Log.Warn("auth.test failed; mention highlighting disabled", "err", err)
+				}
+
+				if mentionsOnly {
+					if selfID == "" {
+						return mcp.NewToolResultError("mentions_only requires auth.test to succeed; got an empty self id"), nil
+					}
+					results = filterMentions(results, selfID)
+				}
+
+				if len(results) == 0 {
+					if mentionsOnly {
+						return mcp.NewToolResultText("no unread channels mention you"), nil
+					}
+					return mcp.NewToolResultText("all caught up — 0 unread"), nil
 				}
 
 				sort.Slice(results, func(i, j int) bool {
@@ -61,8 +77,12 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				}
 
 				var b strings.Builder
-				fmt.Fprintf(&b, "# Unread summary\n%d channels, %d top-level + %d thread replies\n\n",
-					len(results), totalMsgs, totalReplies)
+				header := "# Unread summary"
+				if mentionsOnly {
+					header = "# Unread summary (mentions only)"
+				}
+				fmt.Fprintf(&b, "%s\n%d channels, %d top-level + %d thread replies\n\n",
+					header, len(results), totalMsgs, totalReplies)
 
 				for _, r := range results {
 					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
@@ -70,6 +90,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 						r.Channel.Name, r.Messages, users, maxPer,
 						format.WithMentionHighlight(selfID),
 						format.WithThreadReplies(r.Replies),
+						format.WithThreadPreviewReplies(replyCap),
 					))
 					b.WriteString("\n\n")
 				}
@@ -172,6 +193,23 @@ func channelMentions(cu *slack.ChannelUnread, selfID string) bool {
 		}
 	}
 	return false
+}
+
+// filterMentions returns only ChannelUnread entries that contain at
+// least one direct mention of selfID, in either a top-level message
+// or a thread reply. selfID must be non-empty; pass through unchanged
+// if filtering should be a no-op.
+func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.ChannelUnread {
+	if selfID == "" {
+		return results
+	}
+	out := results[:0]
+	for _, r := range results {
+		if channelMentions(r, selfID) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // collectUserIDsWithReplies returns unique user IDs across both the

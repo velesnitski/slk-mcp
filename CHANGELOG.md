@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-04-30
+
+### Added
+- **`mentions_only` parameter on `get_unread_summary`** — when true, returns only channels containing at least one direct `<@U_OPERATOR>` mention (top-level or in a thread reply). Header switches to `# Unread summary (mentions only)` so callers can distinguish. See `docs/adr/0004-unread-summary-mentions-only-and-reply-cap.md`.
+- **`thread_preview_replies` parameter on `get_unread_summary`** — overrides the per-thread inline reply cap (default 3). Plumbed through as `format.WithThreadPreviewReplies(n)`; non-positive values fall back to `format.ThreadPreviewReplies`.
+
+### Changed
+- Tool helpers in `internal/tools/unread.go` (`channelMentions`, `filterMentions`, `rankUnread`, `collectUserIDsWithReplies`) are now covered by `internal/tools/unread_helpers_test.go` — 16 new cases.
+
 ## [0.2.5] - 2026-04-30
 
 ### Added
