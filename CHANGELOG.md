@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-04-30
+
+### Changed
+- `list_users` output now includes `profile_updated=YYYY-MM-DD`. New `with_activity` (bool, default false) opt-in fetches each user's last-message date via `search.messages from:@handle` (parallel, 4 workers) and appends `last_post=YYYY-MM-DD`. Slack does not expose account creation date through the API; profile-update + last-post are the closest seniority signals.
+
 ## [0.3.5] - 2026-04-30
 
 ### Added
