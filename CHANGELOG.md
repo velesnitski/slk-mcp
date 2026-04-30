@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-04-30
+
+### Fixed
+- **stdio transport now exits when its parent MCP host process dies.** Previously, hosts that disconnected without closing stdin (e.g. some Claude Code reconnect paths) left orphan `slk-mcp` processes around, requiring manual `pkill`. The new `internal/lifecycle.WatchParent` polls `os.Getppid()` and exits when it changes (parent reparented to PID 1 / launchd). See `docs/adr/0002-parent-pid-watcher-for-stdio-orphans.md`.
+
+### Added
+- `internal/lifecycle` package with `WatchParent` plus 6 unit tests covering ppid-change detection, single-shot semantics, context-cancel exit, nil-logger safety, and zero-interval default behaviour.
+
 ## [0.2.3] - 2026-04-30
 
 ### Fixed

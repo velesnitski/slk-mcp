@@ -20,13 +20,14 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/velesnitski/slk-mcp/internal/config"
+	"github.com/velesnitski/slk-mcp/internal/lifecycle"
 	"github.com/velesnitski/slk-mcp/internal/logger"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 	"github.com/velesnitski/slk-mcp/internal/tools"
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "0.2.3"
+var version = "0.2.4"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -105,10 +106,28 @@ func run() error {
 	}
 }
 
-// runStdio runs the stdio transport. ServeStdio is blocking; we have no
-// hook to stop it mid-flight, so we simply let the parent process' close
-// of stdin end it cleanly.
+// runStdio runs the stdio transport. ServeStdio is blocking and the
+// upstream library exits on stdin EOF, but some MCP hosts disconnect
+// without closing the pipe — in that case the kernel reparents us to
+// PID 1 / launchd, and the parent watcher trips and we exit on its
+// behalf.
 func runStdio(ctx context.Context, s *server.MCPServer, log *slog.Logger) error {
+	watchCtx, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+
+	go lifecycle.WatchParent(
+		watchCtx,
+		log,
+		os.Getppid,
+		lifecycle.DefaultParentPollInterval,
+		func() {
+			// We can't unblock server.ServeStdio cleanly, but exiting
+			// the process is correct: the host is gone.
+			log.Info("stdio transport: parent process gone, exiting")
+			os.Exit(0)
+		},
+	)
+
 	done := make(chan error, 1)
 	go func() {
 		done <- server.ServeStdio(s)
