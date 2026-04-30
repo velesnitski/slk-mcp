@@ -47,9 +47,12 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("max_messages", mcp.Description("Max messages per channel (default: 20)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list := parseChannelList(req.GetString("channels", ""), d.Cfg.Channels)
+				list, _, err := resolveTargetChannels(ctx, d, req.GetString("channels", ""))
+				if err != nil {
+					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
+				}
 				if len(list) == 0 {
-					return mcp.NewToolResultError("no channels — pass channels or set SLACK_CHANNELS"), nil
+					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
 				}
 				hours := int(req.GetFloat("hours", float64(d.Cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 20))
@@ -77,9 +80,12 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("max_messages", mcp.Description("Max messages per channel (default: 15)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list := parseChannelList(req.GetString("channels", ""), d.Cfg.Channels)
+				list, _, err := resolveTargetChannels(ctx, d, req.GetString("channels", ""))
+				if err != nil {
+					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
+				}
 				if len(list) == 0 {
-					return mcp.NewToolResultError("no channels — pass channels or set SLACK_CHANNELS"), nil
+					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
 				}
 				hours := int(req.GetFloat("hours", float64(d.Cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 15))

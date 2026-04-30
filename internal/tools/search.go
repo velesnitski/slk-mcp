@@ -54,9 +54,12 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("hours", mcp.Description("Lookback window (default: 72)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list := parseChannelList(req.GetString("channels", ""), d.Cfg.Channels)
+				list, _, err := resolveTargetChannels(ctx, d, req.GetString("channels", ""))
+				if err != nil {
+					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
+				}
 				if len(list) == 0 {
-					return mcp.NewToolResultError("no channels — pass channels or set SLACK_CHANNELS"), nil
+					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
 				}
 				hours := int(req.GetFloat("hours", 72))
 				oldest := time.Now().Add(-time.Duration(hours) * time.Hour)

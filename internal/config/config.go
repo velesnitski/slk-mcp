@@ -33,6 +33,11 @@ type Config struct {
 
 	MaxMessagesPerChannel int
 	CompactOutput         bool
+
+	// AutodiscoverLimit caps the number of channels used when no channels
+	// are passed and SLACK_CHANNELS is empty (the server falls back to the
+	// channels the bot/user has joined).
+	AutodiscoverLimit int
 }
 
 // ErrMissingToken is returned when neither bot nor user token is configured.
@@ -52,6 +57,7 @@ func Load() *Config {
 		DigestHours:           parseIntDefault(os.Getenv("SLACK_DIGEST_HOURS"), 24),
 		MaxMessagesPerChannel: parseIntDefault(os.Getenv("SLACK_MAX_MESSAGES"), 200),
 		CompactOutput:         parseBoolDefault(os.Getenv("SLACK_COMPACT"), true),
+		AutodiscoverLimit:     parseIntDefault(os.Getenv("SLACK_AUTODISCOVER_LIMIT"), 50),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",

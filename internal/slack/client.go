@@ -6,7 +6,9 @@
 package slack
 
 import (
+	"context"
 	"log/slog"
+	"sort"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/config"
@@ -71,6 +73,43 @@ func (c *Client) Config() *config.Config { return c.cfg }
 
 // HasUserToken reports whether a user token is available.
 func (c *Client) HasUserToken() bool { return c.user != nil }
+
+// JoinedChannelNames returns the names of channels the active identity is
+// a member of. Uses users.conversations when a user token is configured
+// (the user's joined channels), otherwise falls back to ChannelService.List
+// (channels the bot can see).
+//
+// Result is sorted by member count desc and capped at limit (0 = no cap).
+// Archived channels are filtered out.
+func (c *Client) JoinedChannelNames(ctx context.Context, limit int) ([]string, error) {
+	var channels []goslack.Channel
+	var err error
+
+	if c.HasUserToken() {
+		channels, err = c.Unread.JoinedChannels(ctx)
+	} else {
+		channels, err = c.Channels.List(ctx, 0)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(channels, func(i, j int) bool {
+		return channels[i].NumMembers > channels[j].NumMembers
+	})
+
+	names := make([]string, 0, len(channels))
+	for _, ch := range channels {
+		if ch.IsArchived {
+			continue
+		}
+		names = append(names, ch.Name)
+	}
+	if limit > 0 && len(names) > limit {
+		names = names[:limit]
+	}
+	return names, nil
+}
 
 // searchAPI returns the API handle to use for search: user token if
 // available (search.messages is gated on user tokens in newer Slack apps),
