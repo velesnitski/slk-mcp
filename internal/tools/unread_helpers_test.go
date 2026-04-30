@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack"
@@ -110,7 +111,7 @@ func TestRankUnread_MentionsOutrankVolume(t *testing.T) {
 	tagged := mkChannelUnread("tagged",
 		[]goslack.Message{mkMsg("1.0", "U2", "ping <@U_SELF>")}, nil)
 
-	if rankUnread(busy, "U_SELF") >= rankUnread(tagged, "U_SELF") {
+	if rankUnread(busy, "U_SELF", time.Time{}) >= rankUnread(tagged, "U_SELF", time.Time{}) {
 		t.Fatalf("tagged channel must outrank a much busier non-tagged one")
 	}
 }
@@ -122,7 +123,7 @@ func TestRankUnread_VolumeBreaksTies(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		bigger.Messages = append(bigger.Messages, mkMsg("1.0", "U2", "x"))
 	}
-	if rankUnread(bigger, "U_SELF") <= rankUnread(smaller, "U_SELF") {
+	if rankUnread(bigger, "U_SELF", time.Time{}) <= rankUnread(smaller, "U_SELF", time.Time{}) {
 		t.Fatalf("among non-tagged channels, busier must rank higher")
 	}
 }
@@ -135,7 +136,7 @@ func TestRankUnread_RepliesCountTowardVolume(t *testing.T) {
 		})
 	withoutReplies := mkChannelUnread("b",
 		[]goslack.Message{mkMsg("1.0", "U2", "x")}, nil)
-	if rankUnread(withReplies, "") <= rankUnread(withoutReplies, "") {
+	if rankUnread(withReplies, "", time.Time{}) <= rankUnread(withoutReplies, "", time.Time{}) {
 		t.Fatalf("replies should add to the volume score")
 	}
 }
