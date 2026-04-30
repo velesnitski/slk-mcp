@@ -206,7 +206,8 @@ func TestBuildLogBands_DistributesAndOrders(t *testing.T) {
 	}
 }
 
-func TestBuildLogBands_SamplesCapped(t *testing.T) {
+func TestBuildLogBands_DedupesIdenticalMessages(t *testing.T) {
+	// 10 messages that share a signature → 1 pattern with Count=10.
 	var msgs []goslack.Message
 	for i := 0; i < 10; i++ {
 		msgs = append(msgs, mkLogMsg("ERROR: pipeline failed"))
@@ -219,21 +220,45 @@ func TestBuildLogBands_SamplesCapped(t *testing.T) {
 		if b.Total != 10 {
 			t.Fatalf("ERROR total = %d; want 10", b.Total)
 		}
-		if len(b.Samples) != 3 {
-			t.Fatalf("ERROR samples = %d; want 3", len(b.Samples))
+		if len(b.Patterns) != 1 {
+			t.Fatalf("ERROR patterns = %d; want 1 (all share a signature)", len(b.Patterns))
+		}
+		if got := b.Patterns[0].Count; got != 10 {
+			t.Fatalf("ERROR pattern count = %d; want 10", got)
 		}
 	}
 }
 
-func TestBuildLogBands_ZeroSamplesUsesDefault(t *testing.T) {
+func TestBuildLogBands_PatternsCappedAtPerBandLimit(t *testing.T) {
+	// 10 distinct-body ERROR messages → 10 distinct patterns; cap at 3.
 	var msgs []goslack.Message
 	for i := 0; i < 10; i++ {
-		msgs = append(msgs, mkLogMsg("ERROR x"))
+		msgs = append(msgs, mkLogMsg("ERROR: distinct alert "+string(rune('A'+i))))
+	}
+	bands := buildLogBands(msgs, 3)
+	for _, b := range bands {
+		if b.Label != "ERROR" {
+			continue
+		}
+		if b.Total != 10 {
+			t.Fatalf("ERROR total = %d; want 10", b.Total)
+		}
+		if len(b.Patterns) != 3 {
+			t.Fatalf("ERROR patterns = %d; want 3 (capped)", len(b.Patterns))
+		}
+	}
+}
+
+func TestBuildLogBands_ZeroPatternsUsesDefault(t *testing.T) {
+	var msgs []goslack.Message
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, mkLogMsg("ERROR distinct "+string(rune('A'+i))))
 	}
 	bands := buildLogBands(msgs, 0)
 	for _, b := range bands {
-		if b.Label == "ERROR" && len(b.Samples) != 3 {
-			t.Fatalf("default samplesPerBand should be 3, got %d", len(b.Samples))
+		if b.Label == "ERROR" && len(b.Patterns) != defaultPatternsPerBand {
+			t.Fatalf("default patternsPerBand should be %d, got %d",
+				defaultPatternsPerBand, len(b.Patterns))
 		}
 	}
 }

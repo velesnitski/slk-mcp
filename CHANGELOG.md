@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-30
+
+### Changed
+- **Log-mode rendering now dedupes near-identical messages.** A new `canonicalSignature` pass replaces URLs, IPv4 addresses, hex IDs (≥7 chars), and digit runs with placeholders, lowercases, and collapses whitespace. Messages sharing a signature group into a single `LogPattern` rendered as `"[hh:mm bot] body (×N similar)"`. `samplesPerBand` parameter now caps distinct patterns per band (still default 3); same name, sharper semantics. See `docs/adr/0008-log-pattern-dedup.md`.
+
+### Added
+- `format.LogPattern{Sample, Count, Signature}` — public type used by `LogBand.Patterns`.
+- `LogBand.Patterns []LogPattern` — preferred field; renderer prefers it over the legacy `Samples` path. Existing callers that populate `Samples` keep getting per-message rendering (backwards compatible).
+- 33 new unit tests in `internal/tools/dedup_test.go` covering each regex (URL > IP > hex > digit ordering), family-merge invariants, recency tiebreak in pattern sort, top-N + remainder math, and the renderer's pattern + legacy-fallback paths.
+
+### Notes
+- Conservative dedup: alerts that differ by alphabetic detail stay distinct (e.g. `"high cpu on dc1"` vs `"high cpu on dc-1"` — hyphen alone won't merge them). This is intentional — over-merging genuinely different incidents costs more than rendering two near-duplicate lines.
+
 ## [0.3.0] - 2026-04-30
 
 ### Added

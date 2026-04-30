@@ -128,17 +128,16 @@ func isLogChannelName(name string) bool {
 	return false
 }
 
-// buildLogBands groups messages by severity, samples up to
-// samplesPerBand most-recent messages from each non-empty band, and
-// returns the result in dominance order (FATAL → INFO). Bands with
-// zero messages are still returned (with empty Samples) so the
-// histogram line in LogChannelDigest can show "FATAL=0" as a clean
-// line if the caller wants — but LogChannelDigest itself skips
-// zero-total entries from the histogram, so the empty bands cost
-// nothing visually.
-func buildLogBands(messages []goslack.Message, samplesPerBand int) []format.LogBand {
-	if samplesPerBand <= 0 {
-		samplesPerBand = 3
+// buildLogBands groups messages by severity and dedupes similar
+// messages within each band into LogPatterns, capped at
+// patternsPerBand distinct patterns per severity. Returns one entry
+// per severity in dominance order (FATAL → INFO) — empty bands have
+// Total=0 and no patterns, so LogChannelDigest hides them.
+//
+// patternsPerBand <= 0 falls back to defaultPatternsPerBand.
+func buildLogBands(messages []goslack.Message, patternsPerBand int) []format.LogBand {
+	if patternsPerBand <= 0 {
+		patternsPerBand = defaultPatternsPerBand
 	}
 
 	bins := make(map[LogSeverity][]goslack.Message, len(orderedSeverities))
@@ -152,15 +151,16 @@ func buildLogBands(messages []goslack.Message, samplesPerBand int) []format.LogB
 	bands := make([]format.LogBand, 0, len(orderedSeverities))
 	for _, sev := range orderedSeverities {
 		msgs := bins[sev]
-		samples := msgs
-		if len(samples) > samplesPerBand {
-			samples = samples[:samplesPerBand]
-		}
+		patterns, _ := dedupLogSamples(msgs, patternsPerBand)
 		bands = append(bands, format.LogBand{
-			Label:   sev.String(),
-			Samples: samples,
-			Total:   totals[sev],
+			Label:    sev.String(),
+			Total:    totals[sev],
+			Patterns: patterns,
 		})
 	}
 	return bands
 }
+
+// defaultPatternsPerBand caps the number of distinct deduped
+// patterns shown per severity band when the caller passes <= 0.
+const defaultPatternsPerBand = 3

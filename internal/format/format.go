@@ -19,13 +19,34 @@ import (
 // MessageLineLimit caps a single message body before truncation.
 const MessageLineLimit = 280
 
-// LogBand is one severity slice rendered by LogChannelDigest. Samples
-// are typically the most-recent messages in the band; Total may exceed
-// len(Samples) when more existed than the caller chose to keep.
+// LogPattern is a deduped group of similar messages from one
+// severity band. Sample is the most-recent representative of the
+// group; Count is the total membership including Sample. Signature
+// is the canonical form used for grouping (kept on the struct mostly
+// so tests can assert on it).
+type LogPattern struct {
+	Sample    goslack.Message
+	Count     int
+	Signature string
+}
+
+// LogBand is one severity slice rendered by LogChannelDigest. Two
+// modes:
+//
+//   - Patterns is preferred — populated by callers that pre-deduped
+//     the band. Each pattern renders one line with a "(×N similar)"
+//     suffix when Count > 1.
+//   - Samples is the legacy field used by callers that haven't
+//     deduped. Renders one line per message. Used when Patterns is
+//     empty.
+//
+// Total is the full membership of the band, used for the histogram
+// header and overflow ("+N other") lines.
 type LogBand struct {
-	Label   string
-	Samples []goslack.Message
-	Total   int
+	Label    string
+	Total    int
+	Samples  []goslack.Message
+	Patterns []LogPattern
 }
 
 // LogChannelDigest renders a bot-driven log / alert channel as a
@@ -56,17 +77,33 @@ func LogChannelDigest(channelName string, total int, bands []LogBand, users map[
 	}
 
 	for _, band := range bands {
-		if len(band.Samples) == 0 {
-			continue
-		}
-		fmt.Fprintf(&b, "\nrecent %s:\n", band.Label)
-		for _, m := range band.Samples {
-			b.WriteString("  ")
-			b.WriteString(MessageLine(m, users[m.User]))
-			b.WriteByte('\n')
-		}
-		if hidden := band.Total - len(band.Samples); hidden > 0 {
-			fmt.Fprintf(&b, "  ... +%d more\n", hidden)
+		switch {
+		case len(band.Patterns) > 0:
+			fmt.Fprintf(&b, "\nrecent %s:\n", band.Label)
+			rendered := 0
+			for _, p := range band.Patterns {
+				b.WriteString("  ")
+				b.WriteString(MessageLine(p.Sample, users[p.Sample.User]))
+				if p.Count > 1 {
+					fmt.Fprintf(&b, " (×%d similar)", p.Count)
+				}
+				b.WriteByte('\n')
+				rendered += p.Count
+			}
+			if hidden := band.Total - rendered; hidden > 0 {
+				fmt.Fprintf(&b, "  ... +%d other\n", hidden)
+			}
+
+		case len(band.Samples) > 0:
+			fmt.Fprintf(&b, "\nrecent %s:\n", band.Label)
+			for _, m := range band.Samples {
+				b.WriteString("  ")
+				b.WriteString(MessageLine(m, users[m.User]))
+				b.WriteByte('\n')
+			}
+			if hidden := band.Total - len(band.Samples); hidden > 0 {
+				fmt.Fprintf(&b, "  ... +%d more\n", hidden)
+			}
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
