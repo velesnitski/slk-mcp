@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-04-30
+
+### Changed
+- **`get_unread_summary` now ranks channels by urgency, not just volume.** A new heuristic in `internal/tools/urgency.go` scores each unread channel from per-message signals: question marks (capped at 3 per message), urgency keywords in English and Russian (`urgent`/`срочно`/`сломалось`/...), urgency-suggesting reactions (`rotating_light`, `fire`, `warning`, ...), and recency (`<1h` and `<6h` bands). A single keyword outranks ~9 plain messages; mentions of the operator still dominate any non-mention channel. See `docs/adr/0005-urgency-heuristic-for-unread-ranking.md`.
+
+### Added
+- `internal/tools/urgency.go` + `internal/tools/urgency_test.go` (14 cases): per-signal tests, recency bands, ranking-interaction invariants (mention > urgency > volume), full-width `？` handling, keyword case-insensitivity in Cyrillic.
+
 ## [0.2.6] - 2026-04-30
 
 ### Added

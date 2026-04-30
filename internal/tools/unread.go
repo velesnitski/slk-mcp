@@ -64,8 +64,9 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					return mcp.NewToolResultText("all caught up — 0 unread"), nil
 				}
 
+				now := time.Now()
 				sort.Slice(results, func(i, j int) bool {
-					return rankUnread(results[i], selfID) > rankUnread(results[j], selfID)
+					return rankUnread(results[i], selfID, now) > rankUnread(results[j], selfID, now)
 				})
 
 				totalMsgs, totalReplies := 0, 0
@@ -161,16 +162,24 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 	}
 }
 
-// rankUnread orders ChannelUnread results so channels with a direct
-// mention of selfID surface first; among non-mention channels, busier
-// ones rank higher.
-func rankUnread(cu *slack.ChannelUnread, selfID string) int {
+// rankUnread orders ChannelUnread results. The components, in order
+// of dominance:
+//
+//  1. A direct mention of selfID — adds 1_000_000, so any mention
+//     beats any volume or urgency from non-mentioning channels.
+//  2. Urgency heuristic — keywords ("urgent" / "срочно"), question
+//     marks, urgency reactions, recency. See internal/tools/urgency.go.
+//  3. Raw volume — total unread messages + replies.
+//
+// `now` is injected so tests can fix recency. Pass time.Time{} to
+// disable the recency component.
+func rankUnread(cu *slack.ChannelUnread, selfID string, now time.Time) int {
 	rank := len(cu.Messages)
 	for _, rs := range cu.Replies {
 		rank += len(rs)
 	}
+	rank += urgencyScore(cu, now)
 	if channelMentions(cu, selfID) {
-		// Large enough that any mention beats any volume.
 		rank += 1_000_000
 	}
 	return rank
