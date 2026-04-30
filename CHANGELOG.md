@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-04-30
+
+### Added
+- **`urgency_weight` parameter on `get_unread_summary`** — multiplier on the urgency score before ranking (default `1.0`). Zero or negative values fall back to the default; pass `0.5` to dampen, `2.0` to amplify. See `docs/adr/0006-urgency-tuning-and-log-channel-keywords.md`.
+- **`urgency_keywords` parameter on `get_unread_summary`** — comma-separated extra keywords additive to the built-in en/ru list. Useful for domain-specific terms like `"p0, prod down, internal-tool"` without redeploying.
+- **English log-severity keywords in the built-in list** — `error`, `errors`, `failed`, `failure`, `fatal`, `alert`, `exception`, `panic`, `outage`, `timed out`, plus Russian `не отвечает`. Bot-driven channels (zabbix / gitlab / harbor / aws) now surface real failures above routine info without configuration.
+
+### Notes
+- Deliberately omitted from the built-in list: `down` (matches `downloaded`/`markdown`/`cooldown` — too noisy) and `fail` (superset of `failed` and `failure`, would double-score). Both can still be added via `urgency_keywords` on a per-call basis.
+
 ## [0.2.7] - 2026-04-30
 
 ### Changed

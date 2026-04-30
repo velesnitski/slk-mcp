@@ -28,11 +28,17 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("max_per_channel", mcp.Description("Max unread messages to inline per channel (default: 20)")),
 				mcp.WithBoolean("mentions_only", mcp.Description("If true, return only channels that contain a direct mention of the authenticated user (default: false)")),
 				mcp.WithNumber("thread_preview_replies", mcp.Description("Max thread replies inlined per parent (default: 3)")),
+				mcp.WithNumber("urgency_weight", mcp.Description("Multiplier on the urgency score before ranking (default: 1.0). Pass 0 or negative to use the default; pass 0.5 to dampen, 2.0 to amplify.")),
+				mcp.WithString("urgency_keywords", mcp.Description("Comma-separated extra urgency keywords (case-insensitive substrings). Additive to the built-in en/ru list — e.g. 'asap, critical, p0, prod down'.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				maxPer := int(req.GetFloat("max_per_channel", 20))
 				mentionsOnly := req.GetBool("mentions_only", false)
 				replyCap := int(req.GetFloat("thread_preview_replies", float64(format.ThreadPreviewReplies)))
+				urg := urgencyOpts{
+					Weight:        req.GetFloat("urgency_weight", 0),
+					ExtraKeywords: parseExtraKeywords(req.GetString("urgency_keywords", "")),
+				}
 
 				results, err := d.Client.Unread.UnreadAll(ctx, maxPer)
 				if err != nil {
@@ -66,7 +72,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 
 				now := time.Now()
 				sort.Slice(results, func(i, j int) bool {
-					return rankUnread(results[i], selfID, now) > rankUnread(results[j], selfID, now)
+					return rankUnread(results[i], selfID, now, urg) > rankUnread(results[j], selfID, now, urg)
 				})
 
 				totalMsgs, totalReplies := 0, 0
@@ -169,16 +175,17 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 //     beats any volume or urgency from non-mentioning channels.
 //  2. Urgency heuristic — keywords ("urgent" / "срочно"), question
 //     marks, urgency reactions, recency. See internal/tools/urgency.go.
+//     Tunable per call via urgencyOpts (weight + extra keywords).
 //  3. Raw volume — total unread messages + replies.
 //
 // `now` is injected so tests can fix recency. Pass time.Time{} to
 // disable the recency component.
-func rankUnread(cu *slack.ChannelUnread, selfID string, now time.Time) int {
+func rankUnread(cu *slack.ChannelUnread, selfID string, now time.Time, urg urgencyOpts) int {
 	rank := len(cu.Messages)
 	for _, rs := range cu.Replies {
 		rank += len(rs)
 	}
-	rank += urgencyScore(cu, now)
+	rank += urgencyScore(cu, now, urg)
 	if channelMentions(cu, selfID) {
 		rank += 1_000_000
 	}
