@@ -30,11 +30,15 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("thread_preview_replies", mcp.Description("Max thread replies inlined per parent (default: 3)")),
 				mcp.WithNumber("urgency_weight", mcp.Description("Multiplier on the urgency score before ranking (default: 1.0). Pass 0 or negative to use the default; pass 0.5 to dampen, 2.0 to amplify.")),
 				mcp.WithString("urgency_keywords", mcp.Description("Comma-separated extra urgency keywords (case-insensitive substrings). Additive to the built-in en/ru list — e.g. 'asap, critical, p0, prod down'.")),
+				mcp.WithString("log_mode", mcp.Description("Log-channel rendering: 'auto' (default — detect bot-driven channels and render them as severity histograms) or 'off' (always use the regular per-message digest).")),
+				mcp.WithNumber("log_samples_per_band", mcp.Description("Max sample messages shown per severity band in log mode (default: 3)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				maxPer := int(req.GetFloat("max_per_channel", 20))
 				mentionsOnly := req.GetBool("mentions_only", false)
 				replyCap := int(req.GetFloat("thread_preview_replies", float64(format.ThreadPreviewReplies)))
+				logMode := strings.ToLower(strings.TrimSpace(req.GetString("log_mode", "auto")))
+				logSamples := int(req.GetFloat("log_samples_per_band", 3))
 				urg := urgencyOpts{
 					Weight:        req.GetFloat("urgency_weight", 0),
 					ExtraKeywords: parseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -91,15 +95,26 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				fmt.Fprintf(&b, "%s\n%d channels, %d top-level + %d thread replies\n\n",
 					header, len(results), totalMsgs, totalReplies)
 
+				logChannels := 0
 				for _, r := range results {
 					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
-					b.WriteString(format.ChannelDigest(
-						r.Channel.Name, r.Messages, users, maxPer,
-						format.WithMentionHighlight(selfID),
-						format.WithThreadReplies(r.Replies),
-						format.WithThreadPreviewReplies(replyCap),
-					))
+					if logMode != "off" && detectLogChannel(r) {
+						logChannels++
+						bands := buildLogBands(r.Messages, logSamples)
+						b.WriteString(format.LogChannelDigest(
+							r.Channel.Name, len(r.Messages), bands, users))
+					} else {
+						b.WriteString(format.ChannelDigest(
+							r.Channel.Name, r.Messages, users, maxPer,
+							format.WithMentionHighlight(selfID),
+							format.WithThreadReplies(r.Replies),
+							format.WithThreadPreviewReplies(replyCap),
+						))
+					}
 					b.WriteString("\n\n")
+				}
+				if logChannels > 0 {
+					d.Log.Debug("log mode applied", "channels", logChannels)
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
 			},
