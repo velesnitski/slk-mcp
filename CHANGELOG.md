@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.15] - 2026-05-04
+
+### Added
+- Zabbix-style alerts in log channels are parsed into a structured one-liner: `State: Host — Trigger (sev X) [opdata]`. Multi-line label/value payloads (Host, Severity, Opdata, Trigger description) collapse into a single readable line. Known opdata patterns are compacted (`Load averages(...): (a b c), # of CPUs: N` → `load5=b, CPUs=N`; `Space used: A of B (P %)` → `P% (A of B)`). Unknown opdata passes through truncated to ~80 chars.
+- The structured output gives the LLM (and operator) enough host + metric context to decide whether to drill in via a separate Zabbix MCP / dashboard query — no cross-MCP coupling required.
+
 ## [0.3.14] - 2026-05-04
 
 ### Changed

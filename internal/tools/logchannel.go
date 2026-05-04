@@ -144,6 +144,14 @@ func buildLogBands(messages []goslack.Message, patternsPerBand int) []format.Log
 	totals := make(map[LogSeverity]int, len(orderedSeverities))
 	for _, m := range messages {
 		sev := classifyLogSeverity(m)
+		// Zabbix-style alerts: rewrite to a structured one-liner so
+		// the renderer surfaces host + metric data instead of the
+		// labelled multi-line payload. Severity classification stays
+		// driven by the original text (above) so "Severity Average"
+		// still maps to ALERT.
+		if alert := parseZabbixAlert(m.Text); alert != nil {
+			m.Text = alert.OneLine()
+		}
 		bins[sev] = append(bins[sev], m)
 		totals[sev]++
 	}
