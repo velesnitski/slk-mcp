@@ -4,8 +4,7 @@ services:
     ports:
       - "8001:8000"
     environment:
-      - SLACK_TOKEN=xoxb-your-bot-token
-      - SLACK_CHANNELS=general,announcements
+      - SLACK_USER_TOKEN=xoxp-your-user-token
       # Optional:
       # - SLACK_READ_ONLY=true
       # - SLACK_DIGEST_HOURS=24

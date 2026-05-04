@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-05-04
+
+### Changed
+- README "Install in Claude Code" example now defaults to Setup A (user token only — recommended for personal use). Setup B (bot token) is a one-line addendum. Docker section and `docker-compose.yml` follow the same convention.
+
 ## [0.3.9] - 2026-05-04
 
 ### Changed
