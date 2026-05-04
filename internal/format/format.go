@@ -232,8 +232,9 @@ func MentionsUser(msg goslack.Message, userID string) bool {
 }
 
 // HasContent reports whether a message carries any signal worth
-// rendering — non-empty body, any reaction, or any thread reply.
-// Used to filter out empty Slackbot / webhook pings.
+// rendering — non-empty body, any reaction, any thread reply, OR
+// any file attachment. Used to filter out empty Slackbot / webhook
+// pings.
 func HasContent(msg goslack.Message) bool {
 	if collapseWhitespace(msg.Text) != "" {
 		return true
@@ -242,6 +243,9 @@ func HasContent(msg goslack.Message) bool {
 		return true
 	}
 	if msg.ReplyCount > 0 {
+		return true
+	}
+	if len(msg.Files) > 0 {
 		return true
 	}
 	return false
@@ -294,6 +298,10 @@ func MessageLine(msg goslack.Message, userName string, allUsers ...map[string]st
 		b.WriteString(body)
 	}
 
+	if files := renderFiles(msg.Files); files != "" {
+		b.WriteByte(' ')
+		b.WriteString(files)
+	}
 	if rs := renderReactions(msg.Reactions); rs != "" {
 		b.WriteByte(' ')
 		b.WriteString(rs)
@@ -302,6 +310,36 @@ func MessageLine(msg goslack.Message, userName string, allUsers ...map[string]st
 		fmt.Fprintf(&b, " (%d replies)", msg.ReplyCount)
 	}
 	return b.String()
+}
+
+// renderFiles emits compact attachment markers for any files
+// attached to the message. Image files use 🖼, everything else uses
+// 📎. Includes filename and (for images) original dimensions when
+// available.
+func renderFiles(files []goslack.File) string {
+	if len(files) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, f := range files {
+		marker := "📎"
+		if strings.HasPrefix(f.Mimetype, "image/") {
+			marker = "🖼"
+		}
+		name := f.Name
+		if name == "" {
+			name = f.Title
+		}
+		if name == "" {
+			name = "file"
+		}
+		piece := marker + " " + name
+		if f.OriginalW > 0 && f.OriginalH > 0 {
+			piece += fmt.Sprintf(" (%dx%d)", f.OriginalW, f.OriginalH)
+		}
+		parts = append(parts, "["+piece+"]")
+	}
+	return strings.Join(parts, " ")
 }
 
 // ChannelDigest renders all messages for a channel with a header.

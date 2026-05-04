@@ -296,3 +296,53 @@ func TestCollectMentionedUserIDs_DedupesAcrossMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderFiles_ImageWithDimensions(t *testing.T) {
+	msg := goslack.Message{}
+	msg.Timestamp = "1700000000.000000"
+	msg.User = "U1"
+	msg.Files = []goslack.File{
+		{Name: "screenshot.png", Mimetype: "image/png", OriginalW: 1280, OriginalH: 720},
+	}
+	out := MessageLine(msg, "alex")
+	if !strings.Contains(out, "[🖼 screenshot.png (1280x720)]") {
+		t.Fatalf("expected image marker with dimensions, got: %s", out)
+	}
+}
+
+func TestRenderFiles_NonImageGenericMarker(t *testing.T) {
+	msg := goslack.Message{}
+	msg.Timestamp = "1700000000.000000"
+	msg.User = "U1"
+	msg.Files = []goslack.File{
+		{Name: "report.pdf", Mimetype: "application/pdf"},
+	}
+	out := MessageLine(msg, "alex")
+	if !strings.Contains(out, "[📎 report.pdf]") {
+		t.Fatalf("expected pdf marker, got: %s", out)
+	}
+}
+
+func TestRenderFiles_MultipleAttachments(t *testing.T) {
+	msg := goslack.Message{}
+	msg.Timestamp = "1700000000.000000"
+	msg.User = "U1"
+	msg.Files = []goslack.File{
+		{Name: "a.jpg", Mimetype: "image/jpeg", OriginalW: 800, OriginalH: 600},
+		{Name: "b.zip", Mimetype: "application/zip"},
+	}
+	out := MessageLine(msg, "alex")
+	for _, want := range []string{"🖼 a.jpg (800x600)", "📎 b.zip"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in: %s", want, out)
+		}
+	}
+}
+
+func TestHasContent_FilesAlone(t *testing.T) {
+	msg := goslack.Message{}
+	msg.Files = []goslack.File{{Name: "x.png", Mimetype: "image/png"}}
+	if !HasContent(msg) {
+		t.Fatal("message with file attachment but empty body must still be content-ful")
+	}
+}
