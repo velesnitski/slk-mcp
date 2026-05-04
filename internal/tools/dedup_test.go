@@ -133,6 +133,38 @@ func TestCanonicalSignature_DistinctAlertsStayDistinct(t *testing.T) {
 	}
 }
 
+func TestCanonicalSignature_MergesZabbixFlapping(t *testing.T) {
+	a := canonicalSignature("Problem: Load average is too high (per CPU load over 2 for 5m)")
+	b := canonicalSignature("Resolved in 56s: Load average is too high (per CPU load over 2 for 5m)")
+	c := canonicalSignature("Resolved in 1m 0s: Load average is too high (per CPU load over 2 for 5m)")
+	d := canonicalSignature("Resolved in 7m 0s: Load average is too high (per CPU load over 2 for 5m)")
+	if a != b || a != c || a != d {
+		t.Fatalf("flapping zabbix trigger should merge:\n problem=%q\n 56s=%q\n 1m=%q\n 7m=%q", a, b, c, d)
+	}
+}
+
+func TestClassifyLogSeverity_Zabbix(t *testing.T) {
+	cases := []struct {
+		text string
+		want LogSeverity
+	}{
+		{"Problem: ... Severity Disaster ...", SeverityFatal},
+		{"Problem: ... Severity High ...", SeverityError},
+		{"Problem: ... Severity Average ...", SeverityAlert},
+		{"Problem: ... Severity Warning ...", SeverityWarn},
+		{"Problem: routine info, no severity tag", SeverityInfo},
+	}
+	for _, c := range cases {
+		t.Run(c.text, func(t *testing.T) {
+			m := goslack.Message{}
+			m.Text = c.text
+			if got := classifyLogSeverity(m); got != c.want {
+				t.Fatalf("classifyLogSeverity(%q) = %v; want %v", c.text, got, c.want)
+			}
+		})
+	}
+}
+
 // ----------------------- dedupLogSamples -----------------------
 
 func dedupMsg(text, ts string) goslack.Message {
