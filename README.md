@@ -59,13 +59,13 @@ Invite the bot to channels: `/invite @your-bot`.
 
 ### 2. Install in Claude Code
 
+**Setup A (user token only — recommended):**
+
 ```bash
 claude mcp add slack \
-  -e SLACK_TOKEN=xoxb-your-bot-token \
   -e SLACK_USER_TOKEN=xoxp-your-user-token \
-  -e SLACK_CHANNELS=general,announcements \
   -- docker run --rm -i \
-     -e SLACK_TOKEN -e SLACK_USER_TOKEN -e SLACK_CHANNELS \
+     -e SLACK_USER_TOKEN \
      velesnitski/slk-mcp -transport stdio
 ```
 
@@ -77,20 +77,18 @@ Or via config file (`~/.claude.json`):
     "slack": {
       "command": "docker",
       "args": ["run", "--rm", "-i",
-               "-e", "SLACK_TOKEN",
                "-e", "SLACK_USER_TOKEN",
-               "-e", "SLACK_CHANNELS",
                "velesnitski/slk-mcp",
                "-transport", "stdio"],
       "env": {
-        "SLACK_TOKEN": "xoxb-your-bot-token",
-        "SLACK_USER_TOKEN": "xoxp-your-user-token",
-        "SLACK_CHANNELS": "general,announcements"
+        "SLACK_USER_TOKEN": "xoxp-your-user-token"
       }
     }
   }
 }
 ```
+
+**Setup B (bot token):** add `-e SLACK_TOKEN=xoxb-...` instead of (or alongside) the user token. Bot must be invited to each channel; unread/mentions/DM tools stay hidden unless a user token is also set.
 
 ### 3. Try it
 
@@ -147,12 +145,12 @@ Or via config file (`~/.claude.json`):
 
 ```bash
 docker run -d --name slack-mcp \
-  -e SLACK_TOKEN=xoxb-your-bot-token \
   -e SLACK_USER_TOKEN=xoxp-your-user-token \
-  -e SLACK_CHANNELS=general,announcements \
   -p 8001:8000 \
   velesnitski/slk-mcp
 ```
+
+Add `-e SLACK_TOKEN=xoxb-...` alongside if you also want a bot token (Setup B).
 
 Connect Claude Code over the network:
 
