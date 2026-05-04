@@ -129,10 +129,14 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				mcp.WithDescription("Messages that mention the authenticated user. Requires SLACK_USER_TOKEN."),
 				mcp.WithNumber("hours", mcp.Description("Lookback window in hours (default: 72)")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 30)")),
+				mcp.WithBoolean("with_context", mcp.Description("For each hit, fetch a few preceding messages from the same channel/DM (default: false)")),
+				mcp.WithNumber("context_messages", mcp.Description("How many preceding messages to inline when with_context=true (default: 3)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				hours := int(req.GetFloat("hours", 72))
 				limit := int(req.GetFloat("limit", 30))
+				withContext := req.GetBool("with_context", false)
+				ctxN := int(req.GetFloat("context_messages", 3))
 
 				after := time.Now().Add(-time.Duration(hours) * time.Hour).Format("2006-01-02")
 				q := fmt.Sprintf("to:me after:%s", after)
@@ -150,6 +154,16 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				for _, m := range matches {
 					b.WriteString(format.SearchResult(m))
 					b.WriteByte('\n')
+					if withContext && m.Channel.ID != "" {
+						priors := fetchMentionContext(ctx, d, m.Channel.ID, m.Timestamp, ctxN)
+						userIDs := collectUserIDs(priors)
+						users := d.Client.Users.NamesFor(ctx, userIDs)
+						for _, p := range priors {
+							b.WriteString("    ↳ ")
+							b.WriteString(format.MessageLine(p, users[p.User]))
+							b.WriteByte('\n')
+						}
+					}
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
 			},
@@ -183,6 +197,38 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 			},
 		)
 	}
+}
+
+// fetchMentionContext returns up to n messages immediately preceding
+// `latestTS` in `channelID`, ordered oldest → newest so the calling
+// renderer can show them as ascending context above the mention.
+// Returns nil on any error (context is best-effort).
+func fetchMentionContext(ctx context.Context, d Deps, channelID, latestTS string, n int) []goslack.Message {
+	if n <= 0 {
+		n = 3
+	}
+	hist, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+		ChannelID: channelID,
+		Limit:     n + 1,
+	})
+	if err != nil {
+		d.Log.Debug("fetch mention context failed", "channel", channelID, "err", err)
+		return nil
+	}
+	out := make([]goslack.Message, 0, n)
+	for _, m := range hist {
+		if m.Timestamp >= latestTS {
+			continue
+		}
+		out = append(out, m)
+		if len(out) >= n {
+			break
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
 }
 
 // channelDisplayLabel returns the human-friendly heading used in
