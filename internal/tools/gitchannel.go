@@ -12,13 +12,23 @@ import (
 )
 
 var (
-	issueIDRe  = regexp.MustCompile(`\b([A-Z]{2,5}-\d{1,5})\b`)
-	mrIDRe     = regexp.MustCompile(`!(\d{2,5})\b`)
-	branchRe   = regexp.MustCompile(`branch ['"<]?([\w./-]+)['">]?`)
-	deployRe   = regexp.MustCompile(`(?i)deploy(?:ing)? to (\w+)`)
-	deployOkRe = regexp.MustCompile(`(?i)deploy.* (succeeded|completed)`)
+	issueIDRe   = regexp.MustCompile(`\b([A-Z]{2,5}-\d{1,5})\b`)
+	mrIDRe      = regexp.MustCompile(`!(\d{2,5})\b`)
+	branchRe    = regexp.MustCompile(`(?:branch|to branch) ([\w./-]+?)(?:\s+(?:of|from|to)\b|$)`)
+	deployRe    = regexp.MustCompile(`(?i)deploy(?:ing)? to (\w+)`)
+	deployOkRe  = regexp.MustCompile(`(?i)deploy.* (succeeded|completed)`)
 	deployErrRe = regexp.MustCompile(`(?i)deploy.* (failed|aborted)`)
-	personRe   = regexp.MustCompile(`\(([a-z][\w.-]+)\)`)
+	personRe    = regexp.MustCompile(`\(([a-z][\w.-]+)\)`)
+	pipelineOkRe = regexp.MustCompile(`(?i)Pipeline #?\d+ has passed`)
+	pipelineErrRe = regexp.MustCompile(`(?i)Pipeline #?\d+ has failed`)
+	// "of REPO / SUB / NAME" — last segment is the repo identity.
+	// Slack renders <url|label> as just the label after stripping markup.
+	repoRe = regexp.MustCompile(`(?:of|in) ([A-Z][\w. -]*?(?: ?/ ?[\w. -]+){1,4})`)
+	// Commit subject: "<sha>: subject - author" or "<sha>: subject".
+	commitRe = regexp.MustCompile(`\b[0-9a-f]{7,}: ([^-\n]{3,80}?)(?: - |$)`)
+	// Slack URL markup: <url|label> → label; <url> → "".
+	slackLinkRe = regexp.MustCompile(`<(https?://[^|>]+)\|([^>]+)>`)
+	bareLinkRe  = regexp.MustCompile(`<https?://[^>]+>`)
 )
 
 type gitAction struct {
@@ -28,9 +38,10 @@ type gitAction struct {
 }
 
 type gitWorkflow struct {
-	Key     string
-	Actions []gitAction
-	Actors  map[string]struct{}
+	Key      string
+	Actions  []gitAction
+	Actors   map[string]struct{}
+	Commits  []string
 }
 
 // detectGitChannel reports whether a channel is a CI / git-bot feed
@@ -44,20 +55,60 @@ func detectGitChannel(cu *slack.ChannelUnread) bool {
 	return strings.Contains(name, "git-") || strings.HasPrefix(name, "ci-") || strings.Contains(name, "ci/") || strings.Contains(name, "deploy")
 }
 
+// stripSlackLinks replaces <url|label> with label and drops bare <url>
+// so downstream regexes operate on human-readable text only.
+func stripSlackLinks(text string) string {
+	text = slackLinkRe.ReplaceAllString(text, "$2")
+	text = bareLinkRe.ReplaceAllString(text, "")
+	return text
+}
+
 func extractWorkflowKey(text string) string {
-	if m := issueIDRe.FindString(text); m != "" {
-		return m
+	clean := stripSlackLinks(text)
+	repo := extractRepo(clean)
+	prefix := ""
+	if repo != "" {
+		prefix = repo + " · "
 	}
-	if m := mrIDRe.FindString(text); m != "" {
-		return m
+	if m := issueIDRe.FindString(clean); m != "" {
+		return prefix + m
 	}
-	if m := branchRe.FindStringSubmatch(text); len(m) > 1 {
-		return "branch " + m[1]
+	if m := mrIDRe.FindString(clean); m != "" {
+		return prefix + m
 	}
-	if m := deployRe.FindStringSubmatch(text); len(m) > 1 {
+	if m := branchRe.FindStringSubmatch(clean); len(m) > 1 && m[1] != "" {
+		return prefix + "branch " + m[1]
+	}
+	if m := deployRe.FindStringSubmatch(clean); len(m) > 1 {
 		return "deploy:" + m[1]
 	}
+	if repo != "" {
+		return repo
+	}
 	return ""
+}
+
+func extractRepo(text string) string {
+	m := repoRe.FindStringSubmatch(text)
+	if len(m) < 2 {
+		return ""
+	}
+	parts := strings.Split(m[1], "/")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if len(last) > 40 {
+		last = last[:40]
+	}
+	return last
+}
+
+// extractCommitSubject pulls the subject line from a "sha: subject"
+// pattern, common in GitLab push notifications.
+func extractCommitSubject(text string) string {
+	m := commitRe.FindStringSubmatch(text)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 func extractActor(text string) string {
@@ -70,6 +121,10 @@ func extractActor(text string) string {
 func extractVerb(text string) string {
 	lower := strings.ToLower(text)
 	switch {
+	case pipelineErrRe.MatchString(text):
+		return "pipeline ✗"
+	case pipelineOkRe.MatchString(text):
+		return "pipeline ✓"
 	case deployErrRe.MatchString(text):
 		return "deploy ✗"
 	case deployOkRe.MatchString(text):
@@ -127,6 +182,9 @@ func groupGitWorkflows(messages []goslack.Message) ([]gitWorkflow, []goslack.Mes
 		if verb != "" {
 			w.Actions = append(w.Actions, gitAction{verb: verb, ts: m.Timestamp, by: actor})
 		}
+		if subject := extractCommitSubject(stripSlackLinks(m.Text)); subject != "" {
+			w.Commits = appendUnique(w.Commits, subject)
+		}
 	}
 
 	out := make([]gitWorkflow, 0, len(order))
@@ -165,6 +223,13 @@ func renderGitChannel(channelLabel string, total int, workflows []gitWorkflow, o
 		when := formatTimeRange(first, last)
 		fmt.Fprintf(&b, "- %s [%s]: %s — %s\n",
 			w.Key, when, strings.Join(verbs, " → "), actors)
+		for i, c := range w.Commits {
+			if i >= 3 {
+				fmt.Fprintf(&b, "    · +%d more commits\n", len(w.Commits)-3)
+				break
+			}
+			fmt.Fprintf(&b, "    · %s\n", c)
+		}
 	}
 
 	if len(orphans) > 0 {
@@ -184,6 +249,15 @@ func dedupeKeepingOrder(actions []gitAction) []string {
 		out = append(out, a.verb)
 	}
 	return out
+}
+
+func appendUnique(slice []string, s string) []string {
+	for _, x := range slice {
+		if x == s {
+			return slice
+		}
+	}
+	return append(slice, s)
 }
 
 func timeRange(actions []gitAction) (string, string) {
