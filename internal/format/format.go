@@ -9,12 +9,71 @@ package format
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	goslack "github.com/slack-go/slack"
 )
+
+var (
+	mentionRefRe = regexp.MustCompile(`<@([UW][A-Z0-9]+)(?:\|[^>]*)?>`)
+	linkRefRe    = regexp.MustCompile(`<(https?://[^|>]+)\|([^>]+)>`)
+	bareLinkRe   = regexp.MustCompile(`<(https?://[^>]+)>`)
+)
+
+// RenderText cleans Slack-flavoured markup in a message body for
+// readable, token-efficient output:
+//
+//   - <@USERID>           → @Display Name (looked up in users; falls
+//                          back to USERID when unknown)
+//   - <url|label>         → label
+//   - <url>               → (dropped — caller can re-add a [link]
+//                          marker if needed)
+//
+// users may be nil. Returns text unchanged if it contains no markup.
+func RenderText(text string, users map[string]string) string {
+	if text == "" {
+		return ""
+	}
+	text = mentionRefRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := mentionRefRe.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		uid := sub[1]
+		if name, ok := users[uid]; ok && name != "" {
+			return "@" + name
+		}
+		return "@" + uid
+	})
+	text = linkRefRe.ReplaceAllString(text, "$2")
+	text = bareLinkRe.ReplaceAllString(text, "")
+	return text
+}
+
+// CollectMentionedUserIDs returns the unique set of <@USERID> tokens
+// referenced inside the bodies of the given messages — useful for
+// pre-resolving names before calling RenderText.
+func CollectMentionedUserIDs(messages []goslack.Message) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, m := range messages {
+		for _, match := range mentionRefRe.FindAllStringSubmatch(m.Text, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			id := match[1]
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 // MessageLineLimit caps a single message body before truncation.
 const MessageLineLimit = 280
@@ -93,7 +152,7 @@ func LogChannelDigest(channelLabel string, total int, bands []LogBand, users map
 			rendered := 0
 			for _, p := range nonEmpty {
 				b.WriteString("  ")
-				b.WriteString(MessageLine(p.Sample, users[p.Sample.User]))
+				b.WriteString(MessageLine(p.Sample, users[p.Sample.User], users))
 				if p.Count > 1 {
 					fmt.Fprintf(&b, " (×%d similar)", p.Count)
 				}
@@ -108,7 +167,7 @@ func LogChannelDigest(channelLabel string, total int, bands []LogBand, users map
 			fmt.Fprintf(&b, "\nrecent %s:\n", band.Label)
 			for _, m := range band.Samples {
 				b.WriteString("  ")
-				b.WriteString(MessageLine(m, users[m.User]))
+				b.WriteString(MessageLine(m, users[m.User], users))
 				b.WriteByte('\n')
 			}
 			if hidden := band.Total - len(band.Samples); hidden > 0 {
@@ -205,7 +264,14 @@ func ParseTS(ts string) time.Time {
 // MessageLine renders one message as a single compact line:
 //
 //	[HH:MM alex] message body (+127 chars) :thumbsup:(3) (5 replies)
-func MessageLine(msg goslack.Message, userName string) string {
+//
+// allUsers is optional; when present, <@USERID> mentions and Slack
+// link markup inside the body are resolved to readable form.
+func MessageLine(msg goslack.Message, userName string, allUsers ...map[string]string) string {
+	var users map[string]string
+	if len(allUsers) > 0 {
+		users = allUsers[0]
+	}
 	var b strings.Builder
 	b.Grow(64 + len(msg.Text))
 
@@ -218,7 +284,7 @@ func MessageLine(msg goslack.Message, userName string) string {
 	b.WriteString(displayName(userName, msg.User))
 	b.WriteString("] ")
 
-	body := collapseWhitespace(msg.Text)
+	body := collapseWhitespace(RenderText(msg.Text, users))
 	if len(body) > MessageLineLimit {
 		over := len(body) - MessageLineLimit
 		body = body[:MessageLineLimit]
@@ -282,7 +348,7 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		if MentionsUser(m, cfg.selfID) {
 			b.WriteString(MentionMarker)
 		}
-		b.WriteString(MessageLine(m, users[m.User]))
+		b.WriteString(MessageLine(m, users[m.User], users))
 		b.WriteByte('\n')
 
 		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
@@ -313,7 +379,7 @@ func writeReplies(b *strings.Builder, replies []goslack.Message, users map[strin
 		if MentionsUser(r, selfID) {
 			b.WriteString(MentionMarker)
 		}
-		b.WriteString(MessageLine(r, users[r.User]))
+		b.WriteString(MessageLine(r, users[r.User], users))
 		b.WriteByte('\n')
 	}
 	if hidden > 0 {
