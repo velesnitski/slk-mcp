@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] - 2026-05-04
+
+### Fixed
+- `get_mentions(with_context=true)` now also returns messages **after** the mention timestamp, not just preceding ones. Previously, the operator's own subsequent replies were invisible to the digest, causing false "no answer" reports on conversations the operator had clearly responded to. Rendered as `↪` (after) alongside `↳` (before).
+
 ## [0.3.10] - 2026-05-04
 
 ### Changed
