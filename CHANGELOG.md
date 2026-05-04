@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] - 2026-05-04
+
+### Fixed (LOG MODE — monitoring channels)
+- Recognise Zabbix-style `Severity Disaster/High/Average/Warning` labels and map them to FATAL/ERROR/ALERT/WARN bands. Previously every monitoring alert went to INFO.
+- `canonicalSignature` strips `Problem:` and `Resolved in <duration>:` prefixes, so the same trigger flapping in/out of state collapses to one pattern with a count instead of N near-duplicates.
+
 ## [0.3.12] - 2026-05-04
 
 ### Fixed (GIT MODE)

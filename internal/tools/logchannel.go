@@ -50,13 +50,13 @@ var orderedSeverities = []LogSeverity{
 func classifyLogSeverity(m goslack.Message) LogSeverity {
 	lower := strings.ToLower(m.Text)
 	switch {
-	case containsAny(lower, "fatal", "panic"):
+	case containsAny(lower, "severity disaster", "severitydisaster", "fatal", "panic"):
 		return SeverityFatal
-	case containsAny(lower, "error", "errors", "exception", "failed", "failure"):
+	case containsAny(lower, "severity high", "severityhigh", "error", "errors", "exception", "failed", "failure"):
 		return SeverityError
-	case containsAny(lower, "alert", "outage", "timed out", "не отвечает"):
+	case containsAny(lower, "severity average", "severityaverage", "alert", "outage", "timed out", "не отвечает"):
 		return SeverityAlert
-	case containsAny(lower, "warn", "warning"):
+	case containsAny(lower, "severity warning", "severitywarning", "warn", "warning"):
 		return SeverityWarn
 	default:
 		return SeverityInfo

@@ -35,18 +35,21 @@ var (
 )
 
 // canonicalSignature normalizes a message body so similar alerts
-// share a signature. The order of replacements matters:
+// share a signature. Order of replacements matters:
 //
-//  1. URLs first — they contain digits and dots.
-//  2. IPv4 addresses — match a stricter pattern than bare digit runs.
-//  3. Long hex IDs — caught after URLs (which can contain hex).
-//  4. Bare digit runs — anything left.
+//  1. Zabbix-style state prefixes ("Problem:", "Resolved in <duration>:")
+//     are stripped so the same trigger flapping in/out of state
+//     merges into a single signature.
+//  2. URLs first — they contain digits and dots.
+//  3. IPv4 addresses — stricter than bare digit runs.
+//  4. Long hex IDs — after URLs (which can contain hex).
+//  5. Bare digit runs.
 //
 // Whitespace is collapsed and the result lowercased so "FATAL: x"
-// merges with "fatal: x". Truncated to signatureMaxLen so a single
-// pathologically long message doesn't dominate the dedup map.
+// merges with "fatal: x". Truncated to signatureMaxLen.
 func canonicalSignature(text string) string {
 	t := strings.ToLower(text)
+	t = zabbixStatePrefixRe.ReplaceAllString(t, "")
 	t = urlRegex.ReplaceAllString(t, "<URL>")
 	t = ipRegex.ReplaceAllString(t, "<IP>")
 	t = hexIDRegex.ReplaceAllString(t, "<HEX>")
@@ -57,6 +60,8 @@ func canonicalSignature(text string) string {
 	}
 	return t
 }
+
+var zabbixStatePrefixRe = regexp.MustCompile(`^(?:problem:\s*|resolved in [^:]+:\s*)`)
 
 // dedupLogSamples groups messages by canonicalSignature, picks the
 // most-recent representative per group, sorts groups by count
