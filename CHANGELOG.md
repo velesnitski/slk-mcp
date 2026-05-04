@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-05-04
+
+### Added
+- Git/CI channels (`#git-*`, `#ci-*`, names containing `deploy`) detected as a stricter sub-class of log channels and rendered in **GIT MODE**: events collated per workflow key (issue ID, MR number, branch name, or deploy target), with the action timeline and actors summarized on one line. Replaces the noisy per-event listing for git-bot feeds.
+
 ## [0.3.7] - 2026-05-04
 
 ### Added
