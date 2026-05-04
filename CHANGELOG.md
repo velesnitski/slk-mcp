@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.17] - 2026-05-04
+
+### Added
+- `get_mentions` gains `pending_only` (bool, default false). When true, each match is checked against `conversations.history` after the mention timestamp; only mentions where the operator hasn't posted a non-empty text reply are kept. Reactions and empty messages don't count as a reply, so emoji-only "acks" still surface as pending. One history call per match (4-worker pool).
+
 ## [0.3.16] - 2026-05-04
 
 ### Added
