@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 
 	goslack "github.com/slack-go/slack"
@@ -113,7 +114,7 @@ func formatUserDisplay(u *goslack.User, fallbackID string) string {
 		return fallbackID
 	case real == "":
 		return handle
-	case handle == "" || handle == real:
+	case handle == "" || strings.EqualFold(handle, real):
 		return real
 	default:
 		return real + " (" + handle + ")"
