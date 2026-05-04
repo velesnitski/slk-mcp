@@ -100,7 +100,11 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				for _, r := range results {
 					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
 					label := channelDisplayLabel(ctx, r.Channel, d.Client.Users)
-					if logMode != "off" && detectLogChannel(r) {
+					if logMode != "off" && detectGitChannel(r) {
+						logChannels++
+						workflows, orphans := groupGitWorkflows(r.Messages)
+						b.WriteString(renderGitChannel(label, len(r.Messages), workflows, orphans))
+					} else if logMode != "off" && detectLogChannel(r) {
 						logChannels++
 						bands := buildLogBands(r.Messages, logSamples)
 						b.WriteString(format.LogChannelDigest(
