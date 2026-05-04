@@ -364,7 +364,10 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 }
 
 // collectUserIDsWithReplies returns unique user IDs across both the
-// channel's top-level unread messages and any inlined thread replies.
+// channel's top-level unread messages and any inlined thread replies,
+// PLUS any users referenced via <@USERID> mentions inside message
+// bodies. Pre-resolving mentioned users makes RenderText able to
+// substitute readable names instead of raw IDs.
 func collectUserIDsWithReplies(cu *slack.ChannelUnread) []string {
 	seen := make(map[string]struct{})
 	ids := make([]string, 0, len(cu.Messages))
@@ -384,6 +387,14 @@ func collectUserIDsWithReplies(cu *slack.ChannelUnread) []string {
 	for _, rs := range cu.Replies {
 		for _, r := range rs {
 			add(r.User)
+		}
+	}
+	for _, id := range format.CollectMentionedUserIDs(cu.Messages) {
+		add(id)
+	}
+	for _, rs := range cu.Replies {
+		for _, id := range format.CollectMentionedUserIDs(rs) {
+			add(id)
 		}
 	}
 	return ids

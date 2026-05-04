@@ -104,8 +104,9 @@ func TestChannelDigest_HighlightsMentions(t *testing.T) {
 		t.Fatalf("expected exactly one mention marker, got: %s", out)
 	}
 	// The marker must precede the mentioning line, not the plain one.
+	// RenderText resolves <@USERID> to @USERID (or @Name when known).
 	plainIdx := strings.Index(out, "hello team")
-	mentionIdx := strings.Index(out, "ping <@U001>")
+	mentionIdx := strings.Index(out, "ping @U001")
 	markerIdx := strings.Index(out, MentionMarker)
 	if !(plainIdx < markerIdx && markerIdx < mentionIdx) {
 		t.Fatalf("marker should be on the mentioning line; plain=%d marker=%d mention=%d output:\n%s",
@@ -157,7 +158,7 @@ func TestChannelDigest_InlinesThreadReplies(t *testing.T) {
 	if !strings.Contains(out, ReplyIndent+"[") {
 		t.Fatalf("expected reply indent in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "first reply") || !strings.Contains(out, "second reply with <@U001>") {
+	if !strings.Contains(out, "first reply") || !strings.Contains(out, "second reply with @U001") {
 		t.Fatalf("expected both reply bodies in output, got:\n%s", out)
 	}
 	// Mention marker must apply to the reply containing <@U001>, not to others.
@@ -248,5 +249,50 @@ func TestChannelDigest_RepliesWithoutOptionStillRenders(t *testing.T) {
 	out := ChannelDigest("dev", []goslack.Message{m}, map[string]string{"U002": "alex"}, 5)
 	if strings.Contains(out, MentionMarker) || strings.Contains(out, ReplyIndent) {
 		t.Fatalf("expected no markers/replies without options, got:\n%s", out)
+	}
+}
+
+func TestRenderText_ResolvesMentionsAndStripsLinks(t *testing.T) {
+	users := map[string]string{"U001": "Alice", "U002": "Bob"}
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"ping <@U001> please", "ping @Alice please"},
+		{"ping <@U999>", "ping @U999"},
+		{"see <https://example.test/foo|FOO-1> for details", "see FOO-1 for details"},
+		{"raw link <https://example.test/x>", "raw link "},
+		{"<@U002> please look at <https://example.test/abc|item>", "@Bob please look at item"},
+		{"plain text", "plain text"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			if got := RenderText(c.in, users); got != c.want {
+				t.Fatalf("RenderText(%q) = %q; want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCollectMentionedUserIDs_DedupesAcrossMessages(t *testing.T) {
+	mk := func(text string) goslack.Message {
+		m := goslack.Message{}
+		m.Text = text
+		return m
+	}
+	msgs := []goslack.Message{
+		mk("ping <@U001> and <@U002>"),
+		mk("again <@U001>"),
+		mk("<@U003|already-named>"),
+	}
+	got := CollectMentionedUserIDs(msgs)
+	want := []string{"U001", "U002", "U003"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v; want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("got[%d] = %q; want %q", i, got[i], w)
+		}
 	}
 }
