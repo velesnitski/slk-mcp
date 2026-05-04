@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -148,12 +149,14 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 30)")),
 				mcp.WithBoolean("with_context", mcp.Description("For each hit, fetch a few preceding messages from the same channel/DM (default: false)")),
 				mcp.WithNumber("context_messages", mcp.Description("How many preceding messages to inline when with_context=true (default: 3)")),
+				mcp.WithBoolean("pending_only", mcp.Description("Only keep mentions where you haven't posted a text reply afterwards (emoji reactions and file uploads don't count). Costs one conversations.history call per hit.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				hours := int(req.GetFloat("hours", 72))
 				limit := int(req.GetFloat("limit", 30))
 				withContext := req.GetBool("with_context", false)
 				ctxN := int(req.GetFloat("context_messages", 3))
+				pendingOnly := req.GetBool("pending_only", false)
 
 				after := time.Now().Add(-time.Duration(hours) * time.Hour).Format("2006-01-02")
 				q := fmt.Sprintf("to:me after:%s", after)
@@ -162,12 +165,27 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
+
+				selfID, _ := d.Client.Unread.Self(ctx)
+
+				if pendingOnly && selfID != "" {
+					matches = filterPendingMentions(ctx, d, matches, selfID)
+				}
+
 				if len(matches) == 0 {
+					if pendingOnly {
+						return mcp.NewToolResultText(fmt.Sprintf("no pending mentions in last %dh — every direct ask got a text reply from you", hours)), nil
+					}
 					return mcp.NewToolResultText(fmt.Sprintf("no mentions in last %dh", hours)), nil
 				}
 
 				var b strings.Builder
-				fmt.Fprintf(&b, "%d mentions (last %dh)\n", len(matches), hours)
+				header := fmt.Sprintf("%d mentions (last %dh)", len(matches), hours)
+				if pendingOnly {
+					header += " — pending (no text reply from you)"
+				}
+				b.WriteString(header)
+				b.WriteByte('\n')
 				for _, m := range matches {
 					b.WriteString(format.SearchResult(m))
 					b.WriteByte('\n')
@@ -218,6 +236,86 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 			},
 		)
 	}
+}
+
+// filterPendingMentions keeps only mentions where the operator
+// (selfID) hasn't posted a text reply in the same channel after the
+// mention timestamp. Reactions and empty messages do NOT count as
+// replies. One conversations.history call per match (4-worker pool).
+func filterPendingMentions(ctx context.Context, d Deps, matches []goslack.SearchMessage, selfID string) []goslack.SearchMessage {
+	const workers = 4
+	type job struct {
+		idx   int
+		match goslack.SearchMessage
+	}
+	type result struct {
+		idx     int
+		pending bool
+	}
+
+	jobs := make(chan job, len(matches))
+	results := make(chan result, len(matches))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				results <- result{idx: j.idx, pending: !operatorReplied(ctx, d, j.match.Channel.ID, j.match.Timestamp, selfID)}
+			}
+		}()
+	}
+	for i, m := range matches {
+		jobs <- job{idx: i, match: m}
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	keep := make([]bool, len(matches))
+	for r := range results {
+		keep[r.idx] = r.pending
+	}
+	out := matches[:0]
+	for i, m := range matches {
+		if keep[i] {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func operatorReplied(ctx context.Context, d Deps, channelID, mentionTS, selfID string) bool {
+	pivot, _ := strconv.ParseFloat(mentionTS, 64)
+	if pivot <= 0 || channelID == "" {
+		return false
+	}
+	hist, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+		ChannelID: channelID,
+		OldestTS:  pivot,
+		Limit:     20,
+	})
+	if err != nil {
+		d.Log.Debug("operator-reply check failed", "channel", channelID, "err", err)
+		return false
+	}
+	for _, m := range hist {
+		if m.Timestamp <= mentionTS {
+			continue
+		}
+		if m.User != selfID {
+			continue
+		}
+		if collapseTextEmpty(m.Text) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func collapseTextEmpty(s string) bool {
+	return strings.TrimSpace(s) == ""
 }
 
 // fetchMentionContext returns up to n messages on each side of
