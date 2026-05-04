@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.17] - 2026-05-04
+## [0.3.18] - 2026-05-04
+
+### Fixed
+- `pending_only=true` now returns an error when `auth.test` failed (previously silently passed every match through).
+- `classifyLogSeverity` no longer bins success reports as ERROR just because they contain the literal "Failed: 0". When the body has both a "Status: PASSED" / "Pass rate: 100%" marker AND a `failed: 0` line, classify as INFO. Cuts log-mode noise on healthy CI feeds.
+
+### Changed
+- `get_mentions(with_context=true)` deduplicates context messages across consecutive same-channel mentions: each (channel, ts) shown at most once. Saves ~30–40% on mention sections dominated by one chatty thread.
+- Context messages with no signal (empty body, no reactions, no replies) are filtered out.
+- Channels detected as "low-signal" (name keyword OR ≥5 messages with average body length under 16 chars and no thread replies) collapse to a single line: `## #name — N short status updates from M people (...)`.
+
+
 
 ### Added
 - `get_mentions` gains `pending_only` (bool, default false). When true, each match is checked against `conversations.history` after the mention timestamp; only mentions where the operator hasn't posted a non-empty text reply are kept. Reactions and empty messages don't count as a reply, so emoji-only "acks" still surface as pending. One history call per match (4-worker pool).

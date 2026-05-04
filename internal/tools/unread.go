@@ -115,6 +115,8 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 						logChannels++
 						bands := buildLogBands(r.Messages, logSamples)
 						rendered = format.LogChannelDigest(label, len(r.Messages), bands, users)
+					case detectLowSignalChannel(r):
+						rendered = renderLowSignalChannel(label, r)
 					default:
 						rendered = format.ChannelDigest(
 							label, r.Messages, users, maxPer,
@@ -168,7 +170,10 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 
 				selfID, _ := d.Client.Unread.Self(ctx)
 
-				if pendingOnly && selfID != "" {
+				if pendingOnly {
+					if selfID == "" {
+						return mcp.NewToolResultError("pending_only requires auth.test to succeed; got an empty self id"), nil
+					}
 					matches = filterPendingMentions(ctx, d, matches, selfID)
 				}
 
@@ -186,22 +191,15 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				}
 				b.WriteString(header)
 				b.WriteByte('\n')
+				shownContext := map[string]struct{}{}
 				for _, m := range matches {
 					b.WriteString(format.SearchResult(m))
 					b.WriteByte('\n')
 					if withContext && m.Channel.ID != "" {
 						before, after := fetchMentionContext(ctx, d, m.Channel.ID, m.Timestamp, ctxN)
 						users := d.Client.Users.NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
-						for _, p := range before {
-							b.WriteString("    ↳ ")
-							b.WriteString(format.MessageLine(p, users[p.User]))
-							b.WriteByte('\n')
-						}
-						for _, p := range after {
-							b.WriteString("    ↪ ")
-							b.WriteString(format.MessageLine(p, users[p.User]))
-							b.WriteByte('\n')
-						}
+						writeContextLines(&b, "    ↳ ", before, users, m.Channel.ID, shownContext)
+						writeContextLines(&b, "    ↪ ", after, users, m.Channel.ID, shownContext)
 					}
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
@@ -235,6 +233,27 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				return mcp.NewToolResultText(fmt.Sprintf("marked #%s read up to %s", channel, ts)), nil
 			},
 		)
+	}
+}
+
+// writeContextLines renders prior/subsequent context messages with
+// two filters: (1) skip messages already shown for this channel
+// (dedup across consecutive same-channel mentions), and (2) skip
+// messages with no signal (HasContent == false) so empty Slackbot
+// pings and reaction-only entries don't waste tokens.
+func writeContextLines(b *strings.Builder, prefix string, msgs []goslack.Message, users map[string]string, channelID string, shown map[string]struct{}) {
+	for _, p := range msgs {
+		key := channelID + "|" + p.Timestamp
+		if _, ok := shown[key]; ok {
+			continue
+		}
+		shown[key] = struct{}{}
+		if !format.HasContent(p) {
+			continue
+		}
+		b.WriteString(prefix)
+		b.WriteString(format.MessageLine(p, users[p.User], users))
+		b.WriteByte('\n')
 	}
 }
 

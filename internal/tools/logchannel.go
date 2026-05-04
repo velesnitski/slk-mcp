@@ -49,6 +49,13 @@ var orderedSeverities = []LogSeverity{
 // alarms emit. Falls back to SeverityInfo when nothing matches.
 func classifyLogSeverity(m goslack.Message) LogSeverity {
 	lower := strings.ToLower(m.Text)
+	// Status reports that explicitly succeeded ("Status: PASSED",
+	// "Pass rate: 100%", "Failed: 0") shouldn't bin as ERROR just
+	// because they contain the literal word "Failed:". Re-classify
+	// to INFO when the text is clearly a success summary.
+	if isSuccessReport(lower) {
+		return SeverityInfo
+	}
 	switch {
 	case containsAny(lower, "severity disaster", "severitydisaster", "fatal", "panic"):
 		return SeverityFatal
@@ -61,6 +68,15 @@ func classifyLogSeverity(m goslack.Message) LogSeverity {
 	default:
 		return SeverityInfo
 	}
+}
+
+// isSuccessReport reports whether the body looks like a passing-test
+// or healthy-status summary, regardless of any severity-keyword
+// substrings it happens to contain.
+func isSuccessReport(lower string) bool {
+	hasPassed := containsAny(lower, "status: passed", "status:passed", "pass rate: 100", "pass rate:100")
+	failedZero := strings.Contains(lower, "failed: 0") || strings.Contains(lower, "failed:0")
+	return hasPassed && failedZero
 }
 
 func containsAny(s string, terms ...string) bool {
