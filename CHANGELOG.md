@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.16] - 2026-05-04
+
+### Added
+- `get_unread_summary` now ends with a `## References` footer that lists every issue ID, MR number, and branch name referenced anywhere in the digest, deduplicated and sorted. Designed as a hand-off to enrichment MCPs (issue trackers, code-review tools, dashboards) so the orchestrator can batch-call them without re-parsing prose. slk-mcp stays product-agnostic — the same footer works for any external system that takes one of those identifier shapes.
+
 ## [0.3.15] - 2026-05-04
 
 ### Added

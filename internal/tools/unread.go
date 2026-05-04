@@ -131,6 +131,10 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				if logChannels > 0 {
 					d.Log.Debug("log mode applied", "channels", logChannels)
 				}
+				if footer := renderReferences(collectReferences(results)); footer != "" {
+					b.WriteString(footer)
+					b.WriteString("\n")
+				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
 			},
 		)
