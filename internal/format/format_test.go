@@ -54,9 +54,8 @@ func TestChannelDigest_HidesExtras(t *testing.T) {
 }
 
 func TestChannelDigest_Empty(t *testing.T) {
-	out := ChannelDigest("dev", nil, nil, 5)
-	if !strings.Contains(out, "(no activity)") {
-		t.Fatalf("expected no activity marker, got: %s", out)
+	if out := ChannelDigest("dev", nil, nil, 5); out != "" {
+		t.Fatalf("empty channel must return empty string for token efficiency, got: %s", out)
 	}
 }
 

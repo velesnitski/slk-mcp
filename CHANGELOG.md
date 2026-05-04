@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-05-04
+
+### Changed
+- Empty messages (Slackbot pings, webhooks with no body) are now filtered out before rendering. Channels left with no content after filtering are dropped from the digest entirely. Saves ~40% tokens on workspaces with many empty bot pings.
+- `formatUserDisplay` is now case-insensitive when deciding whether to suppress the `(handle)` parenthetical: `Slackbot (slackbot)` collapses to `Slackbot`.
+- `LogChannelDigest` skips per-band sample listings when every pattern in the band has empty content; the histogram still shows the count.
+
 ## [0.3.8] - 2026-05-04
 
 ### Added

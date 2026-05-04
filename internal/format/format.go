@@ -80,9 +80,18 @@ func LogChannelDigest(channelLabel string, total int, bands []LogBand, users map
 	for _, band := range bands {
 		switch {
 		case len(band.Patterns) > 0:
+			nonEmpty := band.Patterns[:0]
+			for _, p := range band.Patterns {
+				if HasContent(p.Sample) {
+					nonEmpty = append(nonEmpty, p)
+				}
+			}
+			if len(nonEmpty) == 0 {
+				continue
+			}
 			fmt.Fprintf(&b, "\nrecent %s:\n", band.Label)
 			rendered := 0
-			for _, p := range band.Patterns {
+			for _, p := range nonEmpty {
 				b.WriteString("  ")
 				b.WriteString(MessageLine(p.Sample, users[p.Sample.User]))
 				if p.Count > 1 {
@@ -163,6 +172,22 @@ func MentionsUser(msg goslack.Message, userID string) bool {
 	return strings.Contains(msg.Text, "<@"+userID+">")
 }
 
+// HasContent reports whether a message carries any signal worth
+// rendering — non-empty body, any reaction, or any thread reply.
+// Used to filter out empty Slackbot / webhook pings.
+func HasContent(msg goslack.Message) bool {
+	if collapseWhitespace(msg.Text) != "" {
+		return true
+	}
+	if len(msg.Reactions) > 0 {
+		return true
+	}
+	if msg.ReplyCount > 0 {
+		return true
+	}
+	return false
+}
+
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.
 func ParseTS(ts string) time.Time {
 	if ts == "" {
@@ -226,6 +251,17 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		opt(&cfg)
 	}
 
+	filtered := messages[:0]
+	for _, m := range messages {
+		if HasContent(m) {
+			filtered = append(filtered, m)
+		}
+	}
+	messages = filtered
+
+	if len(messages) == 0 && len(cfg.replies) == 0 {
+		return ""
+	}
 	if len(messages) == 0 {
 		return fmt.Sprintf("## %s\n(no activity)", channelLabel)
 	}

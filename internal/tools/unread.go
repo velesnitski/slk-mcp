@@ -100,23 +100,31 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				for _, r := range results {
 					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
 					label := channelDisplayLabel(ctx, r.Channel, d.Client.Users)
-					if logMode != "off" && detectGitChannel(r) {
+					var rendered string
+					switch {
+					case logMode != "off" && detectGitChannel(r):
 						logChannels++
 						workflows, orphans := groupGitWorkflows(r.Messages)
-						b.WriteString(renderGitChannel(label, len(r.Messages), workflows, orphans))
-					} else if logMode != "off" && detectLogChannel(r) {
+						if len(workflows) == 0 && len(orphans) == 0 {
+							continue
+						}
+						rendered = renderGitChannel(label, len(r.Messages), workflows, orphans)
+					case logMode != "off" && detectLogChannel(r):
 						logChannels++
 						bands := buildLogBands(r.Messages, logSamples)
-						b.WriteString(format.LogChannelDigest(
-							label, len(r.Messages), bands, users))
-					} else {
-						b.WriteString(format.ChannelDigest(
+						rendered = format.LogChannelDigest(label, len(r.Messages), bands, users)
+					default:
+						rendered = format.ChannelDigest(
 							label, r.Messages, users, maxPer,
 							format.WithMentionHighlight(selfID),
 							format.WithThreadReplies(r.Replies),
 							format.WithThreadPreviewReplies(replyCap),
-						))
+						)
 					}
+					if rendered == "" {
+						continue
+					}
+					b.WriteString(rendered)
 					b.WriteString("\n\n")
 				}
 				if logChannels > 0 {
