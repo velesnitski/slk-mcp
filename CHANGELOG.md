@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] - 2026-05-04
+
+### Fixed (GIT MODE)
+- Slack `<url|label>` markup is stripped before workflow-key extraction. Previously the `branch` regex grabbed `https` from URL markup ahead of the real branch name, causing distinct repos and branches to merge into one nonsense `branch https` line.
+- Workflow keys now include the **repo name** (extracted from `of REPO / SUB / NAME` patterns), so the same branch name (`pre-release`) across different repos no longer collapses.
+- `Pipeline #N has passed/failed` is recognised as a verb (`pipeline ✓` / `pipeline ✗`).
+- Commit subjects (from `<sha>: subject - author` push messages) are now captured and rendered as bullet sublines under each workflow, capped at 3 with `+N more commits` overflow.
+
 ## [0.3.11] - 2026-05-04
 
 ### Fixed
