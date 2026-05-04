@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -167,11 +168,15 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					b.WriteString(format.SearchResult(m))
 					b.WriteByte('\n')
 					if withContext && m.Channel.ID != "" {
-						priors := fetchMentionContext(ctx, d, m.Channel.ID, m.Timestamp, ctxN)
-						userIDs := collectUserIDs(priors)
-						users := d.Client.Users.NamesFor(ctx, userIDs)
-						for _, p := range priors {
+						before, after := fetchMentionContext(ctx, d, m.Channel.ID, m.Timestamp, ctxN)
+						users := d.Client.Users.NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
+						for _, p := range before {
 							b.WriteString("    ↳ ")
+							b.WriteString(format.MessageLine(p, users[p.User]))
+							b.WriteByte('\n')
+						}
+						for _, p := range after {
+							b.WriteString("    ↪ ")
 							b.WriteString(format.MessageLine(p, users[p.User]))
 							b.WriteByte('\n')
 						}
@@ -211,11 +216,10 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 	}
 }
 
-// fetchMentionContext returns up to n messages immediately preceding
-// `latestTS` in `channelID`, ordered oldest → newest so the calling
-// renderer can show them as ascending context above the mention.
-// Returns nil on any error (context is best-effort).
-func fetchMentionContext(ctx context.Context, d Deps, channelID, latestTS string, n int) []goslack.Message {
+// fetchMentionContext returns up to n messages on each side of
+// `pivotTS` in `channelID`, ordered oldest → newest. Both lists are
+// best-effort and may be empty on error.
+func fetchMentionContext(ctx context.Context, d Deps, channelID, pivotTS string, n int) (before, after []goslack.Message) {
 	if n <= 0 {
 		n = 3
 	}
@@ -224,23 +228,48 @@ func fetchMentionContext(ctx context.Context, d Deps, channelID, latestTS string
 		Limit:     n + 1,
 	})
 	if err != nil {
-		d.Log.Debug("fetch mention context failed", "channel", channelID, "err", err)
-		return nil
-	}
-	out := make([]goslack.Message, 0, n)
-	for _, m := range hist {
-		if m.Timestamp >= latestTS {
-			continue
+		d.Log.Debug("fetch mention context (before) failed", "channel", channelID, "err", err)
+	} else {
+		for _, m := range hist {
+			if m.Timestamp >= pivotTS {
+				continue
+			}
+			before = append(before, m)
+			if len(before) >= n {
+				break
+			}
 		}
-		out = append(out, m)
-		if len(out) >= n {
-			break
+	}
+
+	pivot, _ := strconv.ParseFloat(pivotTS, 64)
+	if pivot > 0 {
+		hist, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+			ChannelID: channelID,
+			OldestTS:  pivot,
+			Limit:     n + 1,
+		})
+		if err != nil {
+			d.Log.Debug("fetch mention context (after) failed", "channel", channelID, "err", err)
+		} else {
+			for _, m := range hist {
+				if m.Timestamp <= pivotTS {
+					continue
+				}
+				after = append(after, m)
+				if len(after) >= n {
+					break
+				}
+			}
 		}
 	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+
+	for i, j := 0, len(before)-1; i < j; i, j = i+1, j-1 {
+		before[i], before[j] = before[j], before[i]
 	}
-	return out
+	for i, j := 0, len(after)-1; i < j; i, j = i+1, j-1 {
+		after[i], after[j] = after[j], after[i]
+	}
+	return before, after
 }
 
 // channelDisplayLabel returns the human-friendly heading used in
