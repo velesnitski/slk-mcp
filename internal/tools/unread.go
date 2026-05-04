@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -152,6 +153,8 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				mcp.WithBoolean("with_context", mcp.Description("For each hit, fetch a few preceding messages from the same channel/DM (default: false)")),
 				mcp.WithNumber("context_messages", mcp.Description("How many preceding messages to inline when with_context=true (default: 3)")),
 				mcp.WithBoolean("pending_only", mcp.Description("Only keep mentions where you haven't posted a text reply afterwards (emoji reactions and file uploads don't count). Costs one conversations.history call per hit.")),
+				mcp.WithBoolean("strict_mention", mcp.Description("Only keep matches where the operator's user id literally appears as <@SELFID> in the message body. Filters Slack-search false positives in shared channels (default: false)")),
+				mcp.WithBoolean("drop_closing_acks", mcp.Description("Drop mentions whose body is a short closing acknowledgement (thanks/спасибо/ok/+1). Useful with pending_only (default: false)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				hours := int(req.GetFloat("hours", 72))
@@ -159,6 +162,8 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				withContext := req.GetBool("with_context", false)
 				ctxN := int(req.GetFloat("context_messages", 3))
 				pendingOnly := req.GetBool("pending_only", false)
+				strictMention := req.GetBool("strict_mention", false)
+				dropAcks := req.GetBool("drop_closing_acks", false)
 
 				after := time.Now().Add(-time.Duration(hours) * time.Hour).Format("2006-01-02")
 				q := fmt.Sprintf("to:me after:%s", after)
@@ -174,7 +179,17 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					if selfID == "" {
 						return mcp.NewToolResultError("pending_only requires auth.test to succeed; got an empty self id"), nil
 					}
+					matches = filterEmptyMentions(matches)
+					if dropAcks {
+						matches = filterClosingAcks(matches)
+					}
 					matches = filterPendingMentions(ctx, d, matches, selfID)
+				}
+				if strictMention {
+					if selfID == "" {
+						return mcp.NewToolResultError("strict_mention requires auth.test to succeed; got an empty self id"), nil
+					}
+					matches = filterStrictMentions(matches, selfID)
 				}
 
 				if len(matches) == 0 {
@@ -234,6 +249,49 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 			},
 		)
 	}
+}
+
+// filterEmptyMentions drops matches whose body has no real text. An
+// empty mention can't be "pending" — there was nothing to reply to.
+func filterEmptyMentions(matches []goslack.SearchMessage) []goslack.SearchMessage {
+	out := matches[:0]
+	for _, m := range matches {
+		if strings.TrimSpace(m.Text) != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// closingAckRe matches short conversation-closing acknowledgements
+// in en + ru. Anchored to whole-trimmed-body so partial matches in
+// longer messages are not affected.
+var closingAckRe = regexp.MustCompile(`(?i)^(?:thanks|thank you|thx|ok|okay|got it|spasibo|spasiba|спасибо|спасиб|пасиб|ок|окей|\+1|👍|:thumbsup:|:\+1:|np|nice|great|ack|done)[!.)\s]*$`)
+
+func filterClosingAcks(matches []goslack.SearchMessage) []goslack.SearchMessage {
+	out := matches[:0]
+	for _, m := range matches {
+		if !closingAckRe.MatchString(strings.TrimSpace(m.Text)) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// filterStrictMentions removes matches that don't literally tag the
+// operator via <@SELFID> in the body. Slack's `to:me` search
+// occasionally surfaces channel-wide messages where you're a member
+// but were never directly mentioned; this filter rejects those.
+func filterStrictMentions(matches []goslack.SearchMessage, selfID string) []goslack.SearchMessage {
+	needle := "<@" + selfID + ">"
+	prefixed := "<@" + selfID + "|"
+	out := matches[:0]
+	for _, m := range matches {
+		if strings.Contains(m.Text, needle) || strings.Contains(m.Text, prefixed) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // writeContextLines renders prior/subsequent context messages with

@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.19] - 2026-05-04
+## [0.3.20] - 2026-05-04
+
+### Fixed
+- `pending_only=true` now skips mentions whose body is empty. An empty message can't be "waiting for a reply" — there was nothing to reply to. Empty-body matches were a false-positive source.
+
+### Added
+- `strict_mention` (bool, default false) — when true, drops matches that don't literally contain `<@SELFID>` (or `<@SELFID|name>`) in the message body. Filters Slack-search false positives in shared channels where you're a member but were never directly tagged.
+- `drop_closing_acks` (bool, default false) — when true, drops mentions whose body is a short closing acknowledgement (`thanks`, `спасибо`, `ok`, `+1`, `got it` and similar in en/ru). Useful with `pending_only=true` to avoid surfacing already-closed conversations.
+
+
 
 ### Added
 - Message rendering now surfaces file attachments. Images get `[🖼 name (WxH)]`, other files get `[📎 name]`. Previously these were silently dropped, hiding screenshots and other attachment-only context from the digest.
