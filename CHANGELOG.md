@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.23] - 2026-05-05
+
+### Fixed
+- `search_messages` body was hard-truncated at 200 chars with no opt-out, swallowing issue IDs and URLs that landed at the end. Now there's a `full_text` flag (default false to preserve token-thrift) that disables truncation when callers know they need the tail.
+
+### Added
+- `search_messages` hits now carry a `thread_ts=… <permalink>` continuation line. For top-level messages thread_ts equals the message ts; for threaded replies it's parsed out of the Slack permalink. This lets the LLM chain straight into `get_thread` without re-searching.
+- `get_channel_digest` accepts `after` / `before` (YYYY-MM-DD, UTC). When set, they override the relative `hours` window — useful for post-mortem reconstructions ("dump #team-alpha between 2026-04-30 and 2026-05-01") that fuzzy search semantics don't reliably cover.
+
 ## [0.3.22] - 2026-05-05
 
 ### Added

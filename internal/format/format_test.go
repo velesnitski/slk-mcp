@@ -346,3 +346,46 @@ func TestHasContent_FilesAlone(t *testing.T) {
 		t.Fatal("message with file attachment but empty body must still be content-ful")
 	}
 }
+
+func TestExtractThreadTS(t *testing.T) {
+	cases := []struct {
+		name      string
+		ts        string
+		permalink string
+		want      string
+	}{
+		{"top-level message: thread_ts == ts", "1714492800.123456", "https://x.slack.com/archives/C01/p1714492800123456", "1714492800.123456"},
+		{"threaded reply: parsed from permalink", "1714492900.000000", "https://x.slack.com/archives/C01/p1714492900000000?thread_ts=1714492800.123456&cid=C01", "1714492800.123456"},
+		{"empty permalink: fall back to ts", "1714492800.123456", "", "1714492800.123456"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := goslack.SearchMessage{Permalink: c.permalink}
+			m.Timestamp = c.ts
+			if got := extractThreadTS(m); got != c.want {
+				t.Fatalf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestSearchResultExt_truncation(t *testing.T) {
+	long := strings.Repeat("a", 300)
+	m := goslack.SearchMessage{Permalink: "https://x.slack.com/archives/C01/p1714492800000000"}
+	m.Timestamp = "1714492800.000000"
+	m.Channel.Name = "general"
+	m.Username = "alice"
+	m.Text = long
+
+	short := SearchResultExt(m, false)
+	if !strings.Contains(short, "...") {
+		t.Fatalf("expected truncation marker in: %q", short)
+	}
+	full := SearchResultExt(m, true)
+	if strings.Contains(full, "...") {
+		t.Fatalf("expected no truncation in: %q", full)
+	}
+	if !strings.Contains(short, "thread_ts=1714492800.000000") {
+		t.Fatalf("expected thread_ts continuation line: %q", short)
+	}
+}

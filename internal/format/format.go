@@ -441,10 +441,28 @@ func DecisionLine(msg goslack.Message, channel, user, reason string) string {
 	return fmt.Sprintf("- #%s %s (%s) [%s] %s", channel, when, user, reason, body)
 }
 
-// SearchResult renders a single search hit as a compact line.
+// SearchResult renders a single search hit as a compact line. Body
+// is collapsed to single-space and truncated to 200 chars.
 func SearchResult(m goslack.SearchMessage) string {
+	return searchResultLine(m, false)
+}
+
+// SearchResultExt renders a search hit with a permalink + thread_ts
+// appended on a tab-indented continuation line. When fullText is true
+// the body is not truncated. The continuation line lets the LLM chain
+// to get_thread without re-searching.
+func SearchResultExt(m goslack.SearchMessage, fullText bool) string {
+	line := searchResultLine(m, fullText)
+	threadTS := extractThreadTS(m)
+	if threadTS == "" || m.Permalink == "" {
+		return line
+	}
+	return line + "\n\tthread_ts=" + threadTS + " " + m.Permalink
+}
+
+func searchResultLine(m goslack.SearchMessage, fullText bool) string {
 	body := collapseWhitespace(m.Text)
-	if len(body) > 200 {
+	if !fullText && len(body) > 200 {
 		body = body[:200] + "..."
 	}
 	t := ParseTS(m.Timestamp)
@@ -453,6 +471,20 @@ func SearchResult(m goslack.SearchMessage) string {
 		when = t.Format("2006-01-02 15:04")
 	}
 	return fmt.Sprintf("- #%s %s (%s) %s", m.Channel.Name, when, m.Username, body)
+}
+
+// extractThreadTS pulls thread_ts from a Slack permalink, falling
+// back to the message's own timestamp (which is correct for
+// top-level messages: thread_ts == ts when the message is the parent).
+func extractThreadTS(m goslack.SearchMessage) string {
+	if i := strings.Index(m.Permalink, "thread_ts="); i >= 0 {
+		rest := m.Permalink[i+len("thread_ts="):]
+		if amp := strings.IndexByte(rest, '&'); amp >= 0 {
+			return rest[:amp]
+		}
+		return rest
+	}
+	return m.Timestamp
 }
 
 func displayName(name, fallback string) string {

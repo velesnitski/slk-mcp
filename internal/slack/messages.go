@@ -26,10 +26,12 @@ func newMessageService(api *goslack.Client, channels *ChannelService, users *Use
 type HistoryParams struct {
 	ChannelID string
 	OldestTS  float64 // unix seconds; 0 means no lower bound
+	LatestTS  float64 // unix seconds; 0 means no upper bound
 	Limit     int
 }
 
-// History returns messages newer than OldestTS, up to Limit, newest first.
+// History returns messages between OldestTS and LatestTS, up to Limit,
+// newest first.
 func (s *MessageService) History(ctx context.Context, p HistoryParams) ([]goslack.Message, error) {
 	if p.Limit <= 0 {
 		p.Limit = 200
@@ -40,6 +42,10 @@ func (s *MessageService) History(ctx context.Context, p HistoryParams) ([]goslac
 	}
 	if p.OldestTS > 0 {
 		params.Oldest = strconv.FormatFloat(p.OldestTS, 'f', 6, 64)
+	}
+	if p.LatestTS > 0 {
+		params.Latest = strconv.FormatFloat(p.LatestTS, 'f', 6, 64)
+		params.Inclusive = true
 	}
 
 	var resp *goslack.GetConversationHistoryResponse

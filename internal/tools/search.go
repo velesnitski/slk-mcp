@@ -16,9 +16,10 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 	if !d.Cfg.IsDisabled("search_messages") {
 		s.AddTool(
 			mcp.NewTool("search_messages",
-				mcp.WithDescription("Workspace search (Slack syntax: from:@user, in:#channel, has:link, before:/after:DATE)."),
+				mcp.WithDescription("Workspace search (Slack syntax: from:@user, in:#channel, has:link, before:/after:DATE). Each hit includes thread_ts + permalink so callers can chain into get_thread."),
 				mcp.WithString("query", mcp.Required(), mcp.Description("Slack search query")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 20)")),
+				mcp.WithBoolean("full_text", mcp.Description("Disable the 200-char body truncation (default: false). Use when issue IDs or URLs sit at the end of the body.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				q, err := req.RequireString("query")
@@ -26,6 +27,7 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 					return mcp.NewToolResultError("query is required"), nil
 				}
 				limit := int(req.GetFloat("limit", 20))
+				fullText := req.GetBool("full_text", false)
 
 				matches, err := d.Client.Search.Messages(ctx, q, limit)
 				if err != nil {
@@ -38,7 +40,7 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 				var b strings.Builder
 				fmt.Fprintf(&b, "%d hits for: %s\n", len(matches), q)
 				for _, m := range matches {
-					b.WriteString(format.SearchResult(m))
+					b.WriteString(format.SearchResultExt(m, fullText))
 					b.WriteByte('\n')
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
