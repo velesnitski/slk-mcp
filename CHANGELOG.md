@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.22] - 2026-05-05
+
+### Added
+- `list_users` accepts `filter` (case-insensitive substring) — matches against handle, real name, display name, and job title. Lets the LLM narrow to "marketing" / "qa" / "devops" without rendering the full 80+ user dump.
+- `list_users` now renders `profile.title` (job title) as a column. Slack stored it all along; we just weren't surfacing it. Critical for "who's on team X" queries when channel membership is fuzzy.
+
 ## [0.3.21] - 2026-05-05
 
 ### Fixed

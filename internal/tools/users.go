@@ -19,13 +19,15 @@ func registerUserTools(s *server.MCPServer, d Deps) {
 	}
 	s.AddTool(
 		mcp.NewTool("list_users",
-			mcp.WithDescription("List active workspace users with handle, real name, role flags, and profile-update date. Optionally include last-message date."),
+			mcp.WithDescription("List active workspace users with handle, real name, job title, role flags, and profile-update date. Optionally include last-message date."),
 			mcp.WithBoolean("include_bots", mcp.Description("Include bot/integration accounts (default: false)")),
 			mcp.WithBoolean("with_activity", mcp.Description("Fetch each user's last-message date via search (slower; one search.messages call per user, run in parallel) (default: false)")),
+			mcp.WithString("filter", mcp.Description("Case-insensitive substring filter — matches against handle, real name, and job title. Useful for 'marketing', 'qa', 'devops' etc.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			includeBots := req.GetBool("include_bots", false)
 			withActivity := req.GetBool("with_activity", false)
+			filter := strings.ToLower(strings.TrimSpace(req.GetString("filter", "")))
 
 			users, err := d.Client.Users.List(ctx)
 			if err != nil {
@@ -37,6 +39,9 @@ func registerUserTools(s *server.MCPServer, d Deps) {
 			filtered := make([]goslack.User, 0, len(users))
 			for _, u := range users {
 				if (u.IsBot || u.Name == "slackbot") && !includeBots {
+					continue
+				}
+				if filter != "" && !userMatchesFilter(u, filter) {
 					continue
 				}
 				filtered = append(filtered, u)
@@ -72,22 +77,30 @@ func registerUserTools(s *server.MCPServer, d Deps) {
 					real = "(no name)"
 				}
 				updated := u.Updated.Time().UTC().Format("2006-01-02")
+				title := strings.TrimSpace(u.Profile.Title)
 				if withActivity {
 					last := lastPost[u.ID]
 					if last == "" {
 						last = "(none found)"
 					}
-					fmt.Fprintf(&b, "%s | %s |%s | profile_updated=%s | last_post=%s\n",
-						u.Name, real, flags, updated, last)
+					fmt.Fprintf(&b, "%s | %s | %s |%s | profile_updated=%s | last_post=%s\n",
+						u.Name, real, title, flags, updated, last)
 				} else {
-					fmt.Fprintf(&b, "%s | %s |%s | profile_updated=%s\n",
-						u.Name, real, flags, updated)
+					fmt.Fprintf(&b, "%s | %s | %s |%s | profile_updated=%s\n",
+						u.Name, real, title, flags, updated)
 				}
 			}
 			header := fmt.Sprintf("%d users\n", len(filtered))
 			return mcp.NewToolResultText(header + strings.TrimRight(b.String(), "\n")), nil
 		},
 	)
+}
+
+// userMatchesFilter returns true if needle (already lowercased) is a
+// substring of the user's handle, real name, display name, or job title.
+func userMatchesFilter(u goslack.User, needle string) bool {
+	hay := strings.ToLower(u.Name + " " + u.RealName + " " + u.Profile.RealName + " " + u.Profile.DisplayName + " " + u.Profile.Title)
+	return strings.Contains(hay, needle)
 }
 
 // fetchLastPostDates queries search.messages with from:@handle for
