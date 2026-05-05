@@ -129,12 +129,15 @@ func (s *ChannelService) List(ctx context.Context, limit int) ([]goslack.Channel
 	return all, nil
 }
 
-// Info returns full channel metadata for a given channel ID.
+// Info returns full channel metadata for a given channel ID. We always
+// request num_members because Slack's conversations.info omits it by
+// default and callers rely on it.
 func (s *ChannelService) Info(ctx context.Context, channelID string) (*goslack.Channel, error) {
 	var ch *goslack.Channel
 	err := ratelimit.Do(ctx, s.log, 0, func() error {
 		result, err := s.api.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
-			ChannelID: channelID,
+			ChannelID:         channelID,
+			IncludeNumMembers: true,
 		})
 		if err != nil {
 			return err
@@ -143,4 +146,43 @@ func (s *ChannelService) Info(ctx context.Context, channelID string) (*goslack.C
 		return nil
 	})
 	return ch, err
+}
+
+// Members returns up to limit user IDs in a channel. limit<=0 means all.
+func (s *ChannelService) Members(ctx context.Context, channelID string, limit int) ([]string, error) {
+	var all []string
+	cursor := ""
+	page := 200
+	for {
+		var ids []string
+		var next string
+		err := ratelimit.Do(ctx, s.log, 0, func() error {
+			users, cur, err := s.api.GetUsersInConversationContext(ctx, &goslack.GetUsersInConversationParameters{
+				ChannelID: channelID,
+				Cursor:    cursor,
+				Limit:     page,
+			})
+			if err != nil {
+				return err
+			}
+			ids = users
+			next = cur
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list members: %w", err)
+		}
+		all = append(all, ids...)
+		if next == "" {
+			break
+		}
+		if limit > 0 && len(all) >= limit {
+			break
+		}
+		cursor = next
+	}
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
 }

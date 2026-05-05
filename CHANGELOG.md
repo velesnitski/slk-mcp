@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.21] - 2026-05-05
+
+### Fixed
+- `get_channel_info` returned `members: 0` for every channel because Slack's `conversations.info` omits `num_members` unless you pass `include_num_members=true`. The wrapper now always sets it, matching what `list_channels` reports.
+
+### Added
+- `get_channel_info` accepts `include_members` (bool) and `members_limit` (int, default 50). When enabled, fetches the channel roster via `conversations.members` and renders display names — useful for "how many people on the X team" lookups without needing to read the channel.
+
 ## [0.3.20] - 2026-05-04
 
 ### Fixed

@@ -49,14 +49,19 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 	if !d.Cfg.IsDisabled("get_channel_info") {
 		s.AddTool(
 			mcp.NewTool("get_channel_info",
-				mcp.WithDescription("Get a channel's topic, purpose, member count and created date."),
+				mcp.WithDescription("Get a channel's topic, purpose, member count and created date. Optionally lists member display names."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops or devops)")),
+				mcp.WithBoolean("include_members", mcp.Description("Resolve and list channel members (default: false)")),
+				mcp.WithNumber("members_limit", mcp.Description("Cap on members listed (default: 50, 0 = all)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				name, err := req.RequireString("channel")
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
+				includeMembers := req.GetBool("include_members", false)
+				membersLimit := int(req.GetFloat("members_limit", 50))
+
 				channelID, err := d.Client.Channels.ResolveID(ctx, name)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
@@ -67,12 +72,29 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 				}
 
 				created := time.Unix(int64(ch.Created), 0).Format("2006-01-02")
-				out := fmt.Sprintf(
+				var b strings.Builder
+				fmt.Fprintf(&b,
 					"#%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
 					ch.Name, ch.NumMembers, created,
 					firstLine(ch.Topic.Value), firstLine(ch.Purpose.Value), ch.IsArchived,
 				)
-				return mcp.NewToolResultText(out), nil
+
+				if includeMembers {
+					ids, err := d.Client.Channels.Members(ctx, channelID, membersLimit)
+					if err != nil {
+						fmt.Fprintf(&b, "\nmembers_error: %s", err.Error())
+					} else {
+						names := d.Client.Users.NamesFor(ctx, ids)
+						b.WriteString("\nroster:")
+						for _, id := range ids {
+							fmt.Fprintf(&b, "\n- %s", names[id])
+						}
+						if membersLimit > 0 && ch.NumMembers > len(ids) {
+							fmt.Fprintf(&b, "\n(+%d more, raise members_limit to see all)", ch.NumMembers-len(ids))
+						}
+					}
+				}
+				return mcp.NewToolResultText(b.String()), nil
 			},
 		)
 	}
