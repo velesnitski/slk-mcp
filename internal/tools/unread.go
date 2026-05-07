@@ -225,19 +225,42 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 	if !d.Cfg.ReadOnly && !d.Cfg.IsDisabled("mark_read") {
 		s.AddTool(
 			mcp.NewTool("mark_read",
-				mcp.WithDescription("Mark a channel as read up to a given message timestamp."),
-				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
-				mcp.WithString("timestamp", mcp.Required(), mcp.Description("Message ts to mark read through")),
+				mcp.WithDescription("Mark a channel as read up to a given message timestamp. Pass either (channel + timestamp) or a Slack permalink."),
+				mcp.WithString("channel", mcp.Description("Channel name (optional if permalink is provided)")),
+				mcp.WithString("timestamp", mcp.Description("Message ts to mark read through (optional if permalink is provided)")),
+				mcp.WithString("permalink", mcp.Description("Slack permalink to the message to mark read through — fills channel and timestamp in one go")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				channel, err := req.RequireString("channel")
-				if err != nil {
-					return mcp.NewToolResultError("channel is required"), nil
+				channel := req.GetString("channel", "")
+				ts := req.GetString("timestamp", "")
+				permalink := req.GetString("permalink", "")
+
+				if permalink != "" {
+					p, err := parseSlackPermalink(permalink)
+					if err != nil {
+						return mcp.NewToolResultError("permalink could not be parsed: " + err.Error()), nil
+					}
+					if p != nil {
+						// mark_read advances the read cursor up to a specific
+						// message — we want the message's own ts, not its thread
+						// root, so use TS even when the permalink points to a
+						// reply.
+						if channel == "" {
+							channel = p.ChannelID
+						}
+						if ts == "" {
+							ts = p.TS
+						}
+					}
 				}
-				ts, err := req.RequireString("timestamp")
-				if err != nil {
-					return mcp.NewToolResultError("timestamp is required"), nil
+
+				if channel == "" {
+					return mcp.NewToolResultError("channel is required (or pass a permalink)"), nil
 				}
+				if ts == "" {
+					return mcp.NewToolResultError("timestamp is required (or pass a permalink)"), nil
+				}
+
 				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil

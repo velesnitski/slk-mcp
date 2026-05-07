@@ -14,18 +14,38 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 	if !d.Cfg.IsDisabled("get_thread") {
 		s.AddTool(
 			mcp.NewTool("get_thread",
-				mcp.WithDescription("Fetch all replies in a thread."),
-				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
-				mcp.WithString("thread_ts", mcp.Required(), mcp.Description("Thread timestamp (ts of the root message)")),
+				mcp.WithDescription("Fetch all replies in a thread. Pass either (channel + thread_ts) or a Slack permalink."),
+				mcp.WithString("channel", mcp.Description("Channel name (optional if permalink is provided)")),
+				mcp.WithString("thread_ts", mcp.Description("Thread root timestamp (optional if permalink is provided)")),
+				mcp.WithString("permalink", mcp.Description("Slack permalink to any message in the thread — fills channel and thread_ts in one go")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				channel, err := req.RequireString("channel")
-				if err != nil {
-					return mcp.NewToolResultError("channel is required"), nil
+				channel := req.GetString("channel", "")
+				threadTS := req.GetString("thread_ts", "")
+				permalink := req.GetString("permalink", "")
+
+				if permalink != "" {
+					p, err := parseSlackPermalink(permalink)
+					if err != nil {
+						return mcp.NewToolResultError("permalink could not be parsed: " + err.Error()), nil
+					}
+					if p != nil {
+						// Explicit args still win when both are passed; permalink
+						// only fills what the caller did not provide.
+						if channel == "" {
+							channel = p.ChannelID
+						}
+						if threadTS == "" {
+							threadTS = p.ThreadTS
+						}
+					}
 				}
-				threadTS, err := req.RequireString("thread_ts")
-				if err != nil {
-					return mcp.NewToolResultError("thread_ts is required"), nil
+
+				if channel == "" {
+					return mcp.NewToolResultError("channel is required (or pass a permalink)"), nil
+				}
+				if threadTS == "" {
+					return mcp.NewToolResultError("thread_ts is required (or pass a permalink)"), nil
 				}
 
 				channelID, err := d.Client.Channels.ResolveID(ctx, channel)

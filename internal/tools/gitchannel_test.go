@@ -193,6 +193,60 @@ func TestGroupGitWorkflows_DeployFlagged(t *testing.T) {
 	}
 }
 
+func TestJoinVerbs_ElidesArrowAfterArrowVerb(t *testing.T) {
+	// "deploy →" should not be followed by another " → " separator,
+	// otherwise we render "deploy → → deploy ✓" which is ugly and
+	// wastes tokens.
+	cases := []struct {
+		verbs []string
+		want  string
+	}{
+		{[]string{"deploy →", "deploy ✓"}, "deploy → deploy ✓"},
+		{[]string{"deploy →", "deploy ✗"}, "deploy → deploy ✗"},
+		{[]string{"MR open", "approved", "merged"}, "MR open → approved → merged"},
+		{[]string{"push"}, "push"},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := joinVerbs(c.verbs); got != c.want {
+			t.Errorf("joinVerbs(%v) = %q; want %q", c.verbs, got, c.want)
+		}
+	}
+}
+
+func TestRenderGitChannel_DropsTrailingDashWhenNoActors(t *testing.T) {
+	// Deploy events frequently have no parseable (handle) — we should
+	// not render "— —" at the end of the line.
+	msgs := []goslack.Message{
+		gitMsg("100", "Starting deploy to production"),
+		gitMsg("110", "Deploy to production succeeded"),
+	}
+	workflows, _ := groupGitWorkflows(msgs)
+	out := renderGitChannel("#git-deploy", len(msgs), workflows, nil)
+
+	if strings.Contains(out, "— —") {
+		t.Errorf("rendered output contains stray '— —' suffix:\n%s", out)
+	}
+	if !strings.Contains(out, "deploy:production") {
+		t.Errorf("expected deploy:production workflow line in:\n%s", out)
+	}
+}
+
+func TestRenderGitChannel_KeepsActorsWhenPresent(t *testing.T) {
+	// When actors ARE present, the trailing " — actors" segment must
+	// stay — we only drop the segment in the "no actors" case.
+	msgs := []goslack.Message{
+		gitMsg("100", "Alice (alice) opened merge request !99"),
+		gitMsg("110", "Alice (alice) merged merge request !99"),
+	}
+	workflows, _ := groupGitWorkflows(msgs)
+	out := renderGitChannel("#git-test", len(msgs), workflows, nil)
+
+	if !strings.Contains(out, "— alice") {
+		t.Errorf("expected '— alice' (with role tag) in:\n%s", out)
+	}
+}
+
 func TestRenderActors_NoRolesStaysBare(t *testing.T) {
 	// Plain-actor verbs (push, branch new/rm, deploy, pipeline) must
 	// not get spurious role tags like "alice(author)".

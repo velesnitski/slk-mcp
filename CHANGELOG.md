@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.25] - 2026-05-07
+
+### Added
+- `get_thread` and `mark_read` accept a Slack `permalink` argument as an alternative to (channel + thread_ts / timestamp). Permalink-only callers no longer have to parse the URL themselves; explicit args still win when both are provided. Thread-reply permalinks correctly extract the thread root via the `thread_ts` query parameter for `get_thread`, and the message's own ts for `mark_read` — they are different intents.
+- `internal/tools/permalink.go`: shared `parseSlackPermalink` helper. Returns `(channel_id, ts, thread_ts)` or `errNotASlackPermalink` for inputs that look like URLs but lack the channel / "p<ts>" segments. Empty input is a no-op so callers can treat "no permalink" as "no override".
+
+### Fixed
+- GIT MODE: `→ →` between deploy verbs ("deploy → → deploy ✓") collapsed to a single arrow. `joinVerbs` now elides the separator when the previous verb already ends with `→`.
+- GIT MODE: trailing `— —` segment dropped when a workflow has no parseable actors (typical for deploy / pipeline events). Saves a few tokens and reads cleanly.
+
 ## [0.3.24] - 2026-05-07
 
 ### Fixed

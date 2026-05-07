@@ -371,8 +371,16 @@ func renderGitChannel(channelLabel string, total int, workflows []gitWorkflow, o
 		verbs := dedupeKeepingOrder(w.Actions)
 		first, last := timeRange(w.Actions)
 		when := formatTimeRange(first, last)
-		fmt.Fprintf(&b, "- %s [%s]: %s — %s\n",
-			w.Key, when, strings.Join(verbs, " → "), renderActors(w))
+		actors := renderActors(w)
+		joined := joinVerbs(verbs)
+		if actors == "—" {
+			// Drop the trailing " — —" segment when there are no actors
+			// to show — saves a few tokens and avoids reading like a typo.
+			fmt.Fprintf(&b, "- %s [%s]: %s\n", w.Key, when, joined)
+		} else {
+			fmt.Fprintf(&b, "- %s [%s]: %s — %s\n",
+				w.Key, when, joined, actors)
+		}
 		for i, c := range w.Commits {
 			if i >= 3 {
 				fmt.Fprintf(&b, "    · +%d more commits\n", len(w.Commits)-3)
@@ -386,6 +394,30 @@ func renderGitChannel(channelLabel string, total int, workflows []gitWorkflow, o
 		fmt.Fprintf(&b, "+ %d uncategorized event(s)\n", len(orphans))
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// joinVerbs renders the verb chain with " → " between entries, but
+// elides the separator when the previous verb already ends in an
+// arrow (e.g. "deploy →"). Without this we'd get "deploy → → deploy ✓"
+// — readable but ugly and wasteful of tokens.
+func joinVerbs(verbs []string) string {
+	if len(verbs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, v := range verbs {
+		if i == 0 {
+			b.WriteString(v)
+			continue
+		}
+		if strings.HasSuffix(verbs[i-1], "→") {
+			b.WriteByte(' ')
+		} else {
+			b.WriteString(" → ")
+		}
+		b.WriteString(v)
+	}
+	return b.String()
 }
 
 func dedupeKeepingOrder(actions []gitAction) []string {
