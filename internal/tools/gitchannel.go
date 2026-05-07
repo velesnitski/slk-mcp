@@ -19,7 +19,7 @@ var (
 	deployOkRe  = regexp.MustCompile(`(?i)deploy.* (succeeded|completed)`)
 	deployErrRe = regexp.MustCompile(`(?i)deploy.* (failed|aborted)`)
 	personRe    = regexp.MustCompile(`\(([a-z][\w.-]+)\)`)
-	pipelineOkRe = regexp.MustCompile(`(?i)Pipeline #?\d+ has passed`)
+	pipelineOkRe  = regexp.MustCompile(`(?i)Pipeline #?\d+ has passed`)
 	pipelineErrRe = regexp.MustCompile(`(?i)Pipeline #?\d+ has failed`)
 	// "of REPO / SUB / NAME" — last segment is the repo identity.
 	// Slack renders <url|label> as just the label after stripping markup.
@@ -31,17 +31,41 @@ var (
 	bareLinkRe  = regexp.MustCompile(`<https?://[^>]+>`)
 )
 
+// Actor roles inferred from the verb. Empty role means "plain actor"
+// (push, branch new/rm, comment, pipeline, deploy) — those don't get
+// labelled in the rendered output.
+const (
+	roleAuthor   = "author"
+	roleReviewer = "reviewer"
+	roleMerger   = "merger"
+)
+
 type gitAction struct {
 	verb string
+	role string
 	ts   string
 	by   string
 }
 
 type gitWorkflow struct {
-	Key      string
-	Actions  []gitAction
-	Actors   map[string]struct{}
-	Commits  []string
+	Key     string
+	Actions []gitAction
+	Actors  map[string]struct{}
+	Commits []string
+	// Roles maps actor handle -> set of roles observed (author, reviewer,
+	// merger). Plain-actor verbs leave the entry empty so renderers can
+	// keep those names un-tagged.
+	Roles map[string]map[string]struct{}
+}
+
+// gitFacts is the set of references parsed out of one bot message.
+// Builds the alias map (branch -> MR-iid) and the workflow key.
+type gitFacts struct {
+	issues []string
+	mr     string // "!iid" or ""
+	branch string
+	deploy string
+	repo   string
 }
 
 // detectGitChannel reports whether a channel is a CI / git-bot feed
@@ -63,29 +87,83 @@ func stripSlackLinks(text string) string {
 	return text
 }
 
-func extractWorkflowKey(text string) string {
+// extractGitFacts parses everything we want to know about one bot
+// message in a single sweep. Cheap and idempotent.
+func extractGitFacts(text string) gitFacts {
 	clean := stripSlackLinks(text)
-	repo := extractRepo(clean)
-	prefix := ""
-	if repo != "" {
-		prefix = repo + " · "
+	f := gitFacts{repo: extractRepo(clean)}
+
+	// All issue IDs (deduped, original order).
+	if hits := issueIDRe.FindAllString(clean, -1); len(hits) > 0 {
+		seen := map[string]struct{}{}
+		for _, h := range hits {
+			if _, ok := seen[h]; ok {
+				continue
+			}
+			seen[h] = struct{}{}
+			f.issues = append(f.issues, h)
+		}
 	}
-	if m := issueIDRe.FindString(clean); m != "" {
-		return prefix + m
+
+	if m := mrIDRe.FindStringSubmatch(clean); len(m) > 1 {
+		f.mr = "!" + m[1]
 	}
-	if m := mrIDRe.FindString(clean); m != "" {
-		return prefix + m
-	}
-	if m := branchRe.FindStringSubmatch(clean); len(m) > 1 && m[1] != "" {
-		return prefix + "branch " + m[1]
+	if m := branchRe.FindStringSubmatch(clean); len(m) > 1 {
+		f.branch = m[1]
 	}
 	if m := deployRe.FindStringSubmatch(clean); len(m) > 1 {
-		return "deploy:" + m[1]
+		f.deploy = m[1]
 	}
-	if repo != "" {
-		return repo
+	return f
+}
+
+// chooseWorkflowKey picks the most informative grouping key for a
+// message, in priority order:
+//
+//  1. MR-iid in the message text.
+//  2. Branch name that an earlier message has already linked to an
+//     MR-iid (consulting branchAliases).
+//  3. Issue ID.
+//  4. Raw branch name.
+//  5. Deploy target.
+//  6. Repo only.
+//
+// branchAliases may be nil (e.g. when called from extractWorkflowKey
+// in a context-free unit test).
+func chooseWorkflowKey(f gitFacts, branchAliases map[string]string) string {
+	prefix := ""
+	if f.repo != "" {
+		prefix = f.repo + " · "
+	}
+
+	if f.mr != "" {
+		return prefix + f.mr
+	}
+	if f.branch != "" {
+		if mr, ok := branchAliases[f.branch]; ok {
+			return prefix + mr
+		}
+	}
+	if len(f.issues) > 0 {
+		return prefix + f.issues[0]
+	}
+	if f.branch != "" {
+		return prefix + "branch " + f.branch
+	}
+	if f.deploy != "" {
+		return "deploy:" + f.deploy
+	}
+	if f.repo != "" {
+		return f.repo
 	}
 	return ""
+}
+
+// extractWorkflowKey is kept for callers (and tests) that classify a
+// single message in isolation. Production grouping uses
+// groupGitWorkflows which builds an alias map across the whole batch.
+func extractWorkflowKey(text string) string {
+	return chooseWorkflowKey(extractGitFacts(text), nil)
 }
 
 func extractRepo(text string) string {
@@ -153,34 +231,89 @@ func extractVerb(text string) string {
 	return ""
 }
 
-// groupGitWorkflows collates git/CI channel messages by issue ID,
-// MR ID, branch name, or deploy target. Messages that yield no key
-// are dropped from the workflow view (caller can still surface them
-// via a fallback).
+// roleForVerb returns the actor role implied by a verb, or "" when
+// the verb does not imply a structured role (e.g. push, comment,
+// pipeline, deploy).
+func roleForVerb(verb string) string {
+	switch verb {
+	case "MR open":
+		return roleAuthor
+	case "approved":
+		return roleReviewer
+	case "merged":
+		return roleMerger
+	}
+	return ""
+}
+
+// buildBranchAliases walks all messages once to discover branch ↔ MR-iid
+// pairs that co-occur in any single bot message. The result lets the
+// second pass canonicalise events about the same branch under the MR
+// they belong to (so "branch new" and "branch rm" no longer appear as
+// separate workflows from the MR they belong to).
+func buildBranchAliases(messages []goslack.Message) map[string]string {
+	aliases := map[string]string{}
+	for _, m := range messages {
+		f := extractGitFacts(m.Text)
+		if f.mr != "" && f.branch != "" {
+			aliases[f.branch] = f.mr
+		}
+	}
+	return aliases
+}
+
+// groupGitWorkflows collates git/CI channel messages into per-MR /
+// per-branch / per-deploy stories. Two passes:
+//
+//  1. Build a branch ↔ MR-iid alias map by scanning all messages.
+//  2. Choose a canonical key per message (MR-iid wins; branch falls
+//     through to its aliased MR; issue ID is a fallback) and bucket
+//     events under it. Track actor roles inferred from the verb so
+//     authors, reviewers, and mergers stay distinguishable.
+//
+// Messages that yield no key become orphans (caller can render them
+// inline or as a count).
 func groupGitWorkflows(messages []goslack.Message) ([]gitWorkflow, []goslack.Message) {
+	aliases := buildBranchAliases(messages)
+
 	byKey := map[string]*gitWorkflow{}
 	var order []string
 	var orphans []goslack.Message
 
 	for _, m := range messages {
-		key := extractWorkflowKey(m.Text)
+		f := extractGitFacts(m.Text)
+		key := chooseWorkflowKey(f, aliases)
 		if key == "" {
 			orphans = append(orphans, m)
 			continue
 		}
 		w, ok := byKey[key]
 		if !ok {
-			w = &gitWorkflow{Key: key, Actors: map[string]struct{}{}}
+			w = &gitWorkflow{
+				Key:    key,
+				Actors: map[string]struct{}{},
+				Roles:  map[string]map[string]struct{}{},
+			}
 			byKey[key] = w
 			order = append(order, key)
 		}
 		verb := extractVerb(m.Text)
 		actor := extractActor(m.Text)
+		role := roleForVerb(verb)
+
 		if actor != "" {
 			w.Actors[actor] = struct{}{}
+			if role != "" {
+				if w.Roles[actor] == nil {
+					w.Roles[actor] = map[string]struct{}{}
+				}
+				w.Roles[actor][role] = struct{}{}
+			}
 		}
 		if verb != "" {
-			w.Actions = append(w.Actions, gitAction{verb: verb, ts: m.Timestamp, by: actor})
+			w.Actions = append(w.Actions, gitAction{
+				verb: verb, role: role, ts: m.Timestamp, by: actor,
+			})
 		}
 		if subject := extractCommitSubject(stripSlackLinks(m.Text)); subject != "" {
 			w.Commits = appendUnique(w.Commits, subject)
@@ -196,6 +329,34 @@ func groupGitWorkflows(messages []goslack.Message) ([]gitWorkflow, []goslack.Mes
 	return out, orphans
 }
 
+// renderActors formats a workflow's actor list with role tags
+// ("alice(author/merger)") for actors whose role is known, and bare
+// names for everyone else. Stable alphabetical order keeps prompt
+// caches warm.
+func renderActors(w gitWorkflow) string {
+	if len(w.Actors) == 0 {
+		return "—"
+	}
+	out := make([]string, 0, len(w.Actors))
+	for a := range w.Actors {
+		roles := w.Roles[a]
+		if len(roles) == 0 {
+			out = append(out, a)
+			continue
+		}
+		// Stable role order: author, reviewer, merger.
+		var rs []string
+		for _, r := range []string{roleAuthor, roleReviewer, roleMerger} {
+			if _, ok := roles[r]; ok {
+				rs = append(rs, r)
+			}
+		}
+		out = append(out, fmt.Sprintf("%s(%s)", a, strings.Join(rs, "/")))
+	}
+	sort.Strings(out)
+	return strings.Join(out, " ")
+}
+
 // renderGitChannel produces a compact per-workflow digest for a
 // git/CI channel.
 func renderGitChannel(channelLabel string, total int, workflows []gitWorkflow, orphans []goslack.Message) string {
@@ -207,22 +368,11 @@ func renderGitChannel(channelLabel string, total int, workflows []gitWorkflow, o
 	}
 
 	for _, w := range workflows {
-		actorList := make([]string, 0, len(w.Actors))
-		for a := range w.Actors {
-			actorList = append(actorList, a)
-		}
-		sort.Strings(actorList)
-
 		verbs := dedupeKeepingOrder(w.Actions)
 		first, last := timeRange(w.Actions)
-		actors := strings.Join(actorList, "/")
-		if actors == "" {
-			actors = "—"
-		}
-
 		when := formatTimeRange(first, last)
 		fmt.Fprintf(&b, "- %s [%s]: %s — %s\n",
-			w.Key, when, strings.Join(verbs, " → "), actors)
+			w.Key, when, strings.Join(verbs, " → "), renderActors(w))
 		for i, c := range w.Commits {
 			if i >= 3 {
 				fmt.Fprintf(&b, "    · +%d more commits\n", len(w.Commits)-3)

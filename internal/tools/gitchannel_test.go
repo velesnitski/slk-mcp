@@ -20,11 +20,15 @@ func TestExtractWorkflowKey(t *testing.T) {
 		text string
 		want string
 	}{
+		// Single signal — straightforward.
 		{"FOO-123 - add answers to search", "FOO-123"},
 		{"merged !100", "!100"},
 		{"removed branch feature/foo from Repo", "branch feature/foo"},
 		{"Starting deploy to stage", "deploy:stage"},
 		{"random text without anything", ""},
+		// Mixed signals — MR-iid wins over issue ID, branch only loses to MR.
+		{"merged !55 FOO-99 thing", "!55"},
+		{"opened merge request !66 from branch feature/BAR-12", "!66"},
 	}
 	for _, c := range cases {
 		t.Run(c.text, func(t *testing.T) {
@@ -60,48 +64,120 @@ func TestExtractVerb(t *testing.T) {
 	}
 }
 
-func TestGroupGitWorkflows_CollatesByIssueID(t *testing.T) {
+func TestRoleForVerb(t *testing.T) {
+	cases := map[string]string{
+		"MR open":  roleAuthor,
+		"approved": roleReviewer,
+		"merged":   roleMerger,
+		// Plain-actor verbs have no implied role.
+		"push":      "",
+		"branch rm": "",
+		"comment":   "",
+		"deploy ✓":  "",
+	}
+	for verb, want := range cases {
+		if got := roleForVerb(verb); got != want {
+			t.Errorf("roleForVerb(%q) = %q; want %q", verb, got, want)
+		}
+	}
+}
+
+func TestGroupGitWorkflows_PrefersMRIidOverIssue(t *testing.T) {
+	// When a message references both !55 and FOO-99, the MR-iid is the
+	// canonical identity — issue IDs are often inherited from branch
+	// names and may not match the MR title. The two events here must
+	// coalesce under !55.
 	msgs := []goslack.Message{
-		gitMsg("1714000000.000000", "Alice Smith (alice) approved merge request !100 FOO-123 - add answers to search"),
-		gitMsg("1714000010.000000", "Alice Smith (alice) merged merge request !100 FOO-123"),
-		gitMsg("1714000020.000000", "Bob Jones removed branch feature/FOO-123-bar"),
-		gitMsg("1714000030.000000", "Alice Smith (alice) pushed to branch stage FOO-123"),
-		gitMsg("1714000040.000000", "Starting deploy to stage"),
-		gitMsg("1714000050.000000", "Deploy to stage succeeded"),
+		gitMsg("100", "Alice (alice) approved merge request !55 FOO-99 thing"),
+		gitMsg("110", "Alice (alice) merged merge request !55 FOO-99 thing"),
 	}
 	workflows, orphans := groupGitWorkflows(msgs)
-
 	if len(orphans) != 0 {
 		t.Errorf("expected 0 orphans, got %d", len(orphans))
 	}
-
-	// Expect at least one workflow keyed on FOO-123 with multiple verbs
-	var wpFound bool
-	for _, w := range workflows {
-		if w.Key != "FOO-123" {
-			continue
-		}
-		wpFound = true
-		verbs := dedupeKeepingOrder(w.Actions)
-		joined := strings.Join(verbs, " → ")
-		for _, v := range []string{"approved", "merged", "push"} {
-			if !strings.Contains(joined, v) {
-				t.Errorf("FOO-123 workflow missing %q in: %s", v, joined)
-			}
-		}
-		if _, ok := w.Actors["alice"]; !ok {
-			t.Errorf("expected alice in actors, got %v", w.Actors)
-		}
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow keyed by MR-iid, got %d: %+v", len(workflows), workflows)
 	}
-	if !wpFound {
-		t.Fatalf("FOO-123 workflow not found; got %v", workflows)
+	if workflows[0].Key != "!55" {
+		t.Fatalf("key=%q; want !55", workflows[0].Key)
+	}
+}
+
+func TestGroupGitWorkflows_BranchAliasesToMR(t *testing.T) {
+	// Branch lifecycle events ("opened MR from branch X", "branch X
+	// removed") must collate with the MR they belong to once any single
+	// message has linked branch ↔ MR.
+	msgs := []goslack.Message{
+		gitMsg("100", "Alice (alice) opened merge request !66 from branch feature/BAR-12-x"),
+		gitMsg("110", "Bob (bob) removed branch feature/BAR-12-x from Repo"),
+	}
+	workflows, _ := groupGitWorkflows(msgs)
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow (branch should alias to !66), got %d: %+v", len(workflows), workflows)
+	}
+	if workflows[0].Key != "!66" {
+		t.Fatalf("key=%q; want !66", workflows[0].Key)
+	}
+	verbs := dedupeKeepingOrder(workflows[0].Actions)
+	if !strings.Contains(strings.Join(verbs, " "), "MR open") || !strings.Contains(strings.Join(verbs, " "), "branch rm") {
+		t.Errorf("expected MR open and branch rm in: %v", verbs)
+	}
+}
+
+func TestGroupGitWorkflows_TracksActorRoles(t *testing.T) {
+	// Author, reviewer, and merger must remain distinguishable even
+	// when the same person plays two roles (author + merger here).
+	msgs := []goslack.Message{
+		gitMsg("100", "Alice (alice) opened merge request !77"),
+		gitMsg("110", "Bob (bob) approved merge request !77"),
+		gitMsg("120", "Alice (alice) merged merge request !77"),
+	}
+	workflows, _ := groupGitWorkflows(msgs)
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d", len(workflows))
+	}
+	w := workflows[0]
+	if _, ok := w.Roles["alice"][roleAuthor]; !ok {
+		t.Errorf("alice should be tagged author; got %v", w.Roles["alice"])
+	}
+	if _, ok := w.Roles["alice"][roleMerger]; !ok {
+		t.Errorf("alice should be tagged merger; got %v", w.Roles["alice"])
+	}
+	if _, ok := w.Roles["bob"][roleReviewer]; !ok {
+		t.Errorf("bob should be tagged reviewer; got %v", w.Roles["bob"])
+	}
+
+	rendered := renderActors(w)
+	if !strings.Contains(rendered, "alice(author/merger)") {
+		t.Errorf("expected alice(author/merger) in render, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "bob(reviewer)") {
+		t.Errorf("expected bob(reviewer) in render, got %q", rendered)
+	}
+}
+
+func TestGroupGitWorkflows_MRWithoutIssueIDStillGroups(t *testing.T) {
+	// MR titles without a ticket prefix (refactors, hotfixes named
+	// purely for the change) used to fall through and either get
+	// keyed off branch name or land in orphans. They must now group
+	// cleanly under their MR-iid.
+	msgs := []goslack.Message{
+		gitMsg("100", "Alice (alice) opened merge request !88 — refactor logic"),
+		gitMsg("110", "Alice (alice) merged merge request !88"),
+	}
+	workflows, orphans := groupGitWorkflows(msgs)
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphans, got %d", len(orphans))
+	}
+	if len(workflows) != 1 || workflows[0].Key != "!88" {
+		t.Fatalf("expected single !88 workflow; got %+v", workflows)
 	}
 }
 
 func TestGroupGitWorkflows_DeployFlagged(t *testing.T) {
 	msgs := []goslack.Message{
-		gitMsg("1714000040.000000", "Starting deploy to stage"),
-		gitMsg("1714000050.000000", "Deploy to stage succeeded"),
+		gitMsg("100", "Starting deploy to stage"),
+		gitMsg("110", "Deploy to stage succeeded"),
 	}
 	workflows, _ := groupGitWorkflows(msgs)
 	if len(workflows) == 0 {
@@ -114,5 +190,19 @@ func TestGroupGitWorkflows_DeployFlagged(t *testing.T) {
 	joined := strings.Join(verbs, " → ")
 	if !strings.Contains(joined, "deploy ✓") {
 		t.Errorf("expected deploy ✓ in %q", joined)
+	}
+}
+
+func TestRenderActors_NoRolesStaysBare(t *testing.T) {
+	// Plain-actor verbs (push, branch new/rm, deploy, pipeline) must
+	// not get spurious role tags like "alice(author)".
+	w := gitWorkflow{
+		Key:    "branch stage",
+		Actors: map[string]struct{}{"alice": {}, "bob": {}},
+		Roles:  map[string]map[string]struct{}{},
+	}
+	got := renderActors(w)
+	if got != "alice bob" {
+		t.Fatalf("renderActors=%q; want %q", got, "alice bob")
 	}
 }

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.24] - 2026-05-07
+
+### Fixed
+- **GIT MODE: ticket misattribution.** The workflow grouper picked the first `XXX-NNN`-style ID it saw in a bot message, which often came from a branch name and disagreed with the MR title (e.g. an MR about ticket A delivered on a branch named after ticket B was labelled with ticket B). Workflow keys now prefer the MR-iid (`!1234`) when present, so the canonical identity matches the MR itself; ticket IDs in branches no longer override it.
+- **GIT MODE: branch lifecycle events split from their MR.** "branch new" / "branch rm" events appeared as separate workflows from the merge they belonged to (e.g. a `localization` branch and `!937` showed up as two stories about the same change). Added a pre-pass that records branch ↔ MR-iid pairs observed in any single message, then collates branch-only events under the linked MR.
+- **GIT MODE: author / reviewer / merger flattened into one actor list.** The renderer joined every actor with `/`, conflating the MR author with reviewers and the merger. Verbs now imply a role (`MR open` → author, `approved` → reviewer, `merged` → merger), and the rendered actor list tags structured roles inline (`alice(author/merger) bob(reviewer)`). Plain-actor verbs (push, branch ops, deploy, pipeline) stay un-tagged.
+
+### Tests
+- Added regressions for: MR-iid priority over issue ID; branch alias collation; role tracking when one actor wears two hats; MRs without any ticket prefix in title.
+
 ## [0.3.23] - 2026-05-05
 
 ### Fixed
