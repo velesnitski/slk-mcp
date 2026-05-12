@@ -19,14 +19,14 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerUnreadTools(s *server.MCPServer, d Deps) {
-	if !d.Client.HasUserToken() {
-		d.Log.Info("user token not set; unread/mentions tools disabled",
+func (h *Hub) registerUnreadTools(s *server.MCPServer) {
+	if !h.client.HasUserToken() {
+		h.log.Info("user token not set; unread/mentions tools disabled",
 			"hint", "set SLACK_USER_TOKEN=xoxp-... to enable")
 		return
 	}
 
-	if !d.Cfg.IsDisabled("get_unread_summary") {
+	if !h.cfg.IsDisabled("get_unread_summary") {
 		s.AddTool(
 			mcp.NewTool("get_unread_summary",
 				mcp.WithDescription("Smart summary of all unread messages across joined channels. Requires SLACK_USER_TOKEN."),
@@ -49,7 +49,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
 				}
 
-				results, err := d.Client.Unread.UnreadAll(ctx, maxPer)
+				results, err := h.client.Unread.UnreadAll(ctx, maxPer)
 				if err != nil {
 					if errors.Is(err, slack.ErrNoUserToken) {
 						return mcp.NewToolResultError(err.Error()), nil
@@ -60,9 +60,9 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				// Best-effort self-resolution for mention markers; a
 				// failure here disables highlighting AND mentions_only
 				// filtering (we can't filter what we can't identify).
-				selfID, err := d.Client.Unread.Self(ctx)
+				selfID, err := h.client.Unread.Self(ctx)
 				if err != nil {
-					d.Log.Warn("auth.test failed; mention highlighting disabled", "err", err)
+					h.log.Warn("auth.test failed; mention highlighting disabled", "err", err)
 				}
 
 				if mentionsOnly {
@@ -102,8 +102,8 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 
 				logChannels := 0
 				for _, r := range results {
-					users := resolveRefsWithReplies(ctx, d, r)
-					label := channelDisplayLabel(ctx, r.Channel, d.Client.Users)
+					users := h.resolveRefsWithReplies(ctx, r)
+					label := channelDisplayLabel(ctx, r.Channel, h.client.Users)
 					var rendered string
 					switch {
 					case logMode != "off" && digest.DetectGitChannel(r):
@@ -134,7 +134,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					b.WriteString("\n\n")
 				}
 				if logChannels > 0 {
-					d.Log.Debug("log mode applied", "channels", logChannels)
+					h.log.Debug("log mode applied", "channels", logChannels)
 				}
 				if footer := digest.RenderReferences(digest.CollectReferences(results)); footer != "" {
 					b.WriteString(footer)
@@ -145,7 +145,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("get_mentions") {
+	if !h.cfg.IsDisabled("get_mentions") {
 		s.AddTool(
 			mcp.NewTool("get_mentions",
 				mcp.WithDescription("Messages that mention the authenticated user. Requires SLACK_USER_TOKEN."),
@@ -169,12 +169,12 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				after := time.Now().Add(-time.Duration(hours) * time.Hour).Format("2006-01-02")
 				q := fmt.Sprintf("to:me after:%s", after)
 
-				matches, err := d.Client.Search.Messages(ctx, q, limit)
+				matches, err := h.client.Search.Messages(ctx, q, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 
-				selfID, _ := d.Client.Unread.Self(ctx)
+				selfID, _ := h.client.Unread.Self(ctx)
 
 				if pendingOnly {
 					if selfID == "" {
@@ -184,7 +184,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					if dropAcks {
 						matches = filterClosingAcks(matches)
 					}
-					matches = filterPendingMentions(ctx, d, matches, selfID)
+					matches = h.filterPendingMentions(ctx, matches, selfID)
 				}
 				if strictMention {
 					if selfID == "" {
@@ -212,8 +212,8 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					b.WriteString(format.SearchResult(m))
 					b.WriteByte('\n')
 					if withContext && m.Channel.ID != "" {
-						before, after := fetchMentionContext(ctx, d, m.Channel.ID, m.Timestamp, ctxN)
-						users := d.Client.Users.NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
+						before, after := h.fetchMentionContext(ctx, m.Channel.ID, m.Timestamp, ctxN)
+						users := h.client.Users.NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
 						writeContextLines(&b, "    ↳ ", before, users, m.Channel.ID, shownContext)
 						writeContextLines(&b, "    ↪ ", after, users, m.Channel.ID, shownContext)
 					}
@@ -223,7 +223,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.ReadOnly && !d.Cfg.IsDisabled("mark_read") {
+	if !h.cfg.ReadOnly && !h.cfg.IsDisabled("mark_read") {
 		s.AddTool(
 			mcp.NewTool("mark_read",
 				mcp.WithDescription("Mark a channel as read up to a given message timestamp. Pass either (channel + timestamp) or a Slack permalink."),
@@ -262,11 +262,11 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					return mcp.NewToolResultError("timestamp is required (or pass a permalink)"), nil
 				}
 
-				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.client.Channels.ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := d.Client.Unread.MarkRead(ctx, channelID, ts); err != nil {
+				if err := h.client.Unread.MarkRead(ctx, channelID, ts); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 				return mcp.NewToolResultText(fmt.Sprintf("marked #%s read up to %s", channel, ts)), nil
@@ -343,7 +343,7 @@ func writeContextLines(b *strings.Builder, prefix string, msgs []goslack.Message
 // (selfID) hasn't posted a text reply in the same channel after the
 // mention timestamp. Reactions and empty messages do NOT count as
 // replies. One conversations.history call per match (4-worker pool).
-func filterPendingMentions(ctx context.Context, d Deps, matches []goslack.SearchMessage, selfID string) []goslack.SearchMessage {
+func (h *Hub) filterPendingMentions(ctx context.Context, matches []goslack.SearchMessage, selfID string) []goslack.SearchMessage {
 	const workers = 4
 	type job struct {
 		idx   int
@@ -362,7 +362,7 @@ func filterPendingMentions(ctx context.Context, d Deps, matches []goslack.Search
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				results <- result{idx: j.idx, pending: !operatorReplied(ctx, d, j.match.Channel.ID, j.match.Timestamp, selfID)}
+				results <- result{idx: j.idx, pending: !h.operatorReplied(ctx, j.match.Channel.ID, j.match.Timestamp, selfID)}
 			}
 		}()
 	}
@@ -386,18 +386,18 @@ func filterPendingMentions(ctx context.Context, d Deps, matches []goslack.Search
 	return out
 }
 
-func operatorReplied(ctx context.Context, d Deps, channelID, mentionTS, selfID string) bool {
+func (h *Hub) operatorReplied(ctx context.Context, channelID, mentionTS, selfID string) bool {
 	pivot, _ := strconv.ParseFloat(mentionTS, 64)
 	if pivot <= 0 || channelID == "" {
 		return false
 	}
-	hist, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+	hist, err := h.client.Messages.History(ctx, slack.HistoryParams{
 		ChannelID: channelID,
 		OldestTS:  pivot,
 		Limit:     20,
 	})
 	if err != nil {
-		d.Log.Debug("operator-reply check failed", "channel", channelID, "err", err)
+		h.log.Debug("operator-reply check failed", "channel", channelID, "err", err)
 		return false
 	}
 	for _, m := range hist {
@@ -422,16 +422,16 @@ func collapseTextEmpty(s string) bool {
 // fetchMentionContext returns up to n messages on each side of
 // `pivotTS` in `channelID`, ordered oldest → newest. Both lists are
 // best-effort and may be empty on error.
-func fetchMentionContext(ctx context.Context, d Deps, channelID, pivotTS string, n int) (before, after []goslack.Message) {
+func (h *Hub) fetchMentionContext(ctx context.Context, channelID, pivotTS string, n int) (before, after []goslack.Message) {
 	if n <= 0 {
 		n = 3
 	}
-	hist, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+	hist, err := h.client.Messages.History(ctx, slack.HistoryParams{
 		ChannelID: channelID,
 		Limit:     n + 1,
 	})
 	if err != nil {
-		d.Log.Debug("fetch mention context (before) failed", "channel", channelID, "err", err)
+		h.log.Debug("fetch mention context (before) failed", "channel", channelID, "err", err)
 	} else {
 		for _, m := range hist {
 			if m.Timestamp >= pivotTS {
@@ -446,13 +446,13 @@ func fetchMentionContext(ctx context.Context, d Deps, channelID, pivotTS string,
 
 	pivot, _ := strconv.ParseFloat(pivotTS, 64)
 	if pivot > 0 {
-		hist, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+		hist, err := h.client.Messages.History(ctx, slack.HistoryParams{
 			ChannelID: channelID,
 			OldestTS:  pivot,
 			Limit:     n + 1,
 		})
 		if err != nil {
-			d.Log.Debug("fetch mention context (after) failed", "channel", channelID, "err", err)
+			h.log.Debug("fetch mention context (after) failed", "channel", channelID, "err", err)
 		} else {
 			for _, m := range hist {
 				if m.Timestamp <= pivotTS {
@@ -530,9 +530,9 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 // messages AND inlined thread replies, then merges the resolved
 // names. Used by the unread-summary renderer so `<@UID>` and
 // `<#CID>` references inside thread bodies render readably.
-func resolveRefsWithReplies(ctx context.Context, d Deps, cu *slack.ChannelUnread) map[string]string {
-	users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(cu))
-	channels := d.Client.Channels.NamesForIDs(ctx, collectChannelIDsWithReplies(cu))
+func (h *Hub) resolveRefsWithReplies(ctx context.Context, cu *slack.ChannelUnread) map[string]string {
+	users := h.client.Users.NamesFor(ctx, collectUserIDsWithReplies(cu))
+	channels := h.client.Channels.NamesForIDs(ctx, collectChannelIDsWithReplies(cu))
 	return mergeRefs(users, channels)
 }
 

@@ -11,8 +11,8 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerThreadTools(s *server.MCPServer, d Deps) {
-	if !d.Cfg.IsDisabled("get_thread") {
+func (h *Hub) registerThreadTools(s *server.MCPServer) {
+	if !h.cfg.IsDisabled("get_thread") {
 		s.AddTool(
 			mcp.NewTool("get_thread",
 				mcp.WithDescription("Fetch all replies in a thread. Pass either (channel + thread_ts) or a Slack permalink."),
@@ -49,15 +49,15 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 					return mcp.NewToolResultError("thread_ts is required (or pass a permalink)"), nil
 				}
 
-				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.client.Channels.ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				replies, err := d.Client.Messages.ThreadReplies(ctx, channelID, threadTS)
+				replies, err := h.client.Messages.ThreadReplies(ctx, channelID, threadTS)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				users := resolveRefs(ctx, d, replies)
+				users := h.resolveRefs(ctx, replies)
 
 				var b strings.Builder
 				fmt.Fprintf(&b, "thread #%s (%d msgs)\n", channel, len(replies))
@@ -70,7 +70,7 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("get_user_messages") {
+	if !h.cfg.IsDisabled("get_user_messages") {
 		s.AddTool(
 			mcp.NewTool("get_user_messages",
 				mcp.WithDescription("Recent messages from a user. Uses workspace search."),
@@ -90,7 +90,7 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 				if channel != "" {
 					query += " in:#" + strings.TrimPrefix(channel, "#")
 				}
-				matches, err := d.Client.Search.Messages(ctx, query, limit)
+				matches, err := h.client.Search.Messages(ctx, query, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -109,11 +109,11 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if d.Cfg.ReadOnly {
+	if h.cfg.ReadOnly {
 		return
 	}
 
-	if !d.Cfg.IsDisabled("post_message") {
+	if !h.cfg.IsDisabled("post_message") {
 		s.AddTool(
 			mcp.NewTool("post_message",
 				mcp.WithDescription("Post a message to a channel. Supports thread replies."),
@@ -132,11 +132,11 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 				}
 				threadTS := req.GetString("thread_ts", "")
 
-				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.client.Channels.ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				ts, err := d.Client.Messages.Post(ctx, channelID, text, threadTS)
+				ts, err := h.client.Messages.Post(ctx, channelID, text, threadTS)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -145,7 +145,7 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("add_reaction") {
+	if !h.cfg.IsDisabled("add_reaction") {
 		s.AddTool(
 			mcp.NewTool("add_reaction",
 				mcp.WithDescription("Add an emoji reaction to a message."),
@@ -158,11 +158,11 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 				timestamp, _ := req.RequireString("timestamp")
 				emoji, _ := req.RequireString("emoji")
 
-				channelID, err := d.Client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.client.Channels.ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := d.Client.Messages.AddReaction(ctx, channelID, timestamp, emoji); err != nil {
+				if err := h.client.Messages.AddReaction(ctx, channelID, timestamp, emoji); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s", emoji, channel)), nil

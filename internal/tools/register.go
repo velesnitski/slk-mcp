@@ -1,35 +1,13 @@
-// Package tools wires MCP tool handlers to the Slack service layer.
 package tools
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/config"
 	"github.com/velesnitski/slk-mcp/internal/format"
-	"github.com/velesnitski/slk-mcp/internal/slack"
 )
-
-// Deps is the surface every tool module needs.
-type Deps struct {
-	Client *slack.Client
-	Cfg    *config.Config
-	Log    *slog.Logger
-}
-
-// RegisterAll wires every tool module onto s. Tools that require a user
-// token register themselves conditionally.
-func RegisterAll(s *server.MCPServer, deps Deps) {
-	registerChannelTools(s, deps)
-	registerDigestTools(s, deps)
-	registerSearchTools(s, deps)
-	registerThreadTools(s, deps)
-	registerUnreadTools(s, deps)
-	registerUserTools(s, deps)
-}
 
 // parseChannelList splits a comma-separated input. Returns nil if input is empty.
 func parseChannelList(input string) []string {
@@ -56,21 +34,21 @@ func parseChannelList(input string) []string {
 //
 // Returns the resolved list, the source label ("input"/"config"/"auto"),
 // and any error encountered during auto-discovery.
-func resolveTargetChannels(ctx context.Context, d Deps, input string) ([]string, string, error) {
+func (h *Hub) resolveTargetChannels(ctx context.Context, input string) ([]string, string, error) {
 	if list := parseChannelList(input); len(list) > 0 {
 		return list, "input", nil
 	}
-	if len(d.Cfg.Channels) > 0 {
-		return d.Cfg.Channels, "config", nil
+	if len(h.cfg.Channels) > 0 {
+		return h.cfg.Channels, "config", nil
 	}
 
-	names, err := d.Client.JoinedChannelNames(ctx, d.Cfg.AutodiscoverLimit)
+	names, err := h.client.JoinedChannelNames(ctx, h.cfg.AutodiscoverLimit)
 	if err != nil {
 		return nil, "auto", err
 	}
-	d.Log.Info("auto-discovered channels",
+	h.log.Info("auto-discovered channels",
 		"count", len(names),
-		"limit", d.Cfg.AutodiscoverLimit,
+		"limit", h.cfg.AutodiscoverLimit,
 	)
 	return names, "auto", nil
 }
@@ -139,9 +117,9 @@ func collectUserIDs(messages []goslack.Message) []string {
 //
 // The two maps are merged because Slack ID prefixes (U/W vs C/G) keep
 // their namespaces disjoint — see format.RenderText.
-func resolveRefs(ctx context.Context, d Deps, messages []goslack.Message) map[string]string {
-	users := d.Client.Users.NamesFor(ctx, collectUserIDs(messages))
-	channels := d.Client.Channels.NamesForIDs(ctx, format.CollectMentionedChannelIDs(messages))
+func (h *Hub) resolveRefs(ctx context.Context, messages []goslack.Message) map[string]string {
+	users := h.client.Users.NamesFor(ctx, collectUserIDs(messages))
+	channels := h.client.Channels.NamesForIDs(ctx, format.CollectMentionedChannelIDs(messages))
 	return mergeRefs(users, channels)
 }
 

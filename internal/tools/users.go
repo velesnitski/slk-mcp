@@ -13,8 +13,8 @@ import (
 	goslack "github.com/slack-go/slack"
 )
 
-func registerUserTools(s *server.MCPServer, d Deps) {
-	if d.Cfg.IsDisabled("list_users") {
+func (h *Hub) registerUserTools(s *server.MCPServer) {
+	if h.cfg.IsDisabled("list_users") {
 		return
 	}
 	s.AddTool(
@@ -29,7 +29,7 @@ func registerUserTools(s *server.MCPServer, d Deps) {
 			withActivity := req.GetBool("with_activity", false)
 			filter := strings.ToLower(strings.TrimSpace(req.GetString("filter", "")))
 
-			users, err := d.Client.Users.List(ctx)
+			users, err := h.client.Users.List(ctx)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -49,7 +49,7 @@ func registerUserTools(s *server.MCPServer, d Deps) {
 
 			lastPost := map[string]string{}
 			if withActivity {
-				lastPost = fetchLastPostDates(ctx, d, filtered)
+				lastPost = h.fetchLastPostDates(ctx, filtered)
 			}
 
 			var b strings.Builder
@@ -106,7 +106,7 @@ func userMatchesFilter(u goslack.User, needle string) bool {
 // fetchLastPostDates queries search.messages with from:@handle for
 // each user and returns a map of user ID → "YYYY-MM-DD" of the most
 // recent hit. Empty string when there's no match.
-func fetchLastPostDates(ctx context.Context, d Deps, users []goslack.User) map[string]string {
+func (h *Hub) fetchLastPostDates(ctx context.Context, users []goslack.User) map[string]string {
 	const workers = 4
 	type result struct {
 		id   string
@@ -122,7 +122,7 @@ func fetchLastPostDates(ctx context.Context, d Deps, users []goslack.User) map[s
 			defer wg.Done()
 			for u := range jobs {
 				date := ""
-				hits, err := d.Client.Search.Messages(ctx, "from:@"+u.Name, 1)
+				hits, err := h.client.Search.Messages(ctx, "from:@"+u.Name, 1)
 				if err == nil && len(hits) > 0 {
 					if t := parseSlackTS(hits[0].Timestamp); !t.IsZero() {
 						date = t.UTC().Format("2006-01-02")

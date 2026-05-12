@@ -76,11 +76,7 @@ func run() error {
 		server.WithToolCapabilities(true),
 		server.WithRecovery(),
 	)
-	tools.RegisterAll(mcpServer, tools.Deps{
-		Client: client,
-		Cfg:    cfg,
-		Log:    log,
-	})
+	tools.NewHub(client, cfg, log).RegisterAll(mcpServer)
 
 	log.Info("slk-mcp ready",
 		"version", version,

@@ -12,8 +12,8 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerDigestTools(s *server.MCPServer, d Deps) {
-	if !d.Cfg.IsDisabled("get_channel_digest") {
+func (h *Hub) registerDigestTools(s *server.MCPServer) {
+	if !h.cfg.IsDisabled("get_channel_digest") {
 		s.AddTool(
 			mcp.NewTool("get_channel_digest",
 				mcp.WithDescription("Compact digest of recent messages from one channel. Either give a relative `hours` window (default), or absolute `after`/`before` (YYYY-MM-DD) for post-mortem-style fetches."),
@@ -28,7 +28,7 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				hours := int(req.GetFloat("hours", float64(d.Cfg.DigestHours)))
+				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 50))
 				after := req.GetString("after", "")
 				before := req.GetString("before", "")
@@ -37,7 +37,7 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				txt, err := channelDigestRange(ctx, d, channel, oldest, latest, maxShow)
+				txt, err := h.channelDigestRange(ctx, channel, oldest, latest, maxShow)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -46,7 +46,7 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("get_multi_channel_digest") {
+	if !h.cfg.IsDisabled("get_multi_channel_digest") {
 		s.AddTool(
 			mcp.NewTool("get_multi_channel_digest",
 				mcp.WithDescription("Compact digest across multiple channels. Falls back to SLACK_CHANNELS."),
@@ -55,19 +55,19 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("max_messages", mcp.Description("Max messages per channel (default: 20)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list, _, err := resolveTargetChannels(ctx, d, req.GetString("channels", ""))
+				list, _, err := h.resolveTargetChannels(ctx, req.GetString("channels", ""))
 				if err != nil {
 					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
 				}
 				if len(list) == 0 {
 					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
 				}
-				hours := int(req.GetFloat("hours", float64(d.Cfg.DigestHours)))
+				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 20))
 
 				var parts []string
 				for _, ch := range list {
-					txt, err := channelDigest(ctx, d, ch, hours, maxShow)
+					txt, err := h.channelDigest(ctx, ch, hours, maxShow)
 					if err != nil {
 						parts = append(parts, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 						continue
@@ -79,7 +79,7 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("get_morning_recap") {
+	if !h.cfg.IsDisabled("get_morning_recap") {
 		s.AddTool(
 			mcp.NewTool("get_morning_recap",
 				mcp.WithDescription("Morning recap: decisions + channel activity across channels. Falls back to SLACK_CHANNELS."),
@@ -88,14 +88,14 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("max_messages", mcp.Description("Max messages per channel (default: 15)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list, _, err := resolveTargetChannels(ctx, d, req.GetString("channels", ""))
+				list, _, err := h.resolveTargetChannels(ctx, req.GetString("channels", ""))
 				if err != nil {
 					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
 				}
 				if len(list) == 0 {
 					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
 				}
-				hours := int(req.GetFloat("hours", float64(d.Cfg.DigestHours)))
+				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 15))
 				oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
 
@@ -103,23 +103,23 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 				var digests []string
 
 				for _, ch := range list {
-					channelID, err := d.Client.Channels.ResolveID(ctx, ch)
+					channelID, err := h.client.Channels.ResolveID(ctx, ch)
 					if err != nil {
 						digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 						continue
 					}
-					msgs, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+					msgs, err := h.client.Messages.History(ctx, slack.HistoryParams{
 						ChannelID: channelID,
 						OldestTS:  float64(oldest.Unix()),
-						Limit:     d.Cfg.MaxMessagesPerChannel,
+						Limit:     h.cfg.MaxMessagesPerChannel,
 					})
 					if err != nil {
 						digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 						continue
 					}
-					users := resolveRefs(ctx, d, msgs)
+					users := h.resolveRefs(ctx, msgs)
 					digests = append(digests, format.ChannelDigest("#"+ch, msgs, users, maxShow))
-					decisions = append(decisions, detectDecisions(d.Cfg, ch, msgs, users, format.DecisionLine)...)
+					decisions = append(decisions, detectDecisions(h.cfg, ch, msgs, users, format.DecisionLine)...)
 				}
 
 				var b strings.Builder
@@ -140,29 +140,29 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 	}
 }
 
-func channelDigest(ctx context.Context, d Deps, channel string, hours, maxShow int) (string, error) {
+func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow int) (string, error) {
 	oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
-	return channelDigestRange(ctx, d, channel, oldest, time.Time{}, maxShow)
+	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow)
 }
 
-func channelDigestRange(ctx context.Context, d Deps, channel string, oldest, latest time.Time, maxShow int) (string, error) {
-	channelID, err := d.Client.Channels.ResolveID(ctx, channel)
+func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int) (string, error) {
+	channelID, err := h.client.Channels.ResolveID(ctx, channel)
 	if err != nil {
 		return "", err
 	}
 	p := slack.HistoryParams{
 		ChannelID: channelID,
 		OldestTS:  float64(oldest.Unix()),
-		Limit:     d.Cfg.MaxMessagesPerChannel,
+		Limit:     h.cfg.MaxMessagesPerChannel,
 	}
 	if !latest.IsZero() {
 		p.LatestTS = float64(latest.Unix())
 	}
-	msgs, err := d.Client.Messages.History(ctx, p)
+	msgs, err := h.client.Messages.History(ctx, p)
 	if err != nil {
 		return "", err
 	}
-	users := resolveRefs(ctx, d, msgs)
+	users := h.resolveRefs(ctx, msgs)
 	return format.ChannelDigest("#"+channel, msgs, users, maxShow), nil
 }
 

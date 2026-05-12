@@ -12,8 +12,8 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerChannelTools(s *server.MCPServer, d Deps) {
-	if !d.Cfg.IsDisabled("list_channels") {
+func (h *Hub) registerChannelTools(s *server.MCPServer) {
+	if !h.cfg.IsDisabled("list_channels") {
 		s.AddTool(
 			mcp.NewTool("list_channels",
 				mcp.WithDescription("List Slack channels the bot can see, ordered by member count."),
@@ -21,7 +21,7 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				limit := int(req.GetFloat("limit", 100))
-				channels, err := d.Client.Channels.List(ctx, limit)
+				channels, err := h.client.Channels.List(ctx, limit)
 				if err != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("list channels: %v", err)), nil
 				}
@@ -47,7 +47,7 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("get_channel_info") {
+	if !h.cfg.IsDisabled("get_channel_info") {
 		s.AddTool(
 			mcp.NewTool("get_channel_info",
 				mcp.WithDescription("Get a channel's topic, purpose, member count and created date. Optionally lists member display names. Accepts either a channel name (#devops, devops) or a Slack channel ID (C0ABC1234DE) — useful for resolving `<#CID>` references from message bodies."),
@@ -70,12 +70,12 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 				if slack.IsChannelID(trimmed) {
 					channelID = trimmed
 				} else {
-					channelID, err = d.Client.Channels.ResolveID(ctx, input)
+					channelID, err = h.client.Channels.ResolveID(ctx, input)
 					if err != nil {
 						return mcp.NewToolResultError(err.Error()), nil
 					}
 				}
-				ch, err := d.Client.Channels.Info(ctx, channelID)
+				ch, err := h.client.Channels.Info(ctx, channelID)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -89,11 +89,11 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 				)
 
 				if includeMembers {
-					ids, err := d.Client.Channels.Members(ctx, channelID, membersLimit)
+					ids, err := h.client.Channels.Members(ctx, channelID, membersLimit)
 					if err != nil {
 						fmt.Fprintf(&b, "\nmembers_error: %s", err.Error())
 					} else {
-						names := d.Client.Users.NamesFor(ctx, ids)
+						names := h.client.Users.NamesFor(ctx, ids)
 						b.WriteString("\nroster:")
 						for _, id := range ids {
 							fmt.Fprintf(&b, "\n- %s", names[id])

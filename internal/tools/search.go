@@ -12,8 +12,8 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
-func registerSearchTools(s *server.MCPServer, d Deps) {
-	if !d.Cfg.IsDisabled("search_messages") {
+func (h *Hub) registerSearchTools(s *server.MCPServer) {
+	if !h.cfg.IsDisabled("search_messages") {
 		s.AddTool(
 			mcp.NewTool("search_messages",
 				mcp.WithDescription("Workspace search (Slack syntax: from:@user, in:#channel, has:link, before:/after:DATE). Each hit includes thread_ts + permalink so callers can chain into get_thread."),
@@ -29,7 +29,7 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 				limit := int(req.GetFloat("limit", 20))
 				fullText := req.GetBool("full_text", false)
 
-				matches, err := d.Client.Search.Messages(ctx, q, limit)
+				matches, err := h.client.Search.Messages(ctx, q, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -48,7 +48,7 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 		)
 	}
 
-	if !d.Cfg.IsDisabled("find_decisions") {
+	if !h.cfg.IsDisabled("find_decisions") {
 		s.AddTool(
 			mcp.NewTool("find_decisions",
 				mcp.WithDescription("Scan channels for messages that look like decisions (keywords + reactions)."),
@@ -56,7 +56,7 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 				mcp.WithNumber("hours", mcp.Description("Lookback window (default: 72)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list, _, err := resolveTargetChannels(ctx, d, req.GetString("channels", ""))
+				list, _, err := h.resolveTargetChannels(ctx, req.GetString("channels", ""))
 				if err != nil {
 					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
 				}
@@ -68,22 +68,22 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 
 				var decisions []string
 				for _, ch := range list {
-					channelID, err := d.Client.Channels.ResolveID(ctx, ch)
+					channelID, err := h.client.Channels.ResolveID(ctx, ch)
 					if err != nil {
 						decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
 						continue
 					}
-					msgs, err := d.Client.Messages.History(ctx, slack.HistoryParams{
+					msgs, err := h.client.Messages.History(ctx, slack.HistoryParams{
 						ChannelID: channelID,
 						OldestTS:  float64(oldest.Unix()),
-						Limit:     d.Cfg.MaxMessagesPerChannel,
+						Limit:     h.cfg.MaxMessagesPerChannel,
 					})
 					if err != nil {
 						decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
 						continue
 					}
-					users := resolveRefs(ctx, d, msgs)
-					decisions = append(decisions, detectDecisions(d.Cfg, ch, msgs, users, format.DecisionLine)...)
+					users := h.resolveRefs(ctx, msgs)
+					decisions = append(decisions, detectDecisions(h.cfg, ch, msgs, users, format.DecisionLine)...)
 				}
 
 				if len(decisions) == 0 {
