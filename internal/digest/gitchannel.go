@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"fmt"
@@ -68,11 +68,11 @@ type gitFacts struct {
 	repo   string
 }
 
-// detectGitChannel reports whether a channel is a CI / git-bot feed
+// DetectGitChannel reports whether a channel is a CI / git-bot feed
 // — a stricter form of log channel where messages collate into
 // per-issue workflow stories rather than per-severity histograms.
-func detectGitChannel(cu *slack.ChannelUnread) bool {
-	if !detectLogChannel(cu) {
+func DetectGitChannel(cu *slack.ChannelUnread) bool {
+	if !DetectLogChannel(cu) {
 		return false
 	}
 	name := strings.ToLower(cu.Channel.Name)
@@ -161,7 +161,7 @@ func chooseWorkflowKey(f gitFacts, branchAliases map[string]string) string {
 
 // extractWorkflowKey is kept for callers (and tests) that classify a
 // single message in isolation. Production grouping uses
-// groupGitWorkflows which builds an alias map across the whole batch.
+// GroupGitWorkflows which builds an alias map across the whole batch.
 func extractWorkflowKey(text string) string {
 	return chooseWorkflowKey(extractGitFacts(text), nil)
 }
@@ -262,7 +262,7 @@ func buildBranchAliases(messages []goslack.Message) map[string]string {
 	return aliases
 }
 
-// groupGitWorkflows collates git/CI channel messages into per-MR /
+// GroupGitWorkflows collates git/CI channel messages into per-MR /
 // per-branch / per-deploy stories. Two passes:
 //
 //  1. Build a branch ↔ MR-iid alias map by scanning all messages.
@@ -273,7 +273,7 @@ func buildBranchAliases(messages []goslack.Message) map[string]string {
 //
 // Messages that yield no key become orphans (caller can render them
 // inline or as a count).
-func groupGitWorkflows(messages []goslack.Message) ([]gitWorkflow, []goslack.Message) {
+func GroupGitWorkflows(messages []goslack.Message) ([]gitWorkflow, []goslack.Message) {
 	aliases := buildBranchAliases(messages)
 
 	byKey := map[string]*gitWorkflow{}
@@ -357,9 +357,9 @@ func renderActors(w gitWorkflow) string {
 	return strings.Join(out, " ")
 }
 
-// renderGitChannel produces a compact per-workflow digest for a
+// RenderGitChannel produces a compact per-workflow digest for a
 // git/CI channel.
-func renderGitChannel(channelLabel string, total int, workflows []gitWorkflow, orphans []goslack.Message) string {
+func RenderGitChannel(channelLabel string, total int, workflows []gitWorkflow, orphans []goslack.Message) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## %s [GIT MODE — %d msgs]\n", channelLabel, total)
 	if len(workflows) == 0 && len(orphans) == 0 {

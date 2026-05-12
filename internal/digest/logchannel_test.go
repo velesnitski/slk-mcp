@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"strings"
@@ -130,7 +130,7 @@ func TestIsLogChannelName(t *testing.T) {
 	}
 }
 
-// ----------------------- detectLogChannel -----------------------
+// ----------------------- DetectLogChannel -----------------------
 
 func TestDetectLogChannel_BotMajority(t *testing.T) {
 	cu := mkChannelUnread("anything", []goslack.Message{
@@ -139,7 +139,7 @@ func TestDetectLogChannel_BotMajority(t *testing.T) {
 		botMsg("alert 3"),
 		humanMsg("U1", "human reply"),
 	}, nil)
-	if !detectLogChannel(cu) {
+	if !DetectLogChannel(cu) {
 		t.Fatal("3 of 4 bot messages should classify as log channel")
 	}
 }
@@ -151,7 +151,7 @@ func TestDetectLogChannel_BelowBotThreshold(t *testing.T) {
 		humanMsg("U2", "afternoon"),
 		humanMsg("U3", "evening"),
 	}, nil)
-	if detectLogChannel(cu) {
+	if DetectLogChannel(cu) {
 		t.Fatal("1-of-4 bot share + neutral name should NOT classify as log")
 	}
 }
@@ -163,19 +163,19 @@ func TestDetectLogChannel_NameFallback(t *testing.T) {
 		humanMsg("U_WEBHOOK", "FATAL trigger fired"),
 		humanMsg("U_WEBHOOK", "ERROR another one"),
 	}, nil)
-	if !detectLogChannel(cu) {
+	if !DetectLogChannel(cu) {
 		t.Fatal("name pattern should classify as log channel even with no bot_id")
 	}
 }
 
 func TestDetectLogChannel_EmptyChannelIsNotLog(t *testing.T) {
 	cu := mkChannelUnread("infra-monitor-low", nil, nil)
-	if detectLogChannel(cu) {
+	if DetectLogChannel(cu) {
 		t.Fatal("empty channel must not be classified as log")
 	}
 }
 
-// ----------------------- buildLogBands -----------------------
+// ----------------------- BuildLogBands -----------------------
 
 func TestBuildLogBands_DistributesAndOrders(t *testing.T) {
 	msgs := []goslack.Message{
@@ -186,7 +186,7 @@ func TestBuildLogBands_DistributesAndOrders(t *testing.T) {
 		mkLogMsg("alert: cert expiring"),
 		mkLogMsg("merged !42"), // INFO
 	}
-	bands := buildLogBands(msgs, 5)
+	bands := BuildLogBands(msgs, 5)
 
 	wantOrder := []string{"FATAL", "ERROR", "ALERT", "WARN", "INFO"}
 	for i, b := range bands {
@@ -211,7 +211,7 @@ func TestBuildLogBands_DedupesIdenticalMessages(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msgs = append(msgs, mkLogMsg("ERROR: pipeline failed"))
 	}
-	bands := buildLogBands(msgs, 3)
+	bands := BuildLogBands(msgs, 3)
 	for _, b := range bands {
 		if b.Label != "ERROR" {
 			continue
@@ -234,7 +234,7 @@ func TestBuildLogBands_PatternsCappedAtPerBandLimit(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msgs = append(msgs, mkLogMsg("ERROR: distinct alert "+string(rune('A'+i))))
 	}
-	bands := buildLogBands(msgs, 3)
+	bands := BuildLogBands(msgs, 3)
 	for _, b := range bands {
 		if b.Label != "ERROR" {
 			continue
@@ -253,7 +253,7 @@ func TestBuildLogBands_ZeroPatternsUsesDefault(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msgs = append(msgs, mkLogMsg("ERROR distinct "+string(rune('A'+i))))
 	}
-	bands := buildLogBands(msgs, 0)
+	bands := BuildLogBands(msgs, 0)
 	for _, b := range bands {
 		if b.Label == "ERROR" && len(b.Patterns) != defaultPatternsPerBand {
 			t.Fatalf("default patternsPerBand should be %d, got %d",

@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"strings"
@@ -63,10 +63,10 @@ const (
 	urgencyFreshWindow  = 6 * time.Hour
 )
 
-// urgencyOpts tunes the urgency heuristic per call. Zero value means
+// UrgencyOpts tunes the urgency heuristic per call. Zero value means
 // "use defaults" — Weight 1.0, no extra keywords beyond the built-in
 // en + ru list.
-type urgencyOpts struct {
+type UrgencyOpts struct {
 	// Weight scales the raw urgency score before it is folded into
 	// rankUnread. 0 means "use default" (1.0). Pass values like 0.5
 	// to dampen urgency or 2.0 to amplify it. Negative values are
@@ -82,14 +82,14 @@ type urgencyOpts struct {
 
 // effectiveWeight returns Weight with the "0 / negative = default"
 // convention applied.
-func (o urgencyOpts) effectiveWeight() float64 {
+func (o UrgencyOpts) effectiveWeight() float64 {
 	if o.Weight <= 0 {
 		return 1.0
 	}
 	return o.Weight
 }
 
-// urgencyScore returns a heuristic rank bonus for a ChannelUnread,
+// UrgencyScore returns a heuristic rank bonus for a ChannelUnread,
 // summing per-message signals across both top-level messages and
 // thread replies. Independent of volume — added alongside the volume
 // score in rankUnread.
@@ -97,7 +97,7 @@ func (o urgencyOpts) effectiveWeight() float64 {
 // `now` is injected (rather than calling time.Now internally) so
 // tests can pin recency bands deterministically. Pass time.Time{} to
 // disable recency entirely.
-func urgencyScore(cu *slack.ChannelUnread, now time.Time, opts urgencyOpts) int {
+func UrgencyScore(cu *slack.ChannelUnread, now time.Time, opts UrgencyOpts) int {
 	raw := 0
 	for _, m := range cu.Messages {
 		raw += messageUrgency(m, now, opts)
@@ -111,8 +111,8 @@ func urgencyScore(cu *slack.ChannelUnread, now time.Time, opts urgencyOpts) int 
 }
 
 // messageUrgency scores a single message. Public-friendly internals
-// stay package-private — callers should always go through urgencyScore.
-func messageUrgency(m goslack.Message, now time.Time, opts urgencyOpts) int {
+// stay package-private — callers should always go through UrgencyScore.
+func messageUrgency(m goslack.Message, now time.Time, opts UrgencyOpts) int {
 	score := 0
 
 	// Question marks. Count both ASCII and full-width (CJK / RU
@@ -166,11 +166,11 @@ func messageUrgency(m goslack.Message, now time.Time, opts urgencyOpts) int {
 	return score
 }
 
-// parseExtraKeywords converts a comma-separated MCP arg into a clean,
+// ParseExtraKeywords converts a comma-separated MCP arg into a clean,
 // lowercased keyword list. Empty / whitespace-only entries are
 // dropped. Used by tools/unread.go to feed urgency_keywords into
-// urgencyOpts.
-func parseExtraKeywords(arg string) []string {
+// UrgencyOpts.
+func ParseExtraKeywords(arg string) []string {
 	if arg == "" {
 		return nil
 	}

@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"fmt"
@@ -18,7 +18,7 @@ var lowSignalNameKeywords = []string{"checkin", "presence", "standup-status"}
 // name match.
 const lowSignalShortMessageThreshold = 16
 
-// detectLowSignalChannel reports whether a ChannelUnread is a
+// DetectLowSignalChannel reports whether a ChannelUnread is a
 // status-update / "+ обед" style channel that should collapse to a
 // one-line summary instead of per-message rendering.
 //
@@ -27,7 +27,7 @@ const lowSignalShortMessageThreshold = 16
 //   - Channel name contains a known low-signal keyword.
 //   - At least 5 messages, no thread replies, and the average body
 //     length is under lowSignalShortMessageThreshold characters.
-func detectLowSignalChannel(cu *slack.ChannelUnread) bool {
+func DetectLowSignalChannel(cu *slack.ChannelUnread) bool {
 	name := strings.ToLower(cu.Channel.Name)
 	for _, kw := range lowSignalNameKeywords {
 		if strings.Contains(name, kw) {
@@ -47,9 +47,9 @@ func detectLowSignalChannel(cu *slack.ChannelUnread) bool {
 	return totalLen/len(cu.Messages) < lowSignalShortMessageThreshold
 }
 
-// renderLowSignalChannel collapses a status-only channel into one
+// RenderLowSignalChannel collapses a status-only channel into one
 // line: header + count + a few unique authors. No per-message body.
-func renderLowSignalChannel(channelLabel string, cu *slack.ChannelUnread) string {
+func RenderLowSignalChannel(channelLabel string, cu *slack.ChannelUnread) string {
 	authors := map[string]struct{}{}
 	for _, m := range cu.Messages {
 		if m.User != "" {

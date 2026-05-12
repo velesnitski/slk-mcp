@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"strings"
@@ -18,7 +18,7 @@ func shortMsg(user, text string) goslack.Message {
 func TestDetectLowSignalChannel_NameKeyword(t *testing.T) {
 	cu := mkChannelUnread("team-checkin",
 		[]goslack.Message{shortMsg("U1", "+")}, nil)
-	if !detectLowSignalChannel(cu) {
+	if !DetectLowSignalChannel(cu) {
 		t.Fatal("checkin-named channel must be low-signal")
 	}
 }
@@ -32,7 +32,7 @@ func TestDetectLowSignalChannel_ShortMessages(t *testing.T) {
 			shortMsg("U4", "Break"),
 			shortMsg("U5", "пока"),
 		}, nil)
-	if !detectLowSignalChannel(cu) {
+	if !DetectLowSignalChannel(cu) {
 		t.Fatal("5 short messages with no replies must be low-signal")
 	}
 }
@@ -47,7 +47,7 @@ func TestDetectLowSignalChannel_LongMessagesNotLowSignal(t *testing.T) {
 			shortMsg("U4", long),
 			shortMsg("U5", long),
 		}, nil)
-	if detectLowSignalChannel(cu) {
+	if DetectLowSignalChannel(cu) {
 		t.Fatal("long-body messages must not be low-signal")
 	}
 }
@@ -62,7 +62,7 @@ func TestDetectLowSignalChannel_WithRepliesNotLowSignal(t *testing.T) {
 			shortMsg("U5", "+"),
 		},
 		map[string][]goslack.Message{"1": {shortMsg("U6", "real reply")}})
-	if detectLowSignalChannel(cu) {
+	if DetectLowSignalChannel(cu) {
 		t.Fatal("channel with thread replies must not be low-signal")
 	}
 }
@@ -74,7 +74,7 @@ func TestRenderLowSignalChannel_OneLine(t *testing.T) {
 			shortMsg("U2", "обед"),
 			shortMsg("U3", "+"),
 		}, nil)
-	out := renderLowSignalChannel("#status", cu)
+	out := RenderLowSignalChannel("#status", cu)
 	if strings.Contains(out, "\n") {
 		t.Fatalf("low-signal render must be one line, got:\n%s", out)
 	}

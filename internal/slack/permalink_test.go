@@ -1,4 +1,4 @@
-package tools
+package slack
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 func TestParseSlackPermalink_TopLevelMessage(t *testing.T) {
 	// Permalink to a top-level message — TS and ThreadTS coincide.
 	in := "https://example.slack.com/archives/C0ABC1234DE/p1714000000000123"
-	p, err := parseSlackPermalink(in)
+	p, err := ParseSlackPermalink(in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestParseSlackPermalink_ThreadReply(t *testing.T) {
 	// Permalink to a reply: thread_ts query carries the root, the "p"
 	// segment is the reply's own ts.
 	in := "https://example.slack.com/archives/C0ABC1234DE/p1714000099000456?thread_ts=1714000000.000123&cid=C0ABC1234DE"
-	p, err := parseSlackPermalink(in)
+	p, err := ParseSlackPermalink(in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestParseSlackPermalink_ThreadReply(t *testing.T) {
 }
 
 func TestParseSlackPermalink_EmptyIsNoOp(t *testing.T) {
-	p, err := parseSlackPermalink("")
+	p, err := ParseSlackPermalink("")
 	if err != nil {
 		t.Errorf("empty input should not error, got %v", err)
 	}
@@ -51,7 +51,7 @@ func TestParseSlackPermalink_EmptyIsNoOp(t *testing.T) {
 		t.Errorf("empty input should return nil, got %+v", p)
 	}
 
-	p, err = parseSlackPermalink("   \t  ")
+	p, err = ParseSlackPermalink("   \t  ")
 	if err != nil {
 		t.Errorf("whitespace input should not error, got %v", err)
 	}
@@ -68,9 +68,9 @@ func TestParseSlackPermalink_NotAPermalink(t *testing.T) {
 		"random gibberish",
 	}
 	for _, c := range cases {
-		_, err := parseSlackPermalink(c)
-		if !errors.Is(err, errNotASlackPermalink) {
-			t.Errorf("parseSlackPermalink(%q) err=%v; want errNotASlackPermalink", c, err)
+		_, err := ParseSlackPermalink(c)
+		if !errors.Is(err, ErrNotASlackPermalink) {
+			t.Errorf("ParseSlackPermalink(%q) err=%v; want ErrNotASlackPermalink", c, err)
 		}
 	}
 }
@@ -82,8 +82,8 @@ func TestDecodePermalinkTS(t *testing.T) {
 		"100":              "100", // too short — leave unchanged
 	}
 	for in, want := range cases {
-		if got := decodePermalinkTS(in); got != want {
-			t.Errorf("decodePermalinkTS(%q)=%q; want %q", in, got, want)
+		if got := DecodePermalinkTS(in); got != want {
+			t.Errorf("DecodePermalinkTS(%q)=%q; want %q", in, got, want)
 		}
 	}
 }

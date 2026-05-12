@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/velesnitski/slk-mcp/internal/format"
+	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
 func registerThreadTools(s *server.MCPServer, d Deps) {
@@ -25,7 +26,7 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 				permalink := req.GetString("permalink", "")
 
 				if permalink != "" {
-					p, err := parseSlackPermalink(permalink)
+					p, err := slack.ParseSlackPermalink(permalink)
 					if err != nil {
 						return mcp.NewToolResultError("permalink could not be parsed: " + err.Error()), nil
 					}

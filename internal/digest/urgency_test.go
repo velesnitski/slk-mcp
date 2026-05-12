@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"reflect"
@@ -45,7 +45,7 @@ func TestMessageUrgency_QuestionMarksCappedAtThree(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.text, func(t *testing.T) {
-			got := messageUrgency(msgWithText(c.text), time.Time{}, urgencyOpts{})
+			got := messageUrgency(msgWithText(c.text), time.Time{}, UrgencyOpts{})
 			if got != c.want {
 				t.Fatalf("text=%q: messageUrgency=%d; want %d", c.text, got, c.want)
 			}
@@ -54,7 +54,7 @@ func TestMessageUrgency_QuestionMarksCappedAtThree(t *testing.T) {
 }
 
 func TestMessageUrgency_FullWidthQuestionMarkCounts(t *testing.T) {
-	got := messageUrgency(msgWithText("что？？"), time.Time{}, urgencyOpts{})
+	got := messageUrgency(msgWithText("что？？"), time.Time{}, UrgencyOpts{})
 	want := 2 * urgencyQuestionWeight
 	if got != want {
 		t.Fatalf("CJK ？ should count: got %d, want %d", got, want)
@@ -64,7 +64,7 @@ func TestMessageUrgency_FullWidthQuestionMarkCounts(t *testing.T) {
 func TestMessageUrgency_KeywordEnglish(t *testing.T) {
 	for _, kw := range []string{"urgent", "URGENT", "asap", "blocker", "critical", "important", "stuck"} {
 		t.Run(kw, func(t *testing.T) {
-			got := messageUrgency(msgWithText("hey we have a "+kw+" issue"), time.Time{}, urgencyOpts{})
+			got := messageUrgency(msgWithText("hey we have a "+kw+" issue"), time.Time{}, UrgencyOpts{})
 			if got < urgencyKeywordWeight {
 				t.Fatalf("keyword %q: got %d; want >= %d", kw, got, urgencyKeywordWeight)
 			}
@@ -85,7 +85,7 @@ func TestMessageUrgency_KeywordRussian(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.text, func(t *testing.T) {
-			got := messageUrgency(msgWithText(c.text), time.Time{}, urgencyOpts{})
+			got := messageUrgency(msgWithText(c.text), time.Time{}, UrgencyOpts{})
 			if got != c.want {
 				t.Fatalf("text=%q: got %d; want %d", c.text, got, c.want)
 			}
@@ -100,7 +100,7 @@ func TestMessageUrgency_Reactions(t *testing.T) {
 		{Name: "thumbsup", Count: 5}, // not in the urgency set
 		{Name: "fire", Count: 2},
 	}
-	got := messageUrgency(m, time.Time{}, urgencyOpts{})
+	got := messageUrgency(m, time.Time{}, UrgencyOpts{})
 	want := 2 * urgencyReactionWeight // rotating_light + fire
 	if got != want {
 		t.Fatalf("urgency reactions: got %d; want %d", got, want)
@@ -124,7 +124,7 @@ func TestMessageUrgency_RecencyBands(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			m := msgWithText("plain body")
 			m.Timestamp = c.ts
-			got := messageUrgency(m, now, urgencyOpts{})
+			got := messageUrgency(m, now, UrgencyOpts{})
 			if got != c.want {
 				t.Fatalf("ts=%s: got %d; want %d", c.ts, got, c.want)
 			}
@@ -135,12 +135,12 @@ func TestMessageUrgency_RecencyBands(t *testing.T) {
 func TestMessageUrgency_ZeroNowDisablesRecency(t *testing.T) {
 	m := msgWithText("recent body")
 	m.Timestamp = tsOffset(-10 * time.Minute) // very recent
-	if got := messageUrgency(m, time.Time{}, urgencyOpts{}); got != 0 {
+	if got := messageUrgency(m, time.Time{}, UrgencyOpts{}); got != 0 {
 		t.Fatalf("zero now should disable recency, got %d", got)
 	}
 }
 
-// ----------------------- urgencyScore aggregate -----------------------
+// ----------------------- UrgencyScore aggregate -----------------------
 
 func TestUrgencyScore_SumsMessagesAndReplies(t *testing.T) {
 	cu := mkChannelUnread("a",
@@ -148,17 +148,17 @@ func TestUrgencyScore_SumsMessagesAndReplies(t *testing.T) {
 		map[string][]goslack.Message{
 			"1": {msgWithText("срочно нужно")},
 		})
-	got := urgencyScore(cu, time.Time{}, urgencyOpts{})
+	got := UrgencyScore(cu, time.Time{}, UrgencyOpts{})
 	want := (urgencyKeywordWeight + 1*urgencyQuestionWeight) + // top-level
 		urgencyKeywordWeight // reply
 	if got != want {
-		t.Fatalf("urgencyScore = %d; want %d", got, want)
+		t.Fatalf("UrgencyScore = %d; want %d", got, want)
 	}
 }
 
 func TestUrgencyScore_EmptyChannel(t *testing.T) {
 	cu := mkChannelUnread("a", nil, nil)
-	if got := urgencyScore(cu, fixedNow(), urgencyOpts{}); got != 0 {
+	if got := UrgencyScore(cu, fixedNow(), UrgencyOpts{}); got != 0 {
 		t.Fatalf("empty channel urgency = %d; want 0", got)
 	}
 }
@@ -175,7 +175,7 @@ func TestRankUnread_MentionStillBeatsUrgency(t *testing.T) {
 			msgWithText("urgent blocker critical срочно сломалось"))
 	}
 
-	if rankUnread(urgentBomb, "U_SELF", time.Time{}, urgencyOpts{}) >= rankUnread(mentioned, "U_SELF", time.Time{}, urgencyOpts{}) {
+	if RankUnread(urgentBomb, "U_SELF", time.Time{}, UrgencyOpts{}) >= RankUnread(mentioned, "U_SELF", time.Time{}, UrgencyOpts{}) {
 		t.Fatalf("a mention must outrank any amount of urgency in non-mention channels")
 	}
 }
@@ -188,7 +188,7 @@ func TestRankUnread_UrgencyBeatsRawVolume(t *testing.T) {
 	urgent := mkChannelUnread("u",
 		[]goslack.Message{msgWithText("срочно сломалось критично????")}, nil)
 
-	if rankUnread(urgent, "U_SELF", time.Time{}, urgencyOpts{}) <= rankUnread(noisy, "U_SELF", time.Time{}, urgencyOpts{}) {
+	if RankUnread(urgent, "U_SELF", time.Time{}, UrgencyOpts{}) <= RankUnread(noisy, "U_SELF", time.Time{}, UrgencyOpts{}) {
 		t.Fatalf("urgent low-volume channel must outrank noisy chat")
 	}
 }
@@ -210,7 +210,7 @@ func TestRankUnread_RecencyShiftsRanking(t *testing.T) {
 		fresh.Messages = append(fresh.Messages, m)
 	}
 
-	if rankUnread(fresh, "", now, urgencyOpts{}) <= rankUnread(stale, "", now, urgencyOpts{}) {
+	if RankUnread(fresh, "", now, UrgencyOpts{}) <= RankUnread(stale, "", now, UrgencyOpts{}) {
 		t.Fatalf("fresh channel must rank above stale one of equal volume")
 	}
 }
@@ -221,9 +221,9 @@ func TestUrgencyOpts_Weight(t *testing.T) {
 	cu := mkChannelUnread("a",
 		[]goslack.Message{msgWithText("urgent blocker критично")}, nil)
 	// Three keywords × 10 = 30 raw; no other signals because timestamp empty.
-	rawDefault := urgencyScore(cu, time.Time{}, urgencyOpts{})
+	rawDefault := UrgencyScore(cu, time.Time{}, UrgencyOpts{})
 	if rawDefault != 30 {
-		t.Fatalf("default weight: urgencyScore = %d; want 30", rawDefault)
+		t.Fatalf("default weight: UrgencyScore = %d; want 30", rawDefault)
 	}
 
 	cases := []struct {
@@ -239,7 +239,7 @@ func TestUrgencyOpts_Weight(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := urgencyScore(cu, time.Time{}, urgencyOpts{Weight: c.weight})
+			got := UrgencyScore(cu, time.Time{}, UrgencyOpts{Weight: c.weight})
 			if got != c.want {
 				t.Fatalf("weight=%v: got %d; want %d", c.weight, got, c.want)
 			}
@@ -251,10 +251,10 @@ func TestUrgencyOpts_ExtraKeywordsAreAdditive(t *testing.T) {
 	cu := mkChannelUnread("a",
 		[]goslack.Message{msgWithText("p0 incident in prod")}, nil)
 	// "p0" and "incident" aren't in built-in list; without extras, score=0.
-	if got := urgencyScore(cu, time.Time{}, urgencyOpts{}); got != 0 {
+	if got := UrgencyScore(cu, time.Time{}, UrgencyOpts{}); got != 0 {
 		t.Fatalf("expected 0 with no extras; got %d", got)
 	}
-	got := urgencyScore(cu, time.Time{}, urgencyOpts{
+	got := UrgencyScore(cu, time.Time{}, UrgencyOpts{
 		ExtraKeywords: []string{"p0", "incident"},
 	})
 	want := 2 * urgencyKeywordWeight
@@ -266,7 +266,7 @@ func TestUrgencyOpts_ExtraKeywordsAreAdditive(t *testing.T) {
 func TestUrgencyOpts_ExtraKeywordsCoexistWithBuiltins(t *testing.T) {
 	cu := mkChannelUnread("a",
 		[]goslack.Message{msgWithText("urgent prod down, p0 incident")}, nil)
-	got := urgencyScore(cu, time.Time{}, urgencyOpts{
+	got := UrgencyScore(cu, time.Time{}, UrgencyOpts{
 		ExtraKeywords: []string{"prod down", "p0", "incident"},
 	})
 	// Built-ins: "urgent". Extras: "prod down", "p0", "incident".
@@ -282,7 +282,7 @@ func TestUrgencyOpts_ExtraKeywordsSkipEmpty(t *testing.T) {
 	// Empty / whitespace extras must not match anything (which would
 	// match every message because strings.Contains(_, "") is always
 	// true).
-	got := urgencyScore(cu, time.Time{}, urgencyOpts{
+	got := UrgencyScore(cu, time.Time{}, UrgencyOpts{
 		ExtraKeywords: []string{"", "   "},
 	})
 	if got != 0 {
@@ -305,9 +305,9 @@ func TestParseExtraKeywords(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
-			got := parseExtraKeywords(c.in)
+			got := ParseExtraKeywords(c.in)
 			if !reflect.DeepEqual(got, c.want) {
-				t.Fatalf("parseExtraKeywords(%q) = %v; want %v", c.in, got, c.want)
+				t.Fatalf("ParseExtraKeywords(%q) = %v; want %v", c.in, got, c.want)
 			}
 		})
 	}
@@ -337,7 +337,7 @@ func TestMessageUrgency_LogSeverityKeywords(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.text, func(t *testing.T) {
-			got := messageUrgency(msgWithText(c.text), time.Time{}, urgencyOpts{})
+			got := messageUrgency(msgWithText(c.text), time.Time{}, UrgencyOpts{})
 			wantMin := c.minHits * urgencyKeywordWeight
 			if c.minHits == 0 {
 				if got != 0 {
@@ -363,13 +363,13 @@ func TestRankUnread_TuningBeatsBuiltinDefault(t *testing.T) {
 	p0 := mkChannelUnread("p0",
 		[]goslack.Message{msgWithText("we have a p0")}, nil)
 
-	noExtra := urgencyOpts{}
-	withExtra := urgencyOpts{ExtraKeywords: []string{"p0"}}
+	noExtra := UrgencyOpts{}
+	withExtra := UrgencyOpts{ExtraKeywords: []string{"p0"}}
 
-	if rankUnread(p0, "", time.Time{}, noExtra) >= rankUnread(noise, "", time.Time{}, noExtra) {
+	if RankUnread(p0, "", time.Time{}, noExtra) >= RankUnread(noise, "", time.Time{}, noExtra) {
 		t.Fatalf("baseline: p0 should NOT outrank noise without the extra keyword")
 	}
-	if rankUnread(p0, "", time.Time{}, withExtra) <= rankUnread(noise, "", time.Time{}, withExtra) {
+	if RankUnread(p0, "", time.Time{}, withExtra) <= RankUnread(noise, "", time.Time{}, withExtra) {
 		t.Fatalf("with extra keyword: p0 must outrank noise")
 	}
 }

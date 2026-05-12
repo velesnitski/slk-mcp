@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"fmt"
@@ -26,7 +26,7 @@ type References struct {
 	Branches []string // e.g. release-x, feature/foo-bar
 }
 
-func collectReferences(results []*slack.ChannelUnread) References {
+func CollectReferences(results []*slack.ChannelUnread) References {
 	issues := map[string]struct{}{}
 	mrs := map[string]struct{}{}
 	branches := map[string]struct{}{}
@@ -75,9 +75,9 @@ func sortedKeys(m map[string]struct{}) []string {
 	return out
 }
 
-// renderReferences returns a compact footer for the digest. Empty
+// RenderReferences returns a compact footer for the digest. Empty
 // when no references were found.
-func renderReferences(r References) string {
+func RenderReferences(r References) string {
 	if len(r.Issues) == 0 && len(r.MRs) == 0 && len(r.Branches) == 0 {
 		return ""
 	}

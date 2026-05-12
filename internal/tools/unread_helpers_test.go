@@ -7,6 +7,7 @@ import (
 	"time"
 
 	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/digest"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
@@ -34,7 +35,7 @@ func mkChannelUnread(name string, msgs []goslack.Message, replies map[string][]g
 func TestChannelMentions_DirectMessage(t *testing.T) {
 	cu := mkChannelUnread("a",
 		[]goslack.Message{mkMsg("1.0", "U2", "ping <@U_SELF> please")}, nil)
-	if !channelMentions(cu, "U_SELF") {
+	if !digest.ChannelMentions(cu, "U_SELF") {
 		t.Fatal("expected mention in top-level message")
 	}
 }
@@ -45,7 +46,7 @@ func TestChannelMentions_ReplyOnly(t *testing.T) {
 		map[string][]goslack.Message{
 			"1.0": {mkMsg("1.5", "U3", "ping <@U_SELF> deep in thread")},
 		})
-	if !channelMentions(cu, "U_SELF") {
+	if !digest.ChannelMentions(cu, "U_SELF") {
 		t.Fatal("expected mention via thread reply")
 	}
 }
@@ -56,7 +57,7 @@ func TestChannelMentions_None(t *testing.T) {
 		map[string][]goslack.Message{
 			"1.0": {mkMsg("1.5", "U3", "still none")},
 		})
-	if channelMentions(cu, "U_SELF") {
+	if digest.ChannelMentions(cu, "U_SELF") {
 		t.Fatal("expected no mention")
 	}
 }
@@ -64,7 +65,7 @@ func TestChannelMentions_None(t *testing.T) {
 func TestChannelMentions_EmptySelfID(t *testing.T) {
 	cu := mkChannelUnread("a",
 		[]goslack.Message{mkMsg("1.0", "U2", "ping <@U_SELF>")}, nil)
-	if channelMentions(cu, "") {
+	if digest.ChannelMentions(cu, "") {
 		t.Fatal("empty selfID must report no mention")
 	}
 }
@@ -111,7 +112,7 @@ func TestRankUnread_MentionsOutrankVolume(t *testing.T) {
 	tagged := mkChannelUnread("tagged",
 		[]goslack.Message{mkMsg("1.0", "U2", "ping <@U_SELF>")}, nil)
 
-	if rankUnread(busy, "U_SELF", time.Time{}, urgencyOpts{}) >= rankUnread(tagged, "U_SELF", time.Time{}, urgencyOpts{}) {
+	if digest.RankUnread(busy, "U_SELF", time.Time{}, digest.UrgencyOpts{}) >= digest.RankUnread(tagged, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
 		t.Fatalf("tagged channel must outrank a much busier non-tagged one")
 	}
 }
@@ -123,7 +124,7 @@ func TestRankUnread_VolumeBreaksTies(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		bigger.Messages = append(bigger.Messages, mkMsg("1.0", "U2", "x"))
 	}
-	if rankUnread(bigger, "U_SELF", time.Time{}, urgencyOpts{}) <= rankUnread(smaller, "U_SELF", time.Time{}, urgencyOpts{}) {
+	if digest.RankUnread(bigger, "U_SELF", time.Time{}, digest.UrgencyOpts{}) <= digest.RankUnread(smaller, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
 		t.Fatalf("among non-tagged channels, busier must rank higher")
 	}
 }
@@ -136,7 +137,7 @@ func TestRankUnread_RepliesCountTowardVolume(t *testing.T) {
 		})
 	withoutReplies := mkChannelUnread("b",
 		[]goslack.Message{mkMsg("1.0", "U2", "x")}, nil)
-	if rankUnread(withReplies, "", time.Time{}, urgencyOpts{}) <= rankUnread(withoutReplies, "", time.Time{}, urgencyOpts{}) {
+	if digest.RankUnread(withReplies, "", time.Time{}, digest.UrgencyOpts{}) <= digest.RankUnread(withoutReplies, "", time.Time{}, digest.UrgencyOpts{}) {
 		t.Fatalf("replies should add to the volume score")
 	}
 }

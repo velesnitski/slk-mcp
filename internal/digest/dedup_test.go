@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"reflect"
@@ -345,7 +345,7 @@ func TestLogChannelDigest_LegacySamplesStillWork(t *testing.T) {
 	}
 }
 
-// ----------------------- buildLogBands integration -----------------------
+// ----------------------- BuildLogBands integration -----------------------
 
 func TestBuildLogBands_DedupesAndOrders(t *testing.T) {
 	msgs := []goslack.Message{
@@ -356,7 +356,7 @@ func TestBuildLogBands_DedupesAndOrders(t *testing.T) {
 		dedupMsg("ERROR pipeline #3 failed", "1700000500.000000"),
 		dedupMsg("ERROR distinct exception", "1700000600.000000"),
 	}
-	bands := buildLogBands(msgs, 5)
+	bands := BuildLogBands(msgs, 5)
 
 	for _, b := range bands {
 		switch b.Label {

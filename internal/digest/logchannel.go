@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"strings"
@@ -37,7 +37,7 @@ func (s LogSeverity) String() string {
 	}
 }
 
-// orderedSeverities lists the bands that buildLogBands produces, in
+// orderedSeverities lists the bands that BuildLogBands produces, in
 // the order LogChannelDigest renders them — strongest first.
 var orderedSeverities = []LogSeverity{
 	SeverityFatal, SeverityError, SeverityAlert, SeverityWarn, SeverityInfo,
@@ -88,7 +88,7 @@ func containsAny(s string, terms ...string) bool {
 	return false
 }
 
-// detectLogChannel heuristically identifies a bot-driven log/alert
+// DetectLogChannel heuristically identifies a bot-driven log/alert
 // channel. Two signals, OR'd together:
 //
 //  1. Bot authorship — if at least logChannelBotThreshold of the
@@ -100,7 +100,7 @@ func containsAny(s string, terms ...string) bool {
 //     "*-cron", "*-incident", etc.
 //
 // Returns false on empty channels (nothing to classify).
-func detectLogChannel(cu *slack.ChannelUnread) bool {
+func DetectLogChannel(cu *slack.ChannelUnread) bool {
 	if len(cu.Messages) == 0 {
 		return false
 	}
@@ -127,7 +127,7 @@ func isBotMessage(m goslack.Message) bool {
 }
 
 // logChannelNameKeywords drive the fallback channel-name signal in
-// detectLogChannel. Substrings are matched case-insensitively.
+// DetectLogChannel. Substrings are matched case-insensitively.
 var logChannelNameKeywords = []string{
 	"log", "alert", "alarm", "monitor", "monitoring",
 	"metric", "metrics", "report", "reports", "cron",
@@ -144,14 +144,14 @@ func isLogChannelName(name string) bool {
 	return false
 }
 
-// buildLogBands groups messages by severity and dedupes similar
+// BuildLogBands groups messages by severity and dedupes similar
 // messages within each band into LogPatterns, capped at
 // patternsPerBand distinct patterns per severity. Returns one entry
 // per severity in dominance order (FATAL → INFO) — empty bands have
 // Total=0 and no patterns, so LogChannelDigest hides them.
 //
 // patternsPerBand <= 0 falls back to defaultPatternsPerBand.
-func buildLogBands(messages []goslack.Message, patternsPerBand int) []format.LogBand {
+func BuildLogBands(messages []goslack.Message, patternsPerBand int) []format.LogBand {
 	if patternsPerBand <= 0 {
 		patternsPerBand = defaultPatternsPerBand
 	}

@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"strings"
@@ -28,7 +28,7 @@ func TestCollectReferences_DedupesAndCategorises(t *testing.T) {
 			},
 		})
 
-	r := collectReferences([]*slack.ChannelUnread{cu})
+	r := CollectReferences([]*slack.ChannelUnread{cu})
 
 	wantIssues := []string{"BAR-200", "BAZ-7", "FOO-100", "QUX-300"}
 	if len(r.Issues) != len(wantIssues) {
@@ -56,13 +56,13 @@ func TestCollectReferences_DedupesAndCategorises(t *testing.T) {
 }
 
 func TestRenderReferences_EmptyWhenNoRefs(t *testing.T) {
-	if got := renderReferences(References{}); got != "" {
+	if got := RenderReferences(References{}); got != "" {
 		t.Fatalf("expected empty, got %q", got)
 	}
 }
 
 func TestRenderReferences_RendersAllSections(t *testing.T) {
-	out := renderReferences(References{
+	out := RenderReferences(References{
 		Issues:   []string{"FOO-1", "BAR-2"},
 		MRs:      []string{"100"},
 		Branches: []string{"main"},
@@ -86,7 +86,7 @@ func TestCollectReferences_StripsSlackLinkMarkup(t *testing.T) {
 		[]goslack.Message{
 			refMsg("see <https://example.test/issue/FOO-1|FOO-1> for the spec"),
 		}, nil)
-	r := collectReferences([]*slack.ChannelUnread{cu})
+	r := CollectReferences([]*slack.ChannelUnread{cu})
 	if len(r.Issues) != 1 || r.Issues[0] != "FOO-1" {
 		t.Fatalf("expected [FOO-1], got %v", r.Issues)
 	}

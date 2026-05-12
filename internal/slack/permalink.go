@@ -1,4 +1,4 @@
-package tools
+package slack
 
 import (
 	"errors"
@@ -27,12 +27,12 @@ var (
 	permalinkTSRe      = regexp.MustCompile(`/p(\d{10,})`)
 )
 
-// errNotASlackPermalink lets callers distinguish "user passed a
+// ErrNotASlackPermalink lets callers distinguish "user passed a
 // permalink that did not parse" from "user did not pass a permalink at
 // all" — the second is fine, the first is a validation error.
-var errNotASlackPermalink = errors.New("not a slack permalink")
+var ErrNotASlackPermalink = errors.New("not a slack permalink")
 
-// parsedPermalink holds the fields extracted from a Slack message URL.
+// ParsedPermalink holds the fields extracted from a Slack message URL.
 //
 // ChannelID is the canonical channel ID (`C…` for public channels,
 // `G…` for private, `D…` for DMs).
@@ -42,18 +42,18 @@ var errNotASlackPermalink = errors.New("not a slack permalink")
 // ThreadTS is the thread root timestamp: equal to TS when the message
 // is a top-level message, and equal to the `thread_ts` query parameter
 // when the message is a reply.
-type parsedPermalink struct {
+type ParsedPermalink struct {
 	ChannelID string
 	TS        string
 	ThreadTS  string
 }
 
-// parseSlackPermalink extracts (channel_id, ts, thread_ts) from a Slack
-// message permalink. Returns errNotASlackPermalink for inputs that are
+// ParseSlackPermalink extracts (channel_id, ts, thread_ts) from a Slack
+// message permalink. Returns ErrNotASlackPermalink for inputs that are
 // missing the channel or "p<ts>" segments. Empty input is a no-op:
 // returns nil pointer and no error so callers can treat "no permalink"
 // as "no override".
-func parseSlackPermalink(raw string) (*parsedPermalink, error) {
+func ParseSlackPermalink(raw string) (*ParsedPermalink, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
@@ -65,10 +65,10 @@ func parseSlackPermalink(raw string) (*parsedPermalink, error) {
 	chMatch := permalinkChannelRe.FindStringSubmatch(raw)
 	tsMatch := permalinkTSRe.FindStringSubmatch(raw)
 	if len(chMatch) < 2 || len(tsMatch) < 2 {
-		return nil, errNotASlackPermalink
+		return nil, ErrNotASlackPermalink
 	}
 
-	ts := decodePermalinkTS(tsMatch[1])
+	ts := DecodePermalinkTS(tsMatch[1])
 	threadTS := ts
 
 	if u, err := url.Parse(raw); err == nil {
@@ -80,18 +80,18 @@ func parseSlackPermalink(raw string) (*parsedPermalink, error) {
 		}
 	}
 
-	return &parsedPermalink{
+	return &ParsedPermalink{
 		ChannelID: chMatch[1],
 		TS:        ts,
 		ThreadTS:  threadTS,
 	}, nil
 }
 
-// decodePermalinkTS turns the dot-stripped permalink form
+// DecodePermalinkTS turns the dot-stripped permalink form
 // ("1714000000000123") back into the canonical Slack ts
 // ("1714000000.000123"). Slack always pads the fractional part to six
 // digits, so the decimal sits six characters from the end.
-func decodePermalinkTS(packed string) string {
+func DecodePermalinkTS(packed string) string {
 	if len(packed) <= 6 {
 		return packed
 	}

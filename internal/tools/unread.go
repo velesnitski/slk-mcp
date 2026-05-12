@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/digest"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
@@ -43,9 +44,9 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				replyCap := int(req.GetFloat("thread_preview_replies", float64(format.ThreadPreviewReplies)))
 				logMode := strings.ToLower(strings.TrimSpace(req.GetString("log_mode", "auto")))
 				logSamples := int(req.GetFloat("log_samples_per_band", 3))
-				urg := urgencyOpts{
+				urg := digest.UrgencyOpts{
 					Weight:        req.GetFloat("urgency_weight", 0),
-					ExtraKeywords: parseExtraKeywords(req.GetString("urgency_keywords", "")),
+					ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
 				}
 
 				results, err := d.Client.Unread.UnreadAll(ctx, maxPer)
@@ -80,7 +81,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 
 				now := time.Now()
 				sort.Slice(results, func(i, j int) bool {
-					return rankUnread(results[i], selfID, now, urg) > rankUnread(results[j], selfID, now, urg)
+					return digest.RankUnread(results[i], selfID, now, urg) > digest.RankUnread(results[j], selfID, now, urg)
 				})
 
 				totalMsgs, totalReplies := 0, 0
@@ -105,19 +106,19 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 					label := channelDisplayLabel(ctx, r.Channel, d.Client.Users)
 					var rendered string
 					switch {
-					case logMode != "off" && detectGitChannel(r):
+					case logMode != "off" && digest.DetectGitChannel(r):
 						logChannels++
-						workflows, orphans := groupGitWorkflows(r.Messages)
+						workflows, orphans := digest.GroupGitWorkflows(r.Messages)
 						if len(workflows) == 0 && len(orphans) == 0 {
 							continue
 						}
-						rendered = renderGitChannel(label, len(r.Messages), workflows, orphans)
-					case logMode != "off" && detectLogChannel(r):
+						rendered = digest.RenderGitChannel(label, len(r.Messages), workflows, orphans)
+					case logMode != "off" && digest.DetectLogChannel(r):
 						logChannels++
-						bands := buildLogBands(r.Messages, logSamples)
+						bands := digest.BuildLogBands(r.Messages, logSamples)
 						rendered = format.LogChannelDigest(label, len(r.Messages), bands, users)
-					case detectLowSignalChannel(r):
-						rendered = renderLowSignalChannel(label, r)
+					case digest.DetectLowSignalChannel(r):
+						rendered = digest.RenderLowSignalChannel(label, r)
 					default:
 						rendered = format.ChannelDigest(
 							label, r.Messages, users, maxPer,
@@ -135,7 +136,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				if logChannels > 0 {
 					d.Log.Debug("log mode applied", "channels", logChannels)
 				}
-				if footer := renderReferences(collectReferences(results)); footer != "" {
+				if footer := digest.RenderReferences(digest.CollectReferences(results)); footer != "" {
 					b.WriteString(footer)
 					b.WriteString("\n")
 				}
@@ -236,7 +237,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 				permalink := req.GetString("permalink", "")
 
 				if permalink != "" {
-					p, err := parseSlackPermalink(permalink)
+					p, err := slack.ParseSlackPermalink(permalink)
 					if err != nil {
 						return mcp.NewToolResultError("permalink could not be parsed: " + err.Error()), nil
 					}
@@ -505,48 +506,7 @@ func channelDisplayLabel(ctx context.Context, ch goslack.Channel, users *slack.U
 	}
 }
 
-// rankUnread orders ChannelUnread results. The components, in order
-// of dominance:
-//
-//  1. A direct mention of selfID — adds 1_000_000, so any mention
-//     beats any volume or urgency from non-mentioning channels.
-//  2. Urgency heuristic — keywords ("urgent" / "срочно"), question
-//     marks, urgency reactions, recency. See internal/tools/urgency.go.
-//     Tunable per call via urgencyOpts (weight + extra keywords).
-//  3. Raw volume — total unread messages + replies.
-//
-// `now` is injected so tests can fix recency. Pass time.Time{} to
-// disable the recency component.
-func rankUnread(cu *slack.ChannelUnread, selfID string, now time.Time, urg urgencyOpts) int {
-	rank := len(cu.Messages)
-	for _, rs := range cu.Replies {
-		rank += len(rs)
-	}
-	rank += urgencyScore(cu, now, urg)
-	if channelMentions(cu, selfID) {
-		rank += 1_000_000
-	}
-	return rank
-}
-
-func channelMentions(cu *slack.ChannelUnread, selfID string) bool {
-	if selfID == "" {
-		return false
-	}
-	for _, m := range cu.Messages {
-		if format.MentionsUser(m, selfID) {
-			return true
-		}
-	}
-	for _, rs := range cu.Replies {
-		for _, r := range rs {
-			if format.MentionsUser(r, selfID) {
-				return true
-			}
-		}
-	}
-	return false
-}
+// rankUnread / channelMentions moved to internal/digest (rank.go).
 
 // filterMentions returns only ChannelUnread entries that contain at
 // least one direct mention of selfID, in either a top-level message
@@ -558,7 +518,7 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 	}
 	out := results[:0]
 	for _, r := range results {
-		if channelMentions(r, selfID) {
+		if digest.ChannelMentions(r, selfID) {
 			out = append(out, r)
 		}
 	}

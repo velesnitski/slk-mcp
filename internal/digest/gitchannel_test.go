@@ -1,4 +1,4 @@
-package tools
+package digest
 
 import (
 	"strings"
@@ -91,7 +91,7 @@ func TestGroupGitWorkflows_PrefersMRIidOverIssue(t *testing.T) {
 		gitMsg("100", "Alice (alice) approved merge request !55 FOO-99 thing"),
 		gitMsg("110", "Alice (alice) merged merge request !55 FOO-99 thing"),
 	}
-	workflows, orphans := groupGitWorkflows(msgs)
+	workflows, orphans := GroupGitWorkflows(msgs)
 	if len(orphans) != 0 {
 		t.Errorf("expected 0 orphans, got %d", len(orphans))
 	}
@@ -111,7 +111,7 @@ func TestGroupGitWorkflows_BranchAliasesToMR(t *testing.T) {
 		gitMsg("100", "Alice (alice) opened merge request !66 from branch feature/BAR-12-x"),
 		gitMsg("110", "Bob (bob) removed branch feature/BAR-12-x from Repo"),
 	}
-	workflows, _ := groupGitWorkflows(msgs)
+	workflows, _ := GroupGitWorkflows(msgs)
 	if len(workflows) != 1 {
 		t.Fatalf("expected 1 workflow (branch should alias to !66), got %d: %+v", len(workflows), workflows)
 	}
@@ -132,7 +132,7 @@ func TestGroupGitWorkflows_TracksActorRoles(t *testing.T) {
 		gitMsg("110", "Bob (bob) approved merge request !77"),
 		gitMsg("120", "Alice (alice) merged merge request !77"),
 	}
-	workflows, _ := groupGitWorkflows(msgs)
+	workflows, _ := GroupGitWorkflows(msgs)
 	if len(workflows) != 1 {
 		t.Fatalf("expected 1 workflow, got %d", len(workflows))
 	}
@@ -165,7 +165,7 @@ func TestGroupGitWorkflows_MRWithoutIssueIDStillGroups(t *testing.T) {
 		gitMsg("100", "Alice (alice) opened merge request !88 — refactor logic"),
 		gitMsg("110", "Alice (alice) merged merge request !88"),
 	}
-	workflows, orphans := groupGitWorkflows(msgs)
+	workflows, orphans := GroupGitWorkflows(msgs)
 	if len(orphans) != 0 {
 		t.Errorf("expected 0 orphans, got %d", len(orphans))
 	}
@@ -179,7 +179,7 @@ func TestGroupGitWorkflows_DeployFlagged(t *testing.T) {
 		gitMsg("100", "Starting deploy to stage"),
 		gitMsg("110", "Deploy to stage succeeded"),
 	}
-	workflows, _ := groupGitWorkflows(msgs)
+	workflows, _ := GroupGitWorkflows(msgs)
 	if len(workflows) == 0 {
 		t.Fatal("expected workflow for deploy")
 	}
@@ -221,8 +221,8 @@ func TestRenderGitChannel_DropsTrailingDashWhenNoActors(t *testing.T) {
 		gitMsg("100", "Starting deploy to production"),
 		gitMsg("110", "Deploy to production succeeded"),
 	}
-	workflows, _ := groupGitWorkflows(msgs)
-	out := renderGitChannel("#git-deploy", len(msgs), workflows, nil)
+	workflows, _ := GroupGitWorkflows(msgs)
+	out := RenderGitChannel("#git-deploy", len(msgs), workflows, nil)
 
 	if strings.Contains(out, "— —") {
 		t.Errorf("rendered output contains stray '— —' suffix:\n%s", out)
@@ -239,8 +239,8 @@ func TestRenderGitChannel_KeepsActorsWhenPresent(t *testing.T) {
 		gitMsg("100", "Alice (alice) opened merge request !99"),
 		gitMsg("110", "Alice (alice) merged merge request !99"),
 	}
-	workflows, _ := groupGitWorkflows(msgs)
-	out := renderGitChannel("#git-test", len(msgs), workflows, nil)
+	workflows, _ := GroupGitWorkflows(msgs)
+	out := RenderGitChannel("#git-test", len(msgs), workflows, nil)
 
 	if !strings.Contains(out, "— alice") {
 		t.Errorf("expected '— alice' (with role tag) in:\n%s", out)
