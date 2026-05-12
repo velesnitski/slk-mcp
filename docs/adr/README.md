@@ -52,3 +52,4 @@ don't rewrite history.
 - [001 — GIT MODE prefers MR-iid over issue-id](001-mr-iid-priority.md)
 - [002 — Unified `id→name` refs map for users and channels](002-unified-refs-map.md)
 - [003 — `Hub` receiver replaces `Deps` service-locator](003-hub-receiver.md)
+- [004 — Absolute-time `since`/`until` on `get_user_messages`](004-absolute-time-user-search.md)

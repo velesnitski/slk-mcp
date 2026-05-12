@@ -4,12 +4,33 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
+
+// buildUserMessagesQuery assembles the Slack search query for
+// get_user_messages. Factored out for unit testing so the date-bound
+// behaviour stays pinned even if the surrounding handler shifts.
+//
+// since/until pass straight through to Slack's own after:/before:
+// operators. Validation (date format) is the caller's job.
+func buildUserMessagesQuery(user, channel, since, until string) string {
+	parts := []string{"from:@" + user}
+	if channel != "" {
+		parts = append(parts, "in:#"+strings.TrimPrefix(channel, "#"))
+	}
+	if since != "" {
+		parts = append(parts, "after:"+since)
+	}
+	if until != "" {
+		parts = append(parts, "before:"+until)
+	}
+	return strings.Join(parts, " ")
+}
 
 func (h *Hub) registerThreadTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("get_thread") {
@@ -73,10 +94,15 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("get_user_messages") {
 		s.AddTool(
 			mcp.NewTool("get_user_messages",
-				mcp.WithDescription("Recent messages from a user. Uses workspace search."),
+				mcp.WithDescription("Recent messages from a user. Uses workspace search. "+
+					"Pass since=/until= (YYYY-MM-DD) for absolute-time scans — preferred over "+
+					"get_unread_summary when verifying that a user posted by a deadline, since "+
+					"unread state depends on the caller's last_read mark."),
 				mcp.WithString("user", mcp.Required(), mcp.Description("Username or display name")),
 				mcp.WithString("channel", mcp.Description("Optional channel name to restrict search")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 30)")),
+				mcp.WithString("since", mcp.Description("Lower bound, YYYY-MM-DD. Maps to Slack search after:")),
+				mcp.WithString("until", mcp.Description("Upper bound, YYYY-MM-DD. Maps to Slack search before:")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				user, err := req.RequireString("user")
@@ -85,11 +111,18 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				}
 				channel := req.GetString("channel", "")
 				limit := int(req.GetFloat("limit", 30))
-
-				query := "from:@" + user
-				if channel != "" {
-					query += " in:#" + strings.TrimPrefix(channel, "#")
+				since := req.GetString("since", "")
+				until := req.GetString("until", "")
+				for _, d := range []struct{ name, val string }{{"since", since}, {"until", until}} {
+					if d.val == "" {
+						continue
+					}
+					if _, perr := time.Parse("2006-01-02", d.val); perr != nil {
+						return mcp.NewToolResultError(d.name + " must be YYYY-MM-DD"), nil
+					}
 				}
+
+				query := buildUserMessagesQuery(user, channel, since, until)
 				matches, err := h.client.Search.Messages(ctx, query, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-05-12
+
+### Added
+
+- `get_user_messages` now accepts optional `since` / `until` (YYYY-MM-DD)
+  parameters that map straight to Slack's `after:` / `before:` search
+  operators. One call answers "did user X post in channel Y between
+  these dates?" deterministically — independent of the caller's
+  unread / `last_read` state.
+- Tool description spells out the preferred-over-`get_unread_summary`
+  use case so deadline-style queries route to the right primitive.
+
+### Why
+Read-state-driven tools (`get_unread_summary`) silently omit posts
+the caller already saw — leading to false "no post today" inferences
+when the question is really "did the post exist." Absolute-time
+scans are immune to that confusion. See ADR 004.
+
 ## [0.4.1] - 2026-05-12
 
 ### Added — infra, no behaviour change.
