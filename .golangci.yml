@@ -4,13 +4,12 @@
 # accurate AND fixable without aesthetic debate. Style nits
 # (gocritic / gocognit / etc.) are deliberately omitted to avoid
 # churn-on-CI; run them locally if curious.
-version: "2"
 
 run:
   timeout: 5m
 
 linters:
-  default: none
+  disable-all: true
   enable:
     # Catches unhandled errors — the most common Go bug class.
     - errcheck
@@ -25,15 +24,14 @@ linters:
     - ineffassign
     # Variables, constants, functions declared but never used.
     - unused
-    # Simplifications staticcheck doesn't cover — duplicate imports,
-    # missing copyright headers (we don't enforce headers — but the
-    # other checks are still worth having).
+    # Common typos in identifiers, strings, comments.
     - misspell
-  exclusions:
-    rules:
-      # _test.go files can keep variables they declare-but-don't-use
-      # when iterating on tests; we want signal in production code,
-      # not friction during test development.
-      - path: _test\.go
-        linters:
-          - unused
+
+issues:
+  exclude-rules:
+    # _test.go files can keep variables they declare-but-don't-use
+    # when iterating on tests; we want signal in production code,
+    # not friction during test development.
+    - path: _test\.go
+      linters:
+        - unused
