@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-12
+
+### Architecture refresh — no behaviour change, no tool-surface change.
+
+Same MCP contract, same outputs. The internals were reshaped so the
+package boundaries match what each layer is actually doing.
+
+#### Package split (PR-1)
+`internal/tools/` had drifted to 2948 LoC mixing MCP-handler wiring
+with pure rendering and classification logic. Split:
+
+- New `internal/digest/` package — pure helpers, no `mcp.*` types,
+  no shared-state struct: `dedup`, `gitchannel`, `logchannel`,
+  `lowsignal`, `refs`, `urgency`, `zabbix` (Slack-channel alert
+  parser, despite the name), plus the `RankUnread` / `ChannelMentions`
+  scoring previously buried in unread.go.
+- `internal/slack/permalink.go` — `ParseSlackPermalink` belongs at
+  the Slack-protocol boundary, not in the MCP wiring layer.
+- `internal/tools/` is now 1797 LoC, exclusively MCP-handler concerns.
+
+#### `Hub` receiver pattern (PR-2)
+`tools.Deps`-as-service-locator replaced by a `tools.Hub` that owns
+the slack client, config, and structured logger. main.go:
+
+    tools.NewHub(client, cfg, log).RegisterAll(mcpServer)
+
+All register* functions and their helpers (resolveTargetChannels,
+resolveRefs, resolveRefsWithReplies, filterPendingMentions,
+operatorReplied, fetchMentionContext, fetchLastPostDates,
+channelDigest, channelDigestRange) are now methods on `*Hub`. Pure
+helpers (parseChannelList, collectUserIDs, mergeRefs, detectDecisions,
+matchDecision) stay as free functions.
+
+Introduced `toolDef` + `(h *Hub).register(s, defs...)` + `wrap()`
+middleware seam. Today the seam is a pass-through — the hook is
+in place for future timing / panic recovery / structured logs
+without touching individual handlers.
+
+#### Generic retry (PR-3)
+New `ratelimit.DoR[T any](ctx, log, fn func() (T, error)) (T, error)`
+collapses the recurring three-line "var x; ratelimit.Do { x = r }"
+glue to one line. Wired through every single-value Slack API call
+in `slack/channels.go`, `messages.go`, `search.go`, `users.go`.
+Multi-step / void-return paths keep `Do`.
+
+#### File-size cap (≤ 600 LoC)
+`internal/tools/unread.go` (was 641 LoC) split into:
+- `unread.go` (275 LoC) — handler registration only.
+- `unread_helpers.go` (340 LoC) — filter*, fetchMentionContext,
+  channelDisplayLabel, resolveRefsWithReplies, collect*.
+
+No source file in the repo now exceeds 600 LoC.
+
+### Quality
+323 tests pass across 9 packages, `go vet` clean, sensitive-data
+scan clean.
+
 ## [0.3.26] - 2026-05-12
 
 ### Fixed
