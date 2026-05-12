@@ -36,14 +36,8 @@ func (s *UserService) Name(ctx context.Context, userID string) string {
 	}
 	s.mu.RUnlock()
 
-	var user *goslack.User
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
-		u, err := s.api.GetUserInfoContext(ctx, userID)
-		if err != nil {
-			return err
-		}
-		user = u
-		return nil
+	user, err := ratelimit.DoR(ctx, s.log, func() (*goslack.User, error) {
+		return s.api.GetUserInfoContext(ctx, userID)
 	})
 	if err != nil {
 		s.log.Debug("resolve user failed", "user_id", userID, "err", err)
@@ -76,21 +70,20 @@ func (s *UserService) NamesFor(ctx context.Context, userIDs []string) map[string
 // List returns all non-deleted workspace users. Pagination is
 // handled internally; one users.list call per 200-user page.
 func (s *UserService) List(ctx context.Context) ([]goslack.User, error) {
-	var out []goslack.User
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
-		us, err := s.api.GetUsersContext(ctx, goslack.GetUsersOptionLimit(200))
-		if err != nil {
-			return err
-		}
-		for _, u := range us {
-			if u.Deleted {
-				continue
-			}
-			out = append(out, u)
-		}
-		return nil
+	us, err := ratelimit.DoR(ctx, s.log, func() ([]goslack.User, error) {
+		return s.api.GetUsersContext(ctx, goslack.GetUsersOptionLimit(200))
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	out := us[:0]
+	for _, u := range us {
+		if u.Deleted {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out, nil
 }
 
 // formatUserDisplay renders a user as "Real Name (handle)" so the

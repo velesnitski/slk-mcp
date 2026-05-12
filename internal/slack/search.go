@@ -35,14 +35,8 @@ func (s *SearchService) Messages(ctx context.Context, query string, count int) (
 		Count:         count,
 	}
 
-	var result *goslack.SearchMessages
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
-		r, err := s.api.SearchMessagesContext(ctx, query, params)
-		if err != nil {
-			return err
-		}
-		result = r
-		return nil
+	result, err := ratelimit.DoR(ctx, s.log, func() (*goslack.SearchMessages, error) {
+		return s.api.SearchMessagesContext(ctx, query, params)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search.messages: %w", err)

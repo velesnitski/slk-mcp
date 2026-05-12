@@ -68,17 +68,18 @@ func (s *ChannelService) ResolveID(ctx context.Context, name string) (string, er
 			Cursor:          cursor,
 			ExcludeArchived: true,
 		}
-		var channels []goslack.Channel
-		var next string
-		err := ratelimit.Do(ctx, s.log, 0, func() error {
+		page, err := ratelimit.DoR(ctx, s.log, func() (struct {
+			Channels []goslack.Channel
+			Next     string
+		}, error) {
 			ch, cur, err := s.api.GetConversationsContext(ctx, params)
-			if err != nil {
-				return err
-			}
-			channels = ch
-			next = cur
-			return nil
+			return struct {
+				Channels []goslack.Channel
+				Next     string
+			}{ch, cur}, err
 		})
+		channels := page.Channels
+		next := page.Next
 		if err != nil {
 			return "", fmt.Errorf("list channels: %w", err)
 		}
@@ -114,17 +115,18 @@ func (s *ChannelService) List(ctx context.Context, limit int) ([]goslack.Channel
 			Cursor:          cursor,
 			ExcludeArchived: true,
 		}
-		var channels []goslack.Channel
-		var next string
-		err := ratelimit.Do(ctx, s.log, 0, func() error {
+		page, err := ratelimit.DoR(ctx, s.log, func() (struct {
+			Channels []goslack.Channel
+			Next     string
+		}, error) {
 			ch, cur, err := s.api.GetConversationsContext(ctx, params)
-			if err != nil {
-				return err
-			}
-			channels = ch
-			next = cur
-			return nil
+			return struct {
+				Channels []goslack.Channel
+				Next     string
+			}{ch, cur}, err
 		})
+		channels := page.Channels
+		next := page.Next
 		if err != nil {
 			return nil, err
 		}
@@ -151,17 +153,11 @@ func (s *ChannelService) List(ctx context.Context, limit int) ([]goslack.Channel
 // side effect so subsequent NamesForIDs / ResolveID calls hit the
 // cache.
 func (s *ChannelService) Info(ctx context.Context, channelID string) (*goslack.Channel, error) {
-	var ch *goslack.Channel
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
-		result, err := s.api.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
+	ch, err := ratelimit.DoR(ctx, s.log, func() (*goslack.Channel, error) {
+		return s.api.GetConversationInfoContext(ctx, &goslack.GetConversationInfoInput{
 			ChannelID:         channelID,
 			IncludeNumMembers: true,
 		})
-		if err != nil {
-			return err
-		}
-		ch = result
-		return nil
 	})
 	if err == nil && ch != nil {
 		s.recordChannel(ch.Name, ch.ID)

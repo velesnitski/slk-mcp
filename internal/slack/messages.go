@@ -48,14 +48,8 @@ func (s *MessageService) History(ctx context.Context, p HistoryParams) ([]goslac
 		params.Inclusive = true
 	}
 
-	var resp *goslack.GetConversationHistoryResponse
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
-		r, err := s.api.GetConversationHistoryContext(ctx, params)
-		if err != nil {
-			return err
-		}
-		resp = r
-		return nil
+	resp, err := ratelimit.DoR(ctx, s.log, func() (*goslack.GetConversationHistoryResponse, error) {
+		return s.api.GetConversationHistoryContext(ctx, params)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("conversations.history: %w", err)
@@ -70,14 +64,9 @@ func (s *MessageService) ThreadReplies(ctx context.Context, channelID, threadTS 
 		Timestamp: threadTS,
 		Limit:     200,
 	}
-	var msgs []goslack.Message
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
+	msgs, err := ratelimit.DoR(ctx, s.log, func() ([]goslack.Message, error) {
 		m, _, _, err := s.api.GetConversationRepliesContext(ctx, params)
-		if err != nil {
-			return err
-		}
-		msgs = m
-		return nil
+		return m, err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("conversations.replies: %w", err)
@@ -93,14 +82,9 @@ func (s *MessageService) Post(ctx context.Context, channelID, text, threadTS str
 		opts = append(opts, goslack.MsgOptionTS(threadTS))
 	}
 
-	var ts string
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
+	ts, err := ratelimit.DoR(ctx, s.log, func() (string, error) {
 		_, t, err := s.api.PostMessageContext(ctx, channelID, opts...)
-		if err != nil {
-			return err
-		}
-		ts = t
-		return nil
+		return t, err
 	})
 	if err != nil {
 		return "", fmt.Errorf("chat.postMessage: %w", err)
