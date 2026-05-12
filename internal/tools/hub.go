@@ -77,6 +77,12 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 // this centralises the IsDisabled / ReadOnly / RequiresUserToken
 // checks that were previously duplicated inside every register
 // function.
+//
+// Deliberately unused at the moment: the type + helper exist as a
+// seam so the next refactor pass can migrate one register* function
+// at a time without re-introducing the boilerplate. See ADR 003.
+//
+//nolint:unused
 type toolDef struct {
 	Name        string
 	Description string
@@ -97,6 +103,10 @@ type toolDef struct {
 // "disabled by env"). Currently no logging is emitted on skip — the
 // log channel is kept clean — but the structure leaves a hook for
 // future telemetry.
+//
+// Deliberately unused: see toolDef above.
+//
+//nolint:unused
 func (h *Hub) register(s *server.MCPServer, defs ...toolDef) {
 	for _, t := range defs {
 		if h.cfg.IsDisabled(t.Name) {
@@ -121,6 +131,11 @@ func (h *Hub) register(s *server.MCPServer, defs ...toolDef) {
 // touching individual handlers. Keep this function deliberately
 // boring — non-obvious middleware behaviour is the kind of thing
 // that ends up debugged in production at 3am.
+//
+// Deliberately unused at present — called by (h *Hub).register
+// once handlers migrate to the table-driven shape.
+//
+//nolint:unused
 func (h *Hub) wrap(name string, fn server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return fn
 }
