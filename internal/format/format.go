@@ -19,6 +19,7 @@ import (
 
 var (
 	mentionRefRe = regexp.MustCompile(`<@([UW][A-Z0-9]+)(?:\|[^>]*)?>`)
+	channelRefRe = regexp.MustCompile(`<#([CG][A-Z0-9]{6,})(?:\|([^>]*))?>`)
 	linkRefRe    = regexp.MustCompile(`<(https?://[^|>]+)\|([^>]+)>`)
 	bareLinkRe   = regexp.MustCompile(`<(https?://[^>]+)>`)
 )
@@ -26,14 +27,20 @@ var (
 // RenderText cleans Slack-flavoured markup in a message body for
 // readable, token-efficient output:
 //
-//   - <@USERID>           → @Display Name (looked up in users; falls
+//   - <@USERID>           → @Display Name (looked up in refs; falls
 //                          back to USERID when unknown)
+//   - <#CHANNELID|name>   → #name (the inline pipe label, when present)
+//   - <#CHANNELID>        → #channel-name (looked up in refs) or
+//                          #CHANNELID as a last-resort fallback — never
+//                          dropped, since the ID alone is correlatable
 //   - <url|label>         → label
 //   - <url>               → (dropped — caller can re-add a [link]
 //                          marker if needed)
 //
-// users may be nil. Returns text unchanged if it contains no markup.
-func RenderText(text string, users map[string]string) string {
+// refs may be nil and may mix user and channel display names; Slack ID
+// prefixes (U/W vs C/G) keep the namespaces distinct so a single map is
+// safe. Returns text unchanged if it contains no markup.
+func RenderText(text string, refs map[string]string) string {
 	if text == "" {
 		return ""
 	}
@@ -43,10 +50,27 @@ func RenderText(text string, users map[string]string) string {
 			return m
 		}
 		uid := sub[1]
-		if name, ok := users[uid]; ok && name != "" {
+		if name, ok := refs[uid]; ok && name != "" {
 			return "@" + name
 		}
 		return "@" + uid
+	})
+	text = channelRefRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := channelRefRe.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		// Inline pipe label wins — Slack already resolved the name for us.
+		if len(sub) >= 3 && sub[2] != "" {
+			return "#" + sub[2]
+		}
+		cid := sub[1]
+		if name, ok := refs[cid]; ok && name != "" {
+			return "#" + name
+		}
+		// Last resort: leave the ID visible so a downstream caller (or
+		// the LLM) can still correlate it instead of dropping the ref.
+		return "#" + cid
 	})
 	text = linkRefRe.ReplaceAllString(text, "$2")
 	text = bareLinkRe.ReplaceAllString(text, "")
@@ -61,6 +85,33 @@ func CollectMentionedUserIDs(messages []goslack.Message) []string {
 	var out []string
 	for _, m := range messages {
 		for _, match := range mentionRefRe.FindAllStringSubmatch(m.Text, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			id := match[1]
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// CollectMentionedChannelIDs returns the unique set of <#CHANNELID>
+// references found in message bodies — mirrors CollectMentionedUserIDs
+// and is meant to feed Channels.NamesForIDs so RenderText can resolve
+// `<#CID>` to `#channel-name`.
+//
+// Inline-label refs (`<#CID|name>`) are still collected, even though
+// RenderText doesn't need the lookup for them — callers may want to
+// pre-warm the channel cache for downstream tools.
+func CollectMentionedChannelIDs(messages []goslack.Message) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, m := range messages {
+		for _, match := range channelRefRe.FindAllStringSubmatch(m.Text, -1) {
 			if len(match) < 2 {
 				continue
 			}

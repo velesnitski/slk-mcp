@@ -274,6 +274,65 @@ func TestRenderText_ResolvesMentionsAndStripsLinks(t *testing.T) {
 	}
 }
 
+func TestRenderText_ResolvesChannelRefs(t *testing.T) {
+	refs := map[string]string{
+		"U001":            "Alice",
+		"C0ABCDEFGHI":     "dev-backend",
+		"C0AAAABBBBC":     "mr-backend",
+	}
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Inline pipe label always wins, even when the ref isn't in the map.
+		{"check <#C0XXXXXXXXX|team-alpha> please", "check #team-alpha please"},
+		// No pipe → look up in the refs map.
+		{"see <#C0ABCDEFGHI>", "see #dev-backend"},
+		// Two refs in one body, only the first resolves via the map.
+		{"<#C0AAAABBBBC> then <#C0ZZZZZZZZZ>", "#mr-backend then #C0ZZZZZZZZZ"},
+		// Unknown ID with no pipe must NOT vanish — keep `#CID` as a marker.
+		{"ping <#C0ZZZZZZZZZ>", "ping #C0ZZZZZZZZZ"},
+		// Mixed with a user mention in the same body.
+		{"<@U001> in <#C0ABCDEFGHI>", "@Alice in #dev-backend"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			if got := RenderText(c.in, refs); got != c.want {
+				t.Fatalf("RenderText(%q) = %q; want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCollectMentionedChannelIDs_DedupesAndIgnoresInvalid(t *testing.T) {
+	mk := func(text string) goslack.Message {
+		m := goslack.Message{}
+		m.Text = text
+		return m
+	}
+	msgs := []goslack.Message{
+		mk("see <#C0AAAAAAAAA> and <#C0BBBBBBBBB|name>"),
+		mk("again <#C0AAAAAAAAA>"),       // dup
+		mk("private <#G0PRIVATE12>"),     // G-prefix is also a channel
+		mk("user <@U001>"),               // not a channel
+		mk("not-a-channel <#XYZ123>"),    // wrong prefix
+	}
+	got := CollectMentionedChannelIDs(msgs)
+	want := map[string]bool{
+		"C0AAAAAAAAA": true,
+		"C0BBBBBBBBB": true,
+		"G0PRIVATE12": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d ids %v; want %d (%v)", len(got), got, len(want), want)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Errorf("unexpected id %q", id)
+		}
+	}
+}
+
 func TestCollectMentionedUserIDs_DedupesAcrossMessages(t *testing.T) {
 	mk := func(text string) goslack.Message {
 		m := goslack.Message{}

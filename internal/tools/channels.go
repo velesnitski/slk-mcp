@@ -9,6 +9,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
 func registerChannelTools(s *server.MCPServer, d Deps) {
@@ -49,22 +50,30 @@ func registerChannelTools(s *server.MCPServer, d Deps) {
 	if !d.Cfg.IsDisabled("get_channel_info") {
 		s.AddTool(
 			mcp.NewTool("get_channel_info",
-				mcp.WithDescription("Get a channel's topic, purpose, member count and created date. Optionally lists member display names."),
-				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops or devops)")),
+				mcp.WithDescription("Get a channel's topic, purpose, member count and created date. Optionally lists member display names. Accepts either a channel name (#devops, devops) or a Slack channel ID (C0ABC1234DE) — useful for resolving `<#CID>` references from message bodies."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops, devops) or Slack channel ID (C0ABC1234DE)")),
 				mcp.WithBoolean("include_members", mcp.Description("Resolve and list channel members (default: false)")),
 				mcp.WithNumber("members_limit", mcp.Description("Cap on members listed (default: 50, 0 = all)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				name, err := req.RequireString("channel")
+				input, err := req.RequireString("channel")
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
 				includeMembers := req.GetBool("include_members", false)
 				membersLimit := int(req.GetFloat("members_limit", 50))
 
-				channelID, err := d.Client.Channels.ResolveID(ctx, name)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
+				// Skip name→id lookup when the caller already has the ID
+				// (typical when chasing `<#CID>` references from a digest).
+				trimmed := strings.TrimPrefix(input, "#")
+				var channelID string
+				if slack.IsChannelID(trimmed) {
+					channelID = trimmed
+				} else {
+					channelID, err = d.Client.Channels.ResolveID(ctx, input)
+					if err != nil {
+						return mcp.NewToolResultError(err.Error()), nil
+					}
 				}
 				ch, err := d.Client.Channels.Info(ctx, channelID)
 				if err != nil {

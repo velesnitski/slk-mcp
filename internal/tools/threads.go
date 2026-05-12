@@ -56,7 +56,7 @@ func registerThreadTools(s *server.MCPServer, d Deps) {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				users := d.Client.Users.NamesFor(ctx, collectUserIDs(replies))
+				users := resolveRefs(ctx, d, replies)
 
 				var b strings.Builder
 				fmt.Fprintf(&b, "thread #%s (%d msgs)\n", channel, len(replies))

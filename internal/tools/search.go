@@ -82,7 +82,7 @@ func registerSearchTools(s *server.MCPServer, d Deps) {
 						decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
 						continue
 					}
-					users := d.Client.Users.NamesFor(ctx, collectUserIDs(msgs))
+					users := resolveRefs(ctx, d, msgs)
 					decisions = append(decisions, detectDecisions(d.Cfg, ch, msgs, users, format.DecisionLine)...)
 				}
 

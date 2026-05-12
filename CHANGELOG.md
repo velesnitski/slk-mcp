@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.26] - 2026-05-12
+
+### Fixed
+- **`<#CHANNELID>` references in message bodies are no longer rendered as raw `<#C0ABC1234DE>` markup.** `RenderText` now resolves channel references the same way it resolves user mentions: prefers the inline pipe label (`<#CID|name>` → `#name`); falls back to a reverse `id→name` lookup populated from the channel cache; emits `#CID` as a last resort instead of dropping the reference. Channel digests that quote `<#CID>` (e.g. backend asking "сможем прогнать МРы из <#CID>?") now read as `#mr-backend` rather than the opaque ID.
+
+### Added
+- `slack.ChannelService.NamesForIDs(ctx, ids)` — batch reverse lookup, hits an internal `idCache` first (populated by every `ResolveID` / `List` / `Info` call) with `conversations.info` fallback for unseen IDs. Mirrors `UserService.NamesFor`.
+- `slack.IsChannelID(string) bool` — detects canonical Slack channel IDs (`C…` public, `G…` private; `D…` DMs intentionally excluded).
+- `format.CollectMentionedChannelIDs(messages)` — sibling of `CollectMentionedUserIDs`.
+- `tools.resolveRefs(ctx, d, messages)` and `tools.resolveRefsWithReplies(ctx, d, cu)` — unified id→name builders that merge user and channel resolutions into a single map (Slack ID prefixes keep the namespaces disjoint).
+- `get_channel_info` now accepts a Slack channel ID directly (`C0ABC1234DE`) alongside a channel name — handy for resolving a `<#CID>` reference surfaced by another tool without an intermediate lookup step.
+
+### Changed
+- `RenderText`'s second parameter is now semantically a merged id→name map for users **and** channels. The existing user-only call sites continue to work; channel resolution only kicks in for callers that pre-merge channel names (done internally by `resolveRefs` / `resolveRefsWithReplies`).
+
 ## [0.3.25] - 2026-05-07
 
 ### Added

@@ -101,7 +101,7 @@ func registerUnreadTools(s *server.MCPServer, d Deps) {
 
 				logChannels := 0
 				for _, r := range results {
-					users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(r))
+					users := resolveRefsWithReplies(ctx, d, r)
 					label := channelDisplayLabel(ctx, r.Channel, d.Client.Users)
 					var rendered string
 					switch {
@@ -563,6 +563,44 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 		}
 	}
 	return out
+}
+
+// resolveRefsWithReplies is the unread-channel counterpart of
+// resolveRefs: gathers user IDs and channel IDs across top-level
+// messages AND inlined thread replies, then merges the resolved
+// names. Used by the unread-summary renderer so `<@UID>` and
+// `<#CID>` references inside thread bodies render readably.
+func resolveRefsWithReplies(ctx context.Context, d Deps, cu *slack.ChannelUnread) map[string]string {
+	users := d.Client.Users.NamesFor(ctx, collectUserIDsWithReplies(cu))
+	channels := d.Client.Channels.NamesForIDs(ctx, collectChannelIDsWithReplies(cu))
+	return mergeRefs(users, channels)
+}
+
+// collectChannelIDsWithReplies mirrors collectUserIDsWithReplies for
+// `<#CHANNELID>` references — scans both the top-level unread
+// messages and their inlined thread replies, deduping by ID.
+func collectChannelIDsWithReplies(cu *slack.ChannelUnread) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	for _, id := range format.CollectMentionedChannelIDs(cu.Messages) {
+		add(id)
+	}
+	for _, rs := range cu.Replies {
+		for _, id := range format.CollectMentionedChannelIDs(rs) {
+			add(id)
+		}
+	}
+	return ids
 }
 
 // collectUserIDsWithReplies returns unique user IDs across both the

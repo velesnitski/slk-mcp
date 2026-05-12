@@ -117,7 +117,7 @@ func registerDigestTools(s *server.MCPServer, d Deps) {
 						digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 						continue
 					}
-					users := d.Client.Users.NamesFor(ctx, collectUserIDs(msgs))
+					users := resolveRefs(ctx, d, msgs)
 					digests = append(digests, format.ChannelDigest("#"+ch, msgs, users, maxShow))
 					decisions = append(decisions, detectDecisions(d.Cfg, ch, msgs, users, format.DecisionLine)...)
 				}
@@ -162,7 +162,7 @@ func channelDigestRange(ctx context.Context, d Deps, channel string, oldest, lat
 	if err != nil {
 		return "", err
 	}
-	users := d.Client.Users.NamesFor(ctx, collectUserIDs(msgs))
+	users := resolveRefs(ctx, d, msgs)
 	return format.ChannelDigest("#"+channel, msgs, users, maxShow), nil
 }
 

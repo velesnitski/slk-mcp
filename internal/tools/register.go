@@ -9,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/config"
+	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
@@ -128,4 +129,38 @@ func collectUserIDs(messages []goslack.Message) []string {
 		ids = append(ids, m.User)
 	}
 	return ids
+}
+
+// resolveRefs builds the unified id→name map that the format package
+// uses to resolve `<@USERID>` and `<#CHANNELID>` references inside
+// rendered message bodies. Users are always resolved; channels are
+// looked up via the reverse-id cache (cheap) with API fallback for
+// unseen IDs (one conversations.info call each).
+//
+// The two maps are merged because Slack ID prefixes (U/W vs C/G) keep
+// their namespaces disjoint — see format.RenderText.
+func resolveRefs(ctx context.Context, d Deps, messages []goslack.Message) map[string]string {
+	users := d.Client.Users.NamesFor(ctx, collectUserIDs(messages))
+	channels := d.Client.Channels.NamesForIDs(ctx, format.CollectMentionedChannelIDs(messages))
+	return mergeRefs(users, channels)
+}
+
+// mergeRefs merges name lookup maps for users and channels into one,
+// always returning a usable (non-nil) map. Channel and user IDs cannot
+// collide due to Slack's prefix rules (U/W vs C/G/D), so a single map
+// is safe.
+func mergeRefs(users, channels map[string]string) map[string]string {
+	if len(channels) == 0 {
+		if users == nil {
+			return map[string]string{}
+		}
+		return users
+	}
+	if users == nil {
+		users = make(map[string]string, len(channels))
+	}
+	for k, v := range channels {
+		users[k] = v
+	}
+	return users
 }
