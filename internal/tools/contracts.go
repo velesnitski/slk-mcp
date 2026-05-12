@@ -25,6 +25,7 @@ import (
 // UserClient is the user-resolution surface tool handlers consume.
 type UserClient interface {
 	NamesFor(ctx context.Context, userIDs []string) map[string]string
+	Name(ctx context.Context, userID string) string
 	List(ctx context.Context) ([]goslack.User, error)
 }
 

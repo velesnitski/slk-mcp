@@ -70,11 +70,11 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 					return mcp.NewToolResultError("thread_ts is required (or pass a permalink)"), nil
 				}
 
-				channelID, err := h.client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				replies, err := h.client.Messages.ThreadReplies(ctx, channelID, threadTS)
+				replies, err := h.Messages().ThreadReplies(ctx, channelID, threadTS)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -123,7 +123,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				}
 
 				query := buildUserMessagesQuery(user, channel, since, until)
-				matches, err := h.client.Search.Messages(ctx, query, limit)
+				matches, err := h.Search().Messages(ctx, query, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -165,11 +165,11 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				}
 				threadTS := req.GetString("thread_ts", "")
 
-				channelID, err := h.client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				ts, err := h.client.Messages.Post(ctx, channelID, text, threadTS)
+				ts, err := h.Messages().Post(ctx, channelID, text, threadTS)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -191,11 +191,11 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				timestamp, _ := req.RequireString("timestamp")
 				emoji, _ := req.RequireString("emoji")
 
-				channelID, err := h.client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := h.client.Messages.AddReaction(ctx, channelID, timestamp, emoji); err != nil {
+				if err := h.Messages().AddReaction(ctx, channelID, timestamp, emoji); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s", emoji, channel)), nil

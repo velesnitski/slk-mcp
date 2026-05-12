@@ -45,7 +45,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
 				}
 
-				results, err := h.client.Unread.UnreadAll(ctx, maxPer)
+				results, err := h.Unread().UnreadAll(ctx, maxPer)
 				if err != nil {
 					if errors.Is(err, slack.ErrNoUserToken) {
 						return mcp.NewToolResultError(err.Error()), nil
@@ -56,7 +56,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				// Best-effort self-resolution for mention markers; a
 				// failure here disables highlighting AND mentions_only
 				// filtering (we can't filter what we can't identify).
-				selfID, err := h.client.Unread.Self(ctx)
+				selfID, err := h.Unread().Self(ctx)
 				if err != nil {
 					h.log.Warn("auth.test failed; mention highlighting disabled", "err", err)
 				}
@@ -99,7 +99,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				logChannels := 0
 				for _, r := range results {
 					users := h.resolveRefsWithReplies(ctx, r)
-					label := channelDisplayLabel(ctx, r.Channel, h.client.Users)
+					label := channelDisplayLabel(ctx, r.Channel, h.Users())
 					var rendered string
 					switch {
 					case logMode != "off" && digest.DetectGitChannel(r):
@@ -165,12 +165,12 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				after := time.Now().Add(-time.Duration(hours) * time.Hour).Format("2006-01-02")
 				q := fmt.Sprintf("to:me after:%s", after)
 
-				matches, err := h.client.Search.Messages(ctx, q, limit)
+				matches, err := h.Search().Messages(ctx, q, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 
-				selfID, _ := h.client.Unread.Self(ctx)
+				selfID, _ := h.Unread().Self(ctx)
 
 				if pendingOnly {
 					if selfID == "" {
@@ -209,7 +209,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					b.WriteByte('\n')
 					if withContext && m.Channel.ID != "" {
 						before, after := h.fetchMentionContext(ctx, m.Channel.ID, m.Timestamp, ctxN)
-						users := h.client.Users.NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
+						users := h.Users().NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
 						writeContextLines(&b, "    ↳ ", before, users, m.Channel.ID, shownContext)
 						writeContextLines(&b, "    ↪ ", after, users, m.Channel.ID, shownContext)
 					}
@@ -258,11 +258,11 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					return mcp.NewToolResultError("timestamp is required (or pass a permalink)"), nil
 				}
 
-				channelID, err := h.client.Channels.ResolveID(ctx, channel)
+				channelID, err := h.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := h.client.Unread.MarkRead(ctx, channelID, ts); err != nil {
+				if err := h.Unread().MarkRead(ctx, channelID, ts); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 				return mcp.NewToolResultText(fmt.Sprintf("marked #%s read up to %s", channel, ts)), nil

@@ -21,7 +21,7 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				limit := int(req.GetFloat("limit", 100))
-				channels, err := h.client.Channels.List(ctx, limit)
+				channels, err := h.Channels().List(ctx, limit)
 				if err != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("list channels: %v", err)), nil
 				}
@@ -70,12 +70,12 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if slack.IsChannelID(trimmed) {
 					channelID = trimmed
 				} else {
-					channelID, err = h.client.Channels.ResolveID(ctx, input)
+					channelID, err = h.Channels().ResolveID(ctx, input)
 					if err != nil {
 						return mcp.NewToolResultError(err.Error()), nil
 					}
 				}
-				ch, err := h.client.Channels.Info(ctx, channelID)
+				ch, err := h.Channels().Info(ctx, channelID)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -89,11 +89,11 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				)
 
 				if includeMembers {
-					ids, err := h.client.Channels.Members(ctx, channelID, membersLimit)
+					ids, err := h.Channels().Members(ctx, channelID, membersLimit)
 					if err != nil {
 						fmt.Fprintf(&b, "\nmembers_error: %s", err.Error())
 					} else {
-						names := h.client.Users.NamesFor(ctx, ids)
+						names := h.Users().NamesFor(ctx, ids)
 						b.WriteString("\nroster:")
 						for _, id := range ids {
 							fmt.Fprintf(&b, "\n- %s", names[id])

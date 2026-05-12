@@ -26,6 +26,13 @@ func (f *fakeUsers) NamesFor(ctx context.Context, ids []string) map[string]strin
 	return out
 }
 
+func (f *fakeUsers) Name(ctx context.Context, id string) string {
+	if n, ok := f.names[id]; ok {
+		return n
+	}
+	return id
+}
+
 func (f *fakeUsers) List(ctx context.Context) ([]goslack.User, error) {
 	return nil, nil
 }

@@ -130,7 +130,7 @@ func (h *Hub) operatorReplied(ctx context.Context, channelID, mentionTS, selfID 
 	if pivot <= 0 || channelID == "" {
 		return false
 	}
-	hist, err := h.client.Messages.History(ctx, slack.HistoryParams{
+	hist, err := h.Messages().History(ctx, slack.HistoryParams{
 		ChannelID: channelID,
 		OldestTS:  pivot,
 		Limit:     20,
@@ -165,7 +165,7 @@ func (h *Hub) fetchMentionContext(ctx context.Context, channelID, pivotTS string
 	if n <= 0 {
 		n = 3
 	}
-	hist, err := h.client.Messages.History(ctx, slack.HistoryParams{
+	hist, err := h.Messages().History(ctx, slack.HistoryParams{
 		ChannelID: channelID,
 		Limit:     n + 1,
 	})
@@ -185,7 +185,7 @@ func (h *Hub) fetchMentionContext(ctx context.Context, channelID, pivotTS string
 
 	pivot, _ := strconv.ParseFloat(pivotTS, 64)
 	if pivot > 0 {
-		hist, err := h.client.Messages.History(ctx, slack.HistoryParams{
+		hist, err := h.Messages().History(ctx, slack.HistoryParams{
 			ChannelID: channelID,
 			OldestTS:  pivot,
 			Limit:     n + 1,
@@ -225,7 +225,7 @@ func (h *Hub) fetchMentionContext(ctx context.Context, channelID, pivotTS string
 //     who's in the conversation.
 //
 // Falls back to "#?" when nothing usable is available.
-func channelDisplayLabel(ctx context.Context, ch goslack.Channel, users *slack.UserService) string {
+func channelDisplayLabel(ctx context.Context, ch goslack.Channel, users UserClient) string {
 	switch {
 	case ch.IsIM:
 		if ch.User != "" {
@@ -270,8 +270,8 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 // names. Used by the unread-summary renderer so `<@UID>` and
 // `<#CID>` references inside thread bodies render readably.
 func (h *Hub) resolveRefsWithReplies(ctx context.Context, cu *slack.ChannelUnread) map[string]string {
-	users := h.client.Users.NamesFor(ctx, collectUserIDsWithReplies(cu))
-	channels := h.client.Channels.NamesForIDs(ctx, collectChannelIDsWithReplies(cu))
+	users := h.Users().NamesFor(ctx, collectUserIDsWithReplies(cu))
+	channels := h.Channels().NamesForIDs(ctx, collectChannelIDsWithReplies(cu))
 	return mergeRefs(users, channels)
 }
 

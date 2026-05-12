@@ -103,12 +103,12 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				var digests []string
 
 				for _, ch := range list {
-					channelID, err := h.client.Channels.ResolveID(ctx, ch)
+					channelID, err := h.Channels().ResolveID(ctx, ch)
 					if err != nil {
 						digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 						continue
 					}
-					msgs, err := h.client.Messages.History(ctx, slack.HistoryParams{
+					msgs, err := h.Messages().History(ctx, slack.HistoryParams{
 						ChannelID: channelID,
 						OldestTS:  float64(oldest.Unix()),
 						Limit:     h.cfg.MaxMessagesPerChannel,
@@ -146,7 +146,7 @@ func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow 
 }
 
 func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int) (string, error) {
-	channelID, err := h.client.Channels.ResolveID(ctx, channel)
+	channelID, err := h.Channels().ResolveID(ctx, channel)
 	if err != nil {
 		return "", err
 	}
@@ -158,7 +158,7 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 	if !latest.IsZero() {
 		p.LatestTS = float64(latest.Unix())
 	}
-	msgs, err := h.client.Messages.History(ctx, p)
+	msgs, err := h.Messages().History(ctx, p)
 	if err != nil {
 		return "", err
 	}

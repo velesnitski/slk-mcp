@@ -72,17 +72,14 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 }
 
 // toolDef is the table-driven shape used to register a tool with the
-// MCP server through a single filter pipeline. Every register* method
-// builds a slice of toolDefs and hands them to (h *Hub).register —
-// this centralises the IsDisabled / ReadOnly / RequiresUserToken
-// checks that were previously duplicated inside every register
-// function.
+// MCP server through a single filter pipeline. Every migrated
+// register* method builds a slice of toolDefs and hands them to
+// (h *Hub).register — this centralises the IsDisabled / ReadOnly /
+// RequiresUserToken checks that were previously duplicated inside
+// every register function.
 //
-// Deliberately unused at the moment: the type + helper exist as a
-// seam so the next refactor pass can migrate one register* function
-// at a time without re-introducing the boilerplate. See ADR 003.
-//
-//nolint:unused
+// First consumer: registerSearchTools (see search.go). Other
+// register* methods migrate incrementally.
 type toolDef struct {
 	Name        string
 	Description string
@@ -103,10 +100,6 @@ type toolDef struct {
 // "disabled by env"). Currently no logging is emitted on skip — the
 // log channel is kept clean — but the structure leaves a hook for
 // future telemetry.
-//
-// Deliberately unused: see toolDef above.
-//
-//nolint:unused
 func (h *Hub) register(s *server.MCPServer, defs ...toolDef) {
 	for _, t := range defs {
 		if h.cfg.IsDisabled(t.Name) {
@@ -132,10 +125,11 @@ func (h *Hub) register(s *server.MCPServer, defs ...toolDef) {
 // boring — non-obvious middleware behaviour is the kind of thing
 // that ends up debugged in production at 3am.
 //
-// Deliberately unused at present — called by (h *Hub).register
-// once handlers migrate to the table-driven shape.
-//
-//nolint:unused
+// The `name` parameter is intentionally captured here even though
+// the pass-through doesn't use it: future timing/logging middleware
+// will key on it, and threading the name through register() now
+// means the eventual upgrade is a one-file change.
 func (h *Hub) wrap(name string, fn server.ToolHandlerFunc) server.ToolHandlerFunc {
+	_ = name
 	return fn
 }

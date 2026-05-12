@@ -53,3 +53,4 @@ don't rewrite history.
 - [002 — Unified `id→name` refs map for users and channels](002-unified-refs-map.md)
 - [003 — `Hub` receiver replaces `Deps` service-locator](003-hub-receiver.md)
 - [004 — Absolute-time `since`/`until` on `get_user_messages`](004-absolute-time-user-search.md)
+- [005 — Handler migration to `Hub.X()` accessors + table-driven registration](005-table-driven-registration.md)

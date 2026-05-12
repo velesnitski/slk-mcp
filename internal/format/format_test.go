@@ -277,8 +277,8 @@ func TestRenderText_ResolvesMentionsAndStripsLinks(t *testing.T) {
 func TestRenderText_ResolvesChannelRefs(t *testing.T) {
 	refs := map[string]string{
 		"U001":            "Alice",
-		"C0ABCDEFGHI":     "dev-backend",
-		"C0AAAABBBBC":     "mr-backend",
+		"C0ABCDEFGHI":     "team-alpha",
+		"C0AAAABBBBC":     "team-bravo",
 	}
 	cases := []struct {
 		in   string
@@ -287,13 +287,13 @@ func TestRenderText_ResolvesChannelRefs(t *testing.T) {
 		// Inline pipe label always wins, even when the ref isn't in the map.
 		{"check <#C0XXXXXXXXX|team-alpha> please", "check #team-alpha please"},
 		// No pipe → look up in the refs map.
-		{"see <#C0ABCDEFGHI>", "see #dev-backend"},
+		{"see <#C0ABCDEFGHI>", "see #team-alpha"},
 		// Two refs in one body, only the first resolves via the map.
-		{"<#C0AAAABBBBC> then <#C0ZZZZZZZZZ>", "#mr-backend then #C0ZZZZZZZZZ"},
+		{"<#C0AAAABBBBC> then <#C0ZZZZZZZZZ>", "#team-bravo then #C0ZZZZZZZZZ"},
 		// Unknown ID with no pipe must NOT vanish — keep `#CID` as a marker.
 		{"ping <#C0ZZZZZZZZZ>", "ping #C0ZZZZZZZZZ"},
 		// Mixed with a user mention in the same body.
-		{"<@U001> in <#C0ABCDEFGHI>", "@Alice in #dev-backend"},
+		{"<@U001> in <#C0ABCDEFGHI>", "@Alice in #team-alpha"},
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {

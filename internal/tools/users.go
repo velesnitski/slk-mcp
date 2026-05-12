@@ -29,7 +29,7 @@ func (h *Hub) registerUserTools(s *server.MCPServer) {
 			withActivity := req.GetBool("with_activity", false)
 			filter := strings.ToLower(strings.TrimSpace(req.GetString("filter", "")))
 
-			users, err := h.client.Users.List(ctx)
+			users, err := h.Users().List(ctx)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -122,7 +122,7 @@ func (h *Hub) fetchLastPostDates(ctx context.Context, users []goslack.User) map[
 			defer wg.Done()
 			for u := range jobs {
 				date := ""
-				hits, err := h.client.Search.Messages(ctx, "from:@"+u.Name, 1)
+				hits, err := h.Search().Messages(ctx, "from:@"+u.Name, 1)
 				if err == nil && len(hits) > 0 {
 					if t := parseSlackTS(hits[0].Timestamp); !t.IsZero() {
 						date = t.UTC().Format("2006-01-02")

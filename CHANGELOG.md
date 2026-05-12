@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-05-12
+
+### Changed — handlers now consume the interface seam
+
+- Every handler call against the Slack service layer was rewritten
+  from `h.client.X.Method(...)` to `h.X().Method(...)` (33 sites).
+  Production code now exercises the `UserClient` / `ChannelClient`
+  / `MessageClient` / `SearchClient` / `UnreadClient` contracts
+  declared in `contracts.go`, instead of the concrete services.
+- `channelDisplayLabel` broadened from `*slack.UserService` to
+  `UserClient`; `Name(ctx, id) string` added to `UserClient` to
+  support that consumer.
+- `registerSearchTools` migrated to the `Hub.register(s, toolDef{...})`
+  table-driven shape; `handleSearchMessages` / `handleFindDecisions`
+  extracted as named methods. Other register* methods continue in
+  their current shape; `search.go` is the reference for incremental
+  migration.
+- `//nolint:unused` directives on `toolDef` / `register` / `wrap`
+  were removed; the seam is now load-bearing.
+
+### Fixed — sensitive-data hygiene
+
+- `internal/format/format_test.go` swapped two real workspace
+  channel names for synthetic placeholders (`team-alpha`,
+  `team-bravo`). Behaviour identical; no token/hostname change.
+
+### Why
+ADR 005 documents the rationale: both the `Hub.X()` accessors and
+the `toolDef` table seam shipped in v0.4.0/v0.4.1 as design intent
+without a real consumer. Migration earns them their keep before they
+silently rot.
+
 ## [0.4.2] - 2026-05-12
 
 ### Added

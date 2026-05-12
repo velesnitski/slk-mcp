@@ -118,8 +118,8 @@ func collectUserIDs(messages []goslack.Message) []string {
 // The two maps are merged because Slack ID prefixes (U/W vs C/G) keep
 // their namespaces disjoint — see format.RenderText.
 func (h *Hub) resolveRefs(ctx context.Context, messages []goslack.Message) map[string]string {
-	users := h.client.Users.NamesFor(ctx, collectUserIDs(messages))
-	channels := h.client.Channels.NamesForIDs(ctx, format.CollectMentionedChannelIDs(messages))
+	users := h.Users().NamesFor(ctx, collectUserIDs(messages))
+	channels := h.Channels().NamesForIDs(ctx, format.CollectMentionedChannelIDs(messages))
 	return mergeRefs(users, channels)
 }
 
