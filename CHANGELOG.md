@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-12
+
+### Added — infra, no behaviour change.
+
+#### CI hardening (`.github/workflows/test.yml` + `.golangci.yml`)
+- Build / vet / test now run on a `go: ['1.23', '1.24']` matrix.
+  `fail-fast: false` so a regression on either version is visible.
+- Tests run with `-race` — the channel/user caches are RW-locked and
+  digest fan-out uses worker pools; the detector catches drift
+  cheaply.
+- New `lint` job runs `golangci-lint` with a deliberately narrow rule
+  set: `errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`,
+  `misspell`. Style-only linters are intentionally excluded — we
+  block CI on correctness, not aesthetics.
+
+#### Architecture Decision Records (`docs/adr/`)
+Three retroactive ADRs capturing the non-obvious decisions behind
+recent versions:
+- **001** — GIT MODE prefers MR-iid over issue-id (v0.3.24).
+- **002** — Unified id→name refs map for users and channels (v0.3.26).
+- **003** — `Hub` receiver replaces `Deps` service-locator (v0.4.0).
+
+Each ADR records the context, the rejected alternatives, and the
+trade-offs. Format and "when to write one" guidance in `docs/adr/README.md`.
+
+#### Interface seam at the tools ↔ slack boundary (`internal/tools/contracts.go`)
+Narrow consumer-side interfaces — `UserClient`, `ChannelClient`,
+`MessageClient`, `SearchClient`, `UnreadClient` — declared at the
+tools package boundary. The concrete `*slack.XService` types satisfy
+them implicitly; compile-time assertions enforce that drift breaks
+the build with a clear `does not implement` diagnostic.
+
+Hub gains accessor methods (`Users()`, `Channels()`, `Messages()`,
+`Search()`, `Unread()`) that return these contracts. New handler
+code SHOULD call `h.Users().X()` instead of `h.client.Users.X()` so
+future tests can substitute fakes via a wrapper-Hub composition.
+Existing handlers continue to work unchanged; migration is gradual,
+not blocking.
+
+### Quality
+323 tests pass across 9 packages, race detector clean, vet clean,
+sensitive-data scan clean.
+
 ## [0.4.0] - 2026-05-12
 
 ### Architecture refresh — no behaviour change, no tool-surface change.

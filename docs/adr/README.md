@@ -1,0 +1,54 @@
+# Architecture Decision Records
+
+Short, point-in-time notes on non-obvious decisions. The goal is to
+spare a future maintainer (often: future me) from re-litigating a
+choice that already had a careful answer.
+
+## When to write one
+
+- The decision is **non-obvious** (the obvious path is the wrong one,
+  or two paths are equally defensible and we picked one for stated
+  reasons).
+- The decision is **load-bearing** (other code or future decisions
+  rest on this one being true).
+- We made the decision **with context that will fade** (a Slack API
+  quirk, a downstream-tool quirk, a one-time incident, a perf budget
+  we measured but didn't enshrine in a test).
+
+Skip ADRs for changes that are self-explanatory from the diff, the
+commit message, or the CHANGELOG.
+
+## Format
+
+Number sequentially: `001-short-slug.md`, `002-…`. Each ADR has:
+
+```markdown
+# ADR N — Title
+
+**Status:** accepted | superseded by ADR M | reverted
+**Date:** YYYY-MM-DD
+**Tag at acceptance:** vX.Y.Z
+
+## Context
+
+What problem we were solving. Include the option(s) we rejected and
+why; this is the most valuable section for future readers.
+
+## Decision
+
+The choice we made, stated as a rule.
+
+## Consequences
+
+What this commits us to. What it forecloses.
+```
+
+Keep each ADR under one page when possible. Edit later if reality
+diverges from the prediction — note the divergence at the bottom,
+don't rewrite history.
+
+## Index
+
+- [001 — GIT MODE prefers MR-iid over issue-id](001-mr-iid-priority.md)
+- [002 — Unified `id→name` refs map for users and channels](002-unified-refs-map.md)
+- [003 — `Hub` receiver replaces `Deps` service-locator](003-hub-receiver.md)

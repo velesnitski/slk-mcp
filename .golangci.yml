@@ -1,0 +1,39 @@
+# golangci-lint configuration — selective on purpose.
+#
+# We block CI only on linters whose findings have been historically
+# accurate AND fixable without aesthetic debate. Style nits
+# (gocritic / gocognit / etc.) are deliberately omitted to avoid
+# churn-on-CI; run them locally if curious.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # Catches unhandled errors — the most common Go bug class.
+    - errcheck
+    # The vet rules — printf format, struct tag correctness, shadowed
+    # vars in nested scopes.
+    - govet
+    # Comprehensive correctness checker; flags impossible conditions,
+    # unused returns, deprecated API use, slice-of-pointer pitfalls.
+    - staticcheck
+    # Assignments that have no effect on later reads — usually a typo
+    # in error handling.
+    - ineffassign
+    # Variables, constants, functions declared but never used.
+    - unused
+    # Simplifications staticcheck doesn't cover — duplicate imports,
+    # missing copyright headers (we don't enforce headers — but the
+    # other checks are still worth having).
+    - misspell
+  exclusions:
+    rules:
+      # _test.go files can keep variables they declare-but-don't-use
+      # when iterating on tests; we want signal in production code,
+      # not friction during test development.
+      - path: _test\.go
+        linters:
+          - unused

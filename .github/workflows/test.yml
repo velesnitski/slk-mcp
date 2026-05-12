@@ -6,22 +6,31 @@ on:
   pull_request:
     branches: [main, dev]
 
-# Cancel superseded runs on the same ref so a fast push doesn't keep the
-# old job alive.
+# Cancel superseded runs on the same ref so a fast push doesn't keep
+# the old job alive.
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
+    name: Test (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    strategy:
+      # `fail-fast: false` so we see both Go versions even if one breaks
+      # — knowing which version regressed is half the diagnosis.
+      fail-fast: false
+      matrix:
+        # 1.23 is the floor (mcp-go requirement); newer is the moving
+        # target. Bump the upper bound on each new stable release.
+        go: ['1.23', '1.24']
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ matrix.go }}
           cache: true
 
       - name: Build
@@ -30,5 +39,28 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test -count=1 ./...
+      - name: Test (race detector)
+        # -race catches data races in the channel/user caches and the
+        # parallel digest fan-out. Modest performance cost, high
+        # confidence payoff.
+        run: go test -race -count=1 ./...
+
+  lint:
+    name: Lint (golangci-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          # The config lives at .golangci.yml — only the selective rules
+          # we trust to block CI on are enabled there.
+          args: --timeout=5m

@@ -38,9 +38,26 @@ func NewHub(client *slack.Client, cfg *config.Config, log *slog.Logger) *Hub {
 // that needs them outside the registration flow (currently: nothing —
 // the accessors exist for future telemetry / test helpers without
 // forcing fields back to exported).
-func (h *Hub) Client() *slack.Client    { return h.client }
-func (h *Hub) Config() *config.Config   { return h.cfg }
-func (h *Hub) Log() *slog.Logger        { return h.log }
+func (h *Hub) Client() *slack.Client  { return h.client }
+func (h *Hub) Config() *config.Config { return h.cfg }
+func (h *Hub) Log() *slog.Logger      { return h.log }
+
+// Users / Channels / Messages / Search / Unread surface the
+// narrow service contracts from contracts.go.
+//
+// Today they return the concrete *slack.XService directly — the
+// interface return type is the seam. New handler code SHOULD call
+// these accessors instead of reaching into h.client.X so that future
+// tests can substitute fakes (compose a wrapper Hub type that
+// overrides the accessor) without touching the call site.
+//
+// Existing handlers that use h.client.X.Method() continue to work;
+// migrating them is incremental, not blocking.
+func (h *Hub) Users() UserClient       { return h.client.Users }
+func (h *Hub) Channels() ChannelClient { return h.client.Channels }
+func (h *Hub) Messages() MessageClient { return h.client.Messages }
+func (h *Hub) Search() SearchClient    { return h.client.Search }
+func (h *Hub) Unread() UnreadClient    { return h.client.Unread }
 
 // RegisterAll wires every tool category onto s. Order is not
 // significant; tools register themselves conditionally based on
