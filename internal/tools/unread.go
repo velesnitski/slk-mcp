@@ -32,14 +32,20 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("urgency_weight", mcp.Description("Multiplier on the urgency score before ranking (default: 1.0). Pass 0 or negative to use the default; pass 0.5 to dampen, 2.0 to amplify.")),
 				mcp.WithString("urgency_keywords", mcp.Description("Comma-separated extra urgency keywords (case-insensitive substrings). Additive to the built-in en/ru list — e.g. 'asap, critical, p0, prod down'.")),
 				mcp.WithString("log_mode", mcp.Description("Log-channel rendering: 'auto' (default — detect bot-driven channels and render them as severity histograms) or 'off' (always use the regular per-message digest).")),
-				mcp.WithNumber("log_samples_per_band", mcp.Description("Max sample messages shown per severity band in log mode (default: 3)")),
+				mcp.WithNumber("log_samples_per_band", mcp.Description("Max sample messages shown per severity band in log mode (default: 1; raise for more inline samples)")),
+				mcp.WithBoolean("skip_log_mode", mcp.Description("If true, omit log-mode channels (alert/error feeds) entirely. Cheap way to shrink the output when bot channels dominate (default: false)")),
+				mcp.WithBoolean("skip_git_mode", mcp.Description("If true, omit git-mode channels (CI / git-bot feeds) entirely. Cheap way to shrink the output when git activity dominates (default: false)")),
+				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters). Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. 0 = unlimited (default).")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				maxPer := int(req.GetFloat("max_per_channel", 20))
 				mentionsOnly := req.GetBool("mentions_only", false)
 				replyCap := int(req.GetFloat("thread_preview_replies", float64(format.ThreadPreviewReplies)))
 				logMode := strings.ToLower(strings.TrimSpace(req.GetString("log_mode", "auto")))
-				logSamples := int(req.GetFloat("log_samples_per_band", 3))
+				logSamples := int(req.GetFloat("log_samples_per_band", 1))
+				skipLog := req.GetBool("skip_log_mode", false)
+				skipGit := req.GetBool("skip_git_mode", false)
+				maxChars := int(req.GetFloat("max_chars", 0))
 				urg := digest.UrgencyOpts{
 					Weight:        req.GetFloat("urgency_weight", 0),
 					ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -97,19 +103,28 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					header, len(results), totalMsgs, totalReplies)
 
 				logChannels := 0
+				var dropped []string
 				for _, r := range results {
 					users := h.resolveRefsWithReplies(ctx, r)
 					label := channelDisplayLabel(ctx, r.Channel, h.Users())
+					isGit := logMode != "off" && digest.DetectGitChannel(r)
+					isLog := !isGit && logMode != "off" && digest.DetectLogChannel(r)
+					if skipGit && isGit {
+						continue
+					}
+					if skipLog && isLog {
+						continue
+					}
 					var rendered string
 					switch {
-					case logMode != "off" && digest.DetectGitChannel(r):
+					case isGit:
 						logChannels++
 						workflows, orphans := digest.GroupGitWorkflows(r.Messages)
 						if len(workflows) == 0 && len(orphans) == 0 {
 							continue
 						}
 						rendered = digest.RenderGitChannel(label, len(r.Messages), workflows, orphans)
-					case logMode != "off" && digest.DetectLogChannel(r):
+					case isLog:
 						logChannels++
 						bands := digest.BuildLogBands(r.Messages, logSamples)
 						rendered = format.LogChannelDigest(label, len(r.Messages), bands, users)
@@ -126,11 +141,17 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					if rendered == "" {
 						continue
 					}
-					b.WriteString(rendered)
-					b.WriteString("\n\n")
+					if !budgetAppend(&b, rendered, maxChars) {
+						dropped = append(dropped, label)
+						continue
+					}
 				}
 				if logChannels > 0 {
 					h.log.Debug("log mode applied", "channels", logChannels)
+				}
+				if len(dropped) > 0 {
+					fmt.Fprintf(&b, "+ %d channels omitted by max_chars cap: %s\n  (use get_channel_digest to drill in)\n\n",
+						len(dropped), strings.Join(dropped, ", "))
 				}
 				if footer := digest.RenderReferences(digest.CollectReferences(results)); footer != "" {
 					b.WriteString(footer)
@@ -269,6 +290,23 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 			},
 		)
 	}
+}
+
+// budgetAppend writes rendered (plus the inter-channel "\n\n" separator)
+// to b if doing so wouldn't exceed maxChars. Returns true when the
+// channel was emitted, false when it was dropped by the cap.
+//
+// maxChars==0 disables the cap entirely (the historical behaviour).
+// The +2 accounts for the trailing "\n\n" that follows every rendered
+// channel — without it we would write a channel that pushes the body
+// past the cap *after* the separator.
+func budgetAppend(b *strings.Builder, rendered string, maxChars int) bool {
+	if maxChars > 0 && b.Len()+len(rendered)+2 > maxChars {
+		return false
+	}
+	b.WriteString(rendered)
+	b.WriteString("\n\n")
+	return true
 }
 
 // filterEmptyMentions drops matches whose body has no real text. An

@@ -54,3 +54,4 @@ don't rewrite history.
 - [003 — `Hub` receiver replaces `Deps` service-locator](003-hub-receiver.md)
 - [004 — Absolute-time `since`/`until` on `get_user_messages`](004-absolute-time-user-search.md)
 - [005 — Handler migration to `Hub.X()` accessors + table-driven registration](005-table-driven-registration.md)
+- [006 — `get_unread_summary` size controls (`max_chars`, `skip_log_mode`, `skip_git_mode`)](006-unread-summary-size-controls.md)

@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-05-15
+
+### Added — `get_unread_summary` output-size controls
+
+LLM-consumer pain point: a workspace with ~45 unread channels produced
+a 55K-char digest, blowing past per-tool token caps even though the
+ranking pipeline already knew which channels mattered most. Three
+additive parameters now let callers cap the output without losing the
+ranking signal:
+
+- **`max_chars`** (default `0` = unlimited) — soft cap on rendered
+  body size. Channels are emitted in urgency order until the cap is
+  reached; the rest are listed in a footer (`+ N channels omitted by
+  max_chars cap: …`) so the caller can drill in via
+  `get_channel_digest`. Iteration uses `continue`, not `break`, so a
+  smaller lower-urgency channel can still fit after a larger one is
+  rejected.
+- **`skip_log_mode`** (default `false`) — omit `[LOG MODE]` channels
+  entirely (alert / error feeds).
+- **`skip_git_mode`** (default `false`) — omit `[GIT MODE]` channels
+  entirely (CI / git-bot feeds).
+
+### Changed
+
+- `log_samples_per_band` default lowered from `3` → `1`. The samples
+  for INFO bands rarely added signal and dominated long log
+  channels. Callers who want the previous behaviour can pass
+  `log_samples_per_band: 3` explicitly.
+
+### Why
+ADR 006 documents the rationale: the existing urgency ranking
+already knew which channels mattered most, but downstream filtering
+ignored it once size became the constraint. The new flags turn
+ranking into a budget, not just an ordering signal.
+
 ## [0.4.3] - 2026-05-12
 
 ### Changed — handlers now consume the interface seam
