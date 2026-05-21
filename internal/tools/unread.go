@@ -36,6 +36,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("skip_log_mode", mcp.Description("If true, omit log-mode channels (alert/error feeds) entirely. Cheap way to shrink the output when bot channels dominate (default: false)")),
 				mcp.WithBoolean("skip_git_mode", mcp.Description("If true, omit git-mode channels (CI / git-bot feeds) entirely. Cheap way to shrink the output when git activity dominates (default: false)")),
 				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters). Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. 0 = unlimited (default).")),
+				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				maxPer := int(req.GetFloat("max_per_channel", 20))
@@ -46,6 +47,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				skipLog := req.GetBool("skip_log_mode", false)
 				skipGit := req.GetBool("skip_git_mode", false)
 				maxChars := int(req.GetFloat("max_chars", 0))
+				dmWindowHours := int(req.GetFloat("dm_window_hours", 0))
 				urg := digest.UrgencyOpts{
 					Weight:        req.GetFloat("urgency_weight", 0),
 					ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -57,6 +59,21 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 						return mcp.NewToolResultError(err.Error()), nil
 					}
 					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				// DM time-window override: when the operator wants to
+				// see DMs they've already opened (executive syncs, side
+				// chats with decisions), pull recent activity regardless
+				// of last_read and merge it on top of the unread sweep.
+				// Same-channel DM entries from RecentDMActivity replace
+				// their UnreadAll counterparts so we don't duplicate.
+				if dmWindowHours > 0 {
+					dmResults, dmErr := h.Unread().RecentDMActivity(ctx, dmWindowHours, maxPer)
+					if dmErr != nil {
+						h.log.Warn("dm window fetch failed; falling back to unread-only", "err", dmErr)
+					} else {
+						results = mergeDMOverride(results, dmResults)
+					}
 				}
 
 				// Best-effort self-resolution for mention markers; a
@@ -290,6 +307,53 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 			},
 		)
 	}
+}
+
+// mergeDMOverride combines the regular unread sweep with the DM
+// time-window override. DM entries from the override replace any
+// same-channel entries in `base`; non-DM entries in `base` are
+// preserved untouched. DMs that didn't have unread but did have
+// recent activity (the whole point of the override) are appended.
+//
+// The merge is stable in the sense that channels appear in the
+// order: first the rewritten/preserved entries from `base`, then
+// any DM-only additions from `override` that didn't already exist
+// in `base`. The downstream urgency ranker re-orders anyway, so
+// strict ordering here is not load-bearing.
+func mergeDMOverride(base, override []*slack.ChannelUnread) []*slack.ChannelUnread {
+	if len(override) == 0 {
+		return base
+	}
+	byID := make(map[string]*slack.ChannelUnread, len(override))
+	for _, o := range override {
+		if o == nil || o.Channel.ID == "" {
+			continue
+		}
+		byID[o.Channel.ID] = o
+	}
+	out := make([]*slack.ChannelUnread, 0, len(base)+len(override))
+	seen := make(map[string]struct{}, len(base))
+	for _, b := range base {
+		if b == nil {
+			continue
+		}
+		if replacement, ok := byID[b.Channel.ID]; ok && (b.Channel.IsIM || b.Channel.IsMpIM) {
+			out = append(out, replacement)
+		} else {
+			out = append(out, b)
+		}
+		seen[b.Channel.ID] = struct{}{}
+	}
+	for _, o := range override {
+		if o == nil {
+			continue
+		}
+		if _, dup := seen[o.Channel.ID]; dup {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 // budgetAppend writes rendered (plus the inter-channel "\n\n" separator)

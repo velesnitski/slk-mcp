@@ -57,3 +57,4 @@ don't rewrite history.
 - [006 — `get_unread_summary` size controls (`max_chars`, `skip_log_mode`, `skip_git_mode`)](006-unread-summary-size-controls.md)
 - [007 — `with_thread_context` on `get_user_messages`](007-with-thread-context.md)
 - [008 — Permalink-ID short-circuit + hidden-payload markers](008-permalink-id-shortcircuit-and-payload-markers.md)
+- [009 — DM time-window override on `get_unread_summary`](009-dm-window-on-unread-summary.md)

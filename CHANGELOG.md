@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-05-21
+
+### Added — DM time-window override on `get_unread_summary`
+
+Daily recaps missed conversations the operator had themselves
+participated in: any DM or multi-party DM read in the Slack UI no
+longer surfaces in the unread sweep, even when the messages contain
+decisions the user cares about (executive sync, side-chat handoffs).
+
+- New optional `dm_window_hours: int` (default `0` = disabled,
+  non-breaking). When `> 0`, the handler also calls a new
+  `UnreadService.RecentDMActivity(ctx, hours, maxPerChannel)` and
+  merges the result on top of `UnreadAll`. DM and multi-party-DM
+  entries from the time-window fetch replace the unread-only
+  versions; new DMs that weren't in `UnreadAll` (because they were
+  already read) get appended.
+- `RecentDMActivity` lists joined channels via the existing
+  `JoinedChannels` helper (already configured for `im` + `mpim`),
+  filters to DM types, and pulls `conversations.history` since
+  `now − hours`. Reuses `fetchReplies` so the thread-reply contract
+  matches `UnreadAll` exactly.
+- Time source is a package-level `nowUnixFn` seam so tests can pin
+  the cutoff deterministically without mocking the system clock.
+
+### Why
+ADR 009 documents the rationale: unread state is the wrong primitive
+for end-of-day recaps when the operator is themselves a participant.
+The new flag preserves the unread default for normal scans while
+making DM-rich windows reachable with one parameter.
+
 ## [0.4.6] - 2026-05-21
 
 ### Fixed

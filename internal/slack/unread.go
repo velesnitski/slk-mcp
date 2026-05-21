@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack/ratelimit"
@@ -300,6 +301,119 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 	}
 	return out, nil
 }
+
+// RecentDMActivity returns DM and multi-party-DM conversations the
+// user is part of, populated with messages from the last `hours`
+// regardless of last_read. Unlike UnreadAll, it surfaces DMs the
+// user has *already opened* — useful for end-of-day recaps of
+// decisions made privately, where the operator is themselves a
+// participant and so last_read has long since caught up.
+//
+// hours <= 0 is a programming error and returns nil, nil so the
+// caller can no-op trivially. maxPerChannel caps history depth.
+func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChannel int) ([]*ChannelUnread, error) {
+	if !s.Enabled() {
+		return nil, ErrNoUserToken
+	}
+	if hours <= 0 {
+		return nil, nil
+	}
+	if maxPerChannel <= 0 {
+		maxPerChannel = 20
+	}
+
+	channels, err := s.JoinedChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Slack timestamps are unix-seconds with usec fraction. Compose
+	// the oldest cutoff as `<sec>.000000` so the API treats it
+	// canonically.
+	oldestSec := s.nowUnix() - int64(hours)*3600
+	oldest := fmt.Sprintf("%d.000000", oldestSec)
+	oldestFloat := float64(oldestSec)
+
+	// Workers cap stays at 4 to match UnreadAll — same politeness budget.
+	const workers = 4
+	type result struct {
+		cu  *ChannelUnread
+		err error
+	}
+	jobs := make(chan goslack.Channel, len(channels))
+	results := make(chan result, len(channels))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ch := range jobs {
+				if !ch.IsIM && !ch.IsMpIM {
+					continue // non-DM channels handled by UnreadAll
+				}
+				cu, err := s.dmHistorySince(ctx, ch, oldest, oldestFloat, maxPerChannel)
+				results <- result{cu, err}
+			}
+		}()
+	}
+	for _, ch := range channels {
+		jobs <- ch
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	var out []*ChannelUnread
+	for r := range results {
+		if r.err != nil {
+			s.log.Warn("dm window fetch failed", "err", r.err)
+			continue
+		}
+		if r.cu != nil && (len(r.cu.Messages) > 0 || len(r.cu.Replies) > 0) {
+			out = append(out, r.cu)
+		}
+	}
+	return out, nil
+}
+
+// dmHistorySince is the per-channel worker for RecentDMActivity. It
+// pulls history newer than `oldest` and reuses fetchReplies so the
+// thread-reply contract matches UnreadAll's output shape exactly.
+func (s *UnreadService) dmHistorySince(ctx context.Context, ch goslack.Channel, oldest string, oldestFloat float64, maxMessages int) (*ChannelUnread, error) {
+	params := &goslack.GetConversationHistoryParameters{
+		ChannelID: ch.ID,
+		Oldest:    oldest,
+		Limit:     maxMessages,
+		Inclusive: false,
+	}
+	var resp *goslack.GetConversationHistoryResponse
+	err := ratelimit.Do(ctx, s.log, 0, func() error {
+		r, err := s.api.GetConversationHistoryContext(ctx, params)
+		if err != nil {
+			return err
+		}
+		resp = r
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("conversations.history (dm window): %w", err)
+	}
+
+	cu := &ChannelUnread{Channel: ch, LastRead: ch.LastRead}
+	for _, msg := range resp.Messages {
+		cu.Messages = append(cu.Messages, msg)
+	}
+	if err := s.fetchReplies(ctx, ch.ID, oldestFloat, cu); err != nil {
+		s.log.Warn("fetch thread replies failed", "channel", ch.ID, "err", err)
+	}
+	return cu, nil
+}
+
+// nowUnix is a seam for tests — overridden via a package-level var
+// when deterministic time is needed.
+var nowUnixFn = func() int64 { return time.Now().Unix() }
+
+func (s *UnreadService) nowUnix() int64 { return nowUnixFn() }
 
 // MarkRead marks the channel as read up to the given timestamp.
 func (s *UnreadService) MarkRead(ctx context.Context, channelID, ts string) error {
