@@ -504,11 +504,35 @@ func SearchResult(m goslack.SearchMessage) string {
 // to get_thread without re-searching.
 func SearchResultExt(m goslack.SearchMessage, fullText bool) string {
 	line := searchResultLine(m, fullText)
-	threadTS := extractThreadTS(m)
+	threadTS := ExtractThreadTS(m)
 	if threadTS == "" || m.Permalink == "" {
 		return line
 	}
 	return line + "\n\tthread_ts=" + threadTS + " " + m.Permalink
+}
+
+// ThreadContextLine renders one indented context line shown beneath
+// a search hit (parent or surrounding reply). Kept in format/ so the
+// look-and-feel matches sibling renderers (ChannelDigest, MessageLine).
+//
+// `marker` is the bullet glyph: "↑" for the parent, "↳" for a
+// preceding reply, "↪" for a following one. Body is collapsed and
+// truncated identically to SearchResult.
+func ThreadContextLine(marker string, m goslack.Message, displayName string) string {
+	body := collapseWhitespace(m.Text)
+	if len(body) > 200 {
+		body = body[:200] + "..."
+	}
+	name := displayName
+	if name == "" {
+		name = m.User
+	}
+	t := ParseTS(m.Timestamp)
+	when := ""
+	if !t.IsZero() {
+		when = t.Format("15:04")
+	}
+	return "\t" + marker + " [" + when + " " + name + "] " + body
 }
 
 func searchResultLine(m goslack.SearchMessage, fullText bool) string {
@@ -524,10 +548,14 @@ func searchResultLine(m goslack.SearchMessage, fullText bool) string {
 	return fmt.Sprintf("- #%s %s (%s) %s", m.Channel.Name, when, m.Username, body)
 }
 
-// extractThreadTS pulls thread_ts from a Slack permalink, falling
+// ExtractThreadTS pulls thread_ts from a Slack permalink, falling
 // back to the message's own timestamp (which is correct for
 // top-level messages: thread_ts == ts when the message is the parent).
-func extractThreadTS(m goslack.SearchMessage) string {
+//
+// Callers can compare the result against m.Timestamp to decide
+// whether the hit is a thread reply (differs) or a top-level message
+// / thread parent (equals).
+func ExtractThreadTS(m goslack.SearchMessage) string {
 	if i := strings.Index(m.Permalink, "thread_ts="); i >= 0 {
 		rest := m.Permalink[i+len("thread_ts="):]
 		if amp := strings.IndexByte(rest, '&'); amp >= 0 {

@@ -421,7 +421,7 @@ func TestExtractThreadTS(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			m := goslack.SearchMessage{Permalink: c.permalink}
 			m.Timestamp = c.ts
-			if got := extractThreadTS(m); got != c.want {
+			if got := ExtractThreadTS(m); got != c.want {
 				t.Fatalf("got %q want %q", got, c.want)
 			}
 		})

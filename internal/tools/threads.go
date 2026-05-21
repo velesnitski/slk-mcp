@@ -8,9 +8,49 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
+
+// threadKey identifies a unique thread for dedup when fetching parents
+// across many search hits. Two replies in the same thread of the same
+// channel share one key, so we never call conversations.replies twice.
+func threadKey(m goslack.SearchMessage) string {
+	return m.Channel.ID + "|" + format.ExtractThreadTS(m)
+}
+
+// fetchThreadParents enriches a slice of search hits with their thread
+// parents. Only hits that are *replies* (thread_ts != ts) trigger a
+// fetch; top-level messages and thread parents are skipped.
+//
+// Returns a map keyed by threadKey(m) so the caller can match a hit
+// back to its parent without re-doing the lookup. Best-effort: if a
+// single fetch errors, the loop continues — the worst case is a
+// missing parent line, not a failed request.
+func (h *Hub) fetchThreadParents(ctx context.Context, matches []goslack.SearchMessage) map[string]goslack.Message {
+	parents := make(map[string]goslack.Message)
+	seen := make(map[string]struct{})
+	for _, m := range matches {
+		threadTS := format.ExtractThreadTS(m)
+		if threadTS == "" || threadTS == m.Timestamp || m.Channel.ID == "" {
+			continue // not a reply, or the parent itself
+		}
+		key := threadKey(m)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		replies, err := h.Messages().ThreadReplies(ctx, m.Channel.ID, threadTS)
+		if err != nil || len(replies) == 0 {
+			h.log.Debug("fetch thread parent failed", "channel", m.Channel.ID, "ts", threadTS, "err", err)
+			continue
+		}
+		// conversations.replies returns the parent as element [0].
+		parents[key] = replies[0]
+	}
+	return parents
+}
 
 // buildUserMessagesQuery assembles the Slack search query for
 // get_user_messages. Factored out for unit testing so the date-bound
@@ -97,12 +137,16 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				mcp.WithDescription("Recent messages from a user. Uses workspace search. "+
 					"Pass since=/until= (YYYY-MM-DD) for absolute-time scans — preferred over "+
 					"get_unread_summary when verifying that a user posted by a deadline, since "+
-					"unread state depends on the caller's last_read mark."),
+					"unread state depends on the caller's last_read mark. "+
+					"Set with_thread_context=true to inline the thread parent for each hit "+
+					"that is itself a reply — turns fragmentary search results "+
+					"(\"ok\", \"got it\") into self-explanatory lines."),
 				mcp.WithString("user", mcp.Required(), mcp.Description("Username or display name")),
 				mcp.WithString("channel", mcp.Description("Optional channel name to restrict search")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 30)")),
 				mcp.WithString("since", mcp.Description("Lower bound, YYYY-MM-DD. Maps to Slack search after:")),
 				mcp.WithString("until", mcp.Description("Upper bound, YYYY-MM-DD. Maps to Slack search before:")),
+				mcp.WithBoolean("with_thread_context", mcp.Description("If true, for each hit that is a thread reply, inline the thread parent on a continuation line. Costs one conversations.replies call per unique thread (default: false).")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				user, err := req.RequireString("user")
@@ -113,6 +157,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				limit := int(req.GetFloat("limit", 30))
 				since := req.GetString("since", "")
 				until := req.GetString("until", "")
+				withThreadCtx := req.GetBool("with_thread_context", false)
 				for _, d := range []struct{ name, val string }{{"since", since}, {"until", until}} {
 					if d.val == "" {
 						continue
@@ -131,11 +176,21 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 					return mcp.NewToolResultText(fmt.Sprintf("no messages from %s", user)), nil
 				}
 
+				var parents map[string]goslack.Message
+				if withThreadCtx {
+					parents = h.fetchThreadParents(ctx, matches)
+				}
+
 				var b strings.Builder
 				fmt.Fprintf(&b, "%d msgs from %s\n", len(matches), user)
 				for _, m := range matches {
 					b.WriteString(format.SearchResult(m))
 					b.WriteByte('\n')
+					if parent, ok := parents[threadKey(m)]; ok {
+						parentName := h.Users().Name(ctx, parent.User)
+						b.WriteString(format.ThreadContextLine("↑", parent, parentName))
+						b.WriteByte('\n')
+					}
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
 			},

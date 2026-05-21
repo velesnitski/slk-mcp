@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-05-21
+
+### Added — `with_thread_context` on `get_user_messages`
+
+LLM-consumer pain point: a search hit like `"ok"` or `"got it"` is
+impossible to interpret without the parent it was replying to. Slack
+search returns the hit body in isolation; there was no first-class
+way to drill into the parent without an extra manual `get_thread`
+call per hit.
+
+- New optional `with_thread_context: bool` (default `false`,
+  non-breaking). When set, the handler identifies every hit that is
+  a thread reply (`thread_ts != ts`), batches one
+  `conversations.replies` call per unique thread (deduped via the new
+  `threadKey` helper), and inlines the parent on a continuation line
+  beneath each hit:
+
+  ```
+  - #team-alpha 2026-05-20 11:47 (alice) got it, will do
+      ↑ [10:11 bob] please ship the fix today
+  ```
+
+- New `format.ExtractThreadTS` (renamed from private
+  `extractThreadTS`) and `format.ThreadContextLine` exported so the
+  tools package can render the indented continuation line in the
+  same style as the rest of the digest output.
+
+### Why
+Slack's `search.messages` doesn't include thread-parent context.
+For private channels where the conversation IS the context (chats
+between leads, back-and-forth in restricted channels), single-line
+hits are nearly useless. The new flag turns one cheap opt-in into a
+full-fidelity readout. See ADR 007.
+
 ## [0.4.4] - 2026-05-15
 
 ### Added — `get_unread_summary` output-size controls
@@ -193,7 +227,7 @@ scan clean.
 ## [0.3.26] - 2026-05-12
 
 ### Fixed
-- **`<#CHANNELID>` references in message bodies are no longer rendered as raw `<#C0ABC1234DE>` markup.** `RenderText` now resolves channel references the same way it resolves user mentions: prefers the inline pipe label (`<#CID|name>` → `#name`); falls back to a reverse `id→name` lookup populated from the channel cache; emits `#CID` as a last resort instead of dropping the reference. Channel digests that quote `<#CID>` (e.g. backend asking "сможем прогнать МРы из <#CID>?") now read as `#mr-backend` rather than the opaque ID.
+- **`<#CHANNELID>` references in message bodies are no longer rendered as raw `<#C0ABC1234DE>` markup.** `RenderText` now resolves channel references the same way it resolves user mentions: prefers the inline pipe label (`<#CID|name>` → `#name`); falls back to a reverse `id→name` lookup populated from the channel cache; emits `#CID` as a last resort instead of dropping the reference. Channel digests that quote `<#CID>` now render the resolved `#name` rather than the opaque ID.
 
 ### Added
 - `slack.ChannelService.NamesForIDs(ctx, ids)` — batch reverse lookup, hits an internal `idCache` first (populated by every `ResolveID` / `List` / `Info` call) with `conversations.info` fallback for unseen IDs. Mirrors `UserService.NamesFor`.
