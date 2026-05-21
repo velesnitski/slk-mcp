@@ -47,10 +47,19 @@ func (s *ChannelService) recordChannel(name, id string) {
 
 // ResolveID converts a channel name (with or without leading #) to a channel ID.
 // Caches all channels encountered during the lookup.
+//
+// If the input is already a canonical Slack channel ID (passes
+// IsChannelID), it's returned verbatim — this lets callers thread
+// permalink-derived channel IDs through the same code path without
+// a separate lookup, which would fail because IDs aren't channel
+// names and the workspace listing has no entry for them.
 func (s *ChannelService) ResolveID(ctx context.Context, name string) (string, error) {
 	name = strings.TrimPrefix(name, "#")
 	if name == "" {
 		return "", fmt.Errorf("empty channel name")
+	}
+	if IsChannelID(name) {
+		return name, nil
 	}
 
 	s.mu.RLock()

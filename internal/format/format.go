@@ -283,9 +283,13 @@ func MentionsUser(msg goslack.Message, userID string) bool {
 }
 
 // HasContent reports whether a message carries any signal worth
-// rendering — non-empty body, any reaction, any thread reply, OR
-// any file attachment. Used to filter out empty Slackbot / webhook
-// pings.
+// rendering — non-empty body, any reaction, any thread reply, file
+// attachment, Block Kit content, or legacy rich attachment. Used to
+// filter out empty Slackbot / webhook pings.
+//
+// Block Kit and Attachments matter here because some Slack clients
+// (mobile, integrations) post structured content with an empty Text
+// field — dropping those would silently hide a real message.
 func HasContent(msg goslack.Message) bool {
 	if collapseWhitespace(msg.Text) != "" {
 		return true
@@ -299,7 +303,33 @@ func HasContent(msg goslack.Message) bool {
 	if len(msg.Files) > 0 {
 		return true
 	}
+	if len(msg.Attachments) > 0 {
+		return true
+	}
+	if len(msg.Blocks.BlockSet) > 0 {
+		return true
+	}
 	return false
+}
+
+// renderHiddenPayloadMarker returns a short marker describing any
+// non-text payload (legacy Attachments or Block Kit Blocks) attached
+// to msg. Callers gate the call on body-empty-and-files-empty —
+// otherwise we'd add noise to every URL-preview message.
+//
+// The marker exists so MessageLine never renders an effectively
+// empty line for a real message; the reader knows there is content
+// reachable via the permalink even if the renderer can't surface it
+// as plain text.
+func renderHiddenPayloadMarker(msg goslack.Message) string {
+	var parts []string
+	if n := len(msg.Attachments); n > 0 {
+		parts = append(parts, fmt.Sprintf("[attached: %d]", n))
+	}
+	if n := len(msg.Blocks.BlockSet); n > 0 {
+		parts = append(parts, fmt.Sprintf("[blocks: %d]", n))
+	}
+	return strings.Join(parts, " ")
 }
 
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.
@@ -352,6 +382,14 @@ func MessageLine(msg goslack.Message, userName string, allUsers ...map[string]st
 	if files := renderFiles(msg.Files); files != "" {
 		b.WriteByte(' ')
 		b.WriteString(files)
+	} else if body == "" {
+		// Body has no text AND no file uploads — flag any remaining
+		// non-text payload (Block Kit, legacy Attachments) so the
+		// line isn't silently empty. URL-preview messages with text
+		// stay clean because this branch only fires when body == "".
+		if marker := renderHiddenPayloadMarker(msg); marker != "" {
+			b.WriteString(marker)
+		}
 	}
 	if rs := renderReactions(msg.Reactions); rs != "" {
 		b.WriteByte(' ')

@@ -55,3 +55,5 @@ don't rewrite history.
 - [004 — Absolute-time `since`/`until` on `get_user_messages`](004-absolute-time-user-search.md)
 - [005 — Handler migration to `Hub.X()` accessors + table-driven registration](005-table-driven-registration.md)
 - [006 — `get_unread_summary` size controls (`max_chars`, `skip_log_mode`, `skip_git_mode`)](006-unread-summary-size-controls.md)
+- [007 — `with_thread_context` on `get_user_messages`](007-with-thread-context.md)
+- [008 — Permalink-ID short-circuit + hidden-payload markers](008-permalink-id-shortcircuit-and-payload-markers.md)

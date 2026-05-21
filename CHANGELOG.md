@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-05-21
+
+### Fixed
+
+- **`get_thread` and `mark_read` permalink callers no longer fail with
+  "channel #C0... not found"**. `slack.ChannelService.ResolveID` now
+  short-circuits when the input is already a canonical Slack channel
+  ID (`C…` / `G…` per `IsChannelID`) and returns it verbatim. Callers
+  that pass a permalink-derived `p.ChannelID` straight through the
+  same code path are no longer rejected as if the ID were a channel
+  *name*.
+- **`MessageLine` no longer renders an effectively empty line for
+  messages that carry only legacy `Attachments` or Block Kit
+  `Blocks`**. When body text and `Files` are both empty, the
+  renderer appends a short marker (`[attached: N]` /
+  `[blocks: N]`) so the reader knows there is a non-text payload
+  reachable via the permalink. URL-preview messages (text + an
+  Attachment) stay clean — the branch only fires when body == "".
+
+### Why
+
+`get_thread(permalink=...)` failed in practice on this workspace
+because Slack permalinks embed a channel ID, not a name, and
+`ResolveID` treated every input as a name. The fix is at the
+service layer so every caller — `get_thread`, `mark_read`, and any
+future consumer — gets the right behaviour without per-handler
+plumbing.
+
+The `MessageLine` issue surfaced when a thread parent was posted
+with content in `Attachments` only (forwarded message, integration
+post) — the rendered line had a timestamp, an author, then nothing.
+A reader couldn't tell whether the user actually posted an empty
+message or whether the renderer dropped a payload. The new marker
+makes the distinction explicit.
+
+See ADR 008.
+
 ## [0.4.5] - 2026-05-21
 
 ### Added — `with_thread_context` on `get_user_messages`
