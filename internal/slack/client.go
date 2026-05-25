@@ -63,7 +63,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.Channels = newChannelService(primary, c.Users, log)
 	c.Messages = newMessageService(primary, c.Channels, c.Users, log)
 	c.Search = newSearchService(c.searchAPI(), log)
-	c.Unread = newUnreadService(user, c.Channels, c.Users, log)
+	c.Unread = newUnreadService(user, c.Channels, c.Users, c.Search, log)
 
 	return c
 }

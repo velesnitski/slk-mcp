@@ -90,7 +90,7 @@ func TestRecentDMActivity_requiresUserToken(t *testing.T) {
 	// A disabled service (no api wired) must short-circuit with
 	// ErrNoUserToken, never reach the listing call.
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := newUnreadService(nil, nil, nil, log)
+	s := newUnreadService(nil, nil, nil, nil, log)
 	_, err := s.RecentDMActivity(context.Background(), 24, 50)
 	if err != ErrNoUserToken {
 		t.Fatalf("expected ErrNoUserToken; got %v", err)

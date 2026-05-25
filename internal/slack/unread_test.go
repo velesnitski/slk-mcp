@@ -85,7 +85,7 @@ func newTestUnreadService(t *testing.T, f *fakeSlack) *UnreadService {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	users := newUserService(api, log)
 	channels := newChannelService(api, users, log)
-	return newUnreadService(api, channels, users, log)
+	return newUnreadService(api, channels, users, nil, log)
 }
 
 // channelInfo is a minimal subset of conversations.info we set in tests.
@@ -110,13 +110,13 @@ func okInfoResponse(ch channelInfo) map[string]any {
 func TestUnreadService_Enabled(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	disabled := newUnreadService(nil, nil, nil, log)
+	disabled := newUnreadService(nil, nil, nil, nil, log)
 	if disabled.Enabled() {
 		t.Fatalf("Enabled() = true on nil api; want false")
 	}
 
 	api := goslack.New("xoxp-test")
-	enabled := newUnreadService(api, nil, nil, log)
+	enabled := newUnreadService(api, nil, nil, nil, log)
 	if !enabled.Enabled() {
 		t.Fatalf("Enabled() = false on configured api; want true")
 	}
@@ -124,7 +124,7 @@ func TestUnreadService_Enabled(t *testing.T) {
 
 func TestUnread_RequiresUserToken(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := newUnreadService(nil, nil, nil, log)
+	s := newUnreadService(nil, nil, nil, nil, log)
 
 	if _, err := s.Unread(context.Background(), "C1", 10); !errors.Is(err, ErrNoUserToken) {
 		t.Fatalf("Unread err = %v; want ErrNoUserToken", err)
@@ -499,7 +499,7 @@ func TestSelf_CachesAuthTest(t *testing.T) {
 
 func TestSelf_RequiresUserToken(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := newUnreadService(nil, nil, nil, log)
+	s := newUnreadService(nil, nil, nil, nil, log)
 	if _, err := s.Self(context.Background()); !errors.Is(err, ErrNoUserToken) {
 		t.Fatalf("Self err = %v; want ErrNoUserToken", err)
 	}

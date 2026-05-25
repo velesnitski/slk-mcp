@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-05-25
+
+### Fixed — thread-mention backstop on `get_unread_summary`
+
+Silent-miss bug: when a teammate tagged the operator in a reply to a
+thread whose parent was already read, Slack delivered the
+notification but the unread sweep dropped the channel entirely.
+Cause: `UnreadService.fetchReplies` only iterates new top-level
+messages, so a reply to an *old* thread never enters `cu.Replies`,
+and `ChannelMentions` returns false for the channel.
+
+- New `UnreadService.UnreadThreadMentions(ctx, hours)` calls Slack's
+  `search.messages` with `to:me after:<date>`, groups hits by
+  channel, and parses each hit's `?thread_ts=` from its permalink
+  to attach it under the right thread bucket. Filters hits to the
+  exact time window (Slack's `after:` is date-granular only).
+- New optional `thread_mention_hours: int` on `get_unread_summary`
+  (default `24`). When `> 0`, the handler calls the backstop and
+  merges the result via `mergeThreadMentions(base, mentions)`. New
+  channels are appended; existing channels gain the mention reply
+  in their `Replies[threadTS]` bucket. Dedup by message timestamp.
+
+### Why
+ADR 010 documents the rationale. The fix is at the service layer
+(no new tool), so `mentions_only`, `get_unread_summary`, and
+downstream urgency ranking all start surfacing thread-reply
+mentions in the same call.
+
 ## [0.4.7] - 2026-05-21
 
 ### Added — DM time-window override on `get_unread_summary`

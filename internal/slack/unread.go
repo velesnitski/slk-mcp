@@ -26,14 +26,15 @@ type UnreadService struct {
 	api      *goslack.Client
 	channels *ChannelService
 	users    *UserService
+	search   *SearchService
 	log      *slog.Logger
 
 	selfMu sync.RWMutex
 	selfID string
 }
 
-func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, log *slog.Logger) *UnreadService {
-	return &UnreadService{api: api, channels: channels, users: users, log: log}
+func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, search *SearchService, log *slog.Logger) *UnreadService {
+	return &UnreadService{api: api, channels: channels, users: users, search: search, log: log}
 }
 
 // Self returns the authenticated user's Slack ID, calling auth.test on
@@ -414,6 +415,120 @@ func (s *UnreadService) dmHistorySince(ctx context.Context, ch goslack.Channel, 
 var nowUnixFn = func() int64 { return time.Now().Unix() }
 
 func (s *UnreadService) nowUnix() int64 { return nowUnixFn() }
+
+// UnreadThreadMentions catches mentions in thread replies whose parent
+// is already read — `fetchReplies` only iterates new top-level messages,
+// so a reply tagging the operator in an old thread never enters the
+// unread sweep. This method backstops that gap using Slack's own
+// `search.messages to:me` index, which DOES catch the reply.
+//
+// Returns one `*ChannelUnread` per affected channel with the mentioning
+// search hits attached. Caller is responsible for merging into the
+// regular `UnreadAll` result. `hours <= 0` is a no-op.
+func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]*ChannelUnread, error) {
+	if !s.Enabled() {
+		return nil, ErrNoUserToken
+	}
+	if hours <= 0 || s.search == nil {
+		return nil, nil
+	}
+
+	after := s.nowUnix() - int64(hours)*3600
+	afterDate := time.Unix(after, 0).Format("2006-01-02")
+	// Slack's `to:me` matches messages where the operator is the explicit
+	// recipient — DMs to them, plus `<@SELFID>` mentions. That's exactly
+	// the gap UnreadAll's reply-fetch can't see for old-thread replies.
+	query := "to:me after:" + afterDate
+
+	matches, err := s.search.Messages(ctx, query, 100)
+	if err != nil {
+		return nil, fmt.Errorf("search to:me: %w", err)
+	}
+
+	byChannel := make(map[string]*ChannelUnread)
+	for _, m := range matches {
+		if m.Channel.ID == "" {
+			continue
+		}
+		// Filter to the actual time window — Slack's `after:` is
+		// strictly date-granular, so messages from earlier in the
+		// same day could leak in. Drop anything that predates our
+		// hour-precise cutoff.
+		ts, _ := strconv.ParseFloat(m.Timestamp, 64)
+		if int64(ts) < after {
+			continue
+		}
+		cu, ok := byChannel[m.Channel.ID]
+		if !ok {
+			cu = &ChannelUnread{}
+			cu.Channel.ID = m.Channel.ID
+			cu.Channel.Name = m.Channel.Name
+			byChannel[m.Channel.ID] = cu
+		}
+		msg := searchHitToMessage(m)
+		// Decide whether to attach as a top-level message or as a
+		// reply under its parent's ts. Replies go under Replies[ts]
+		// so ChannelMentions traverses them via the same loop it
+		// uses for regular thread replies.
+		if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {
+			if cu.Replies == nil {
+				cu.Replies = make(map[string][]goslack.Message)
+			}
+			cu.Replies[msg.ThreadTimestamp] = append(cu.Replies[msg.ThreadTimestamp], msg)
+		} else {
+			cu.Messages = append(cu.Messages, msg)
+		}
+	}
+
+	out := make([]*ChannelUnread, 0, len(byChannel))
+	for _, cu := range byChannel {
+		out = append(out, cu)
+	}
+	return out, nil
+}
+
+// searchHitToMessage adapts a SearchMessage (the shape returned by
+// search.messages) to the Message shape the rest of the digest
+// pipeline expects. We only fill the fields downstream renderers and
+// mention-detection actually read.
+func searchHitToMessage(h goslack.SearchMessage) goslack.Message {
+	m := goslack.Message{}
+	m.Msg.User = h.User
+	m.Msg.Username = h.Username
+	m.Msg.Text = h.Text
+	m.Msg.Timestamp = h.Timestamp
+	m.Msg.Permalink = h.Permalink
+	// Slack permalinks for thread replies include `?thread_ts=...`;
+	// parse it back to populate ThreadTimestamp so downstream code
+	// (ChannelMentions, rendering) treats this hit as a reply.
+	if i := indexThreadTS(h.Permalink); i >= 0 {
+		rest := h.Permalink[i+len("thread_ts="):]
+		if amp := indexAmp(rest); amp >= 0 {
+			m.Msg.ThreadTimestamp = rest[:amp]
+		} else {
+			m.Msg.ThreadTimestamp = rest
+		}
+	}
+	return m
+}
+
+func indexThreadTS(s string) int {
+	for i := 0; i+10 <= len(s); i++ {
+		if s[i:i+10] == "thread_ts=" {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexAmp(s string) int {
+	for i, r := range s {
+		if r == '&' {
+			return i
+		}
+	}
+	return -1
+}
 
 // MarkRead marks the channel as read up to the given timestamp.
 func (s *UnreadService) MarkRead(ctx context.Context, channelID, ts string) error {

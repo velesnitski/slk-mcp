@@ -10,6 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/digest"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
@@ -37,6 +38,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("skip_git_mode", mcp.Description("If true, omit git-mode channels (CI / git-bot feeds) entirely. Cheap way to shrink the output when git activity dominates (default: false)")),
 				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters). Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. 0 = unlimited (default).")),
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
+				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				maxPer := int(req.GetFloat("max_per_channel", 20))
@@ -48,6 +50,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				skipGit := req.GetBool("skip_git_mode", false)
 				maxChars := int(req.GetFloat("max_chars", 0))
 				dmWindowHours := int(req.GetFloat("dm_window_hours", 0))
+				threadMentionHours := int(req.GetFloat("thread_mention_hours", 24))
 				urg := digest.UrgencyOpts{
 					Weight:        req.GetFloat("urgency_weight", 0),
 					ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -73,6 +76,22 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 						h.log.Warn("dm window fetch failed; falling back to unread-only", "err", dmErr)
 					} else {
 						results = mergeDMOverride(results, dmResults)
+					}
+				}
+
+				// Thread-mention backstop: UnreadAll's fetchReplies only
+				// covers replies to NEW top-level messages. If a teammate
+				// tags the operator in a reply to an *old* thread (parent
+				// already read), Slack pings them but the unread sweep
+				// silently drops the channel. Search-based `to:me` catches
+				// those replies; merge their channels into results so
+				// `mentions_only` and `ChannelMentions` can see them.
+				if threadMentionHours > 0 {
+					tmResults, tmErr := h.Unread().UnreadThreadMentions(ctx, threadMentionHours)
+					if tmErr != nil {
+						h.log.Warn("thread-mention backstop failed; falling back to unread-only", "err", tmErr)
+					} else {
+						results = mergeThreadMentions(results, tmResults)
 					}
 				}
 
@@ -354,6 +373,69 @@ func mergeDMOverride(base, override []*slack.ChannelUnread) []*slack.ChannelUnre
 		out = append(out, o)
 	}
 	return out
+}
+
+// mergeThreadMentions folds search-based thread-mention hits into the
+// regular unread sweep. Unlike mergeDMOverride, this never *replaces*
+// an existing entry — it augments. When the channel is already in
+// `base` (the unread sweep found other activity there), the mention's
+// reply messages are appended into `Replies[threadTS]`. When the
+// channel is new (base didn't know about it because the parent was
+// already read), the whole `*ChannelUnread` is appended.
+//
+// Deduplication is by (threadTS, timestamp) so re-runs don't pile up
+// duplicate replies if a Slack search returns the same message twice
+// across sweeps.
+func mergeThreadMentions(base, mentions []*slack.ChannelUnread) []*slack.ChannelUnread {
+	if len(mentions) == 0 {
+		return base
+	}
+	byID := make(map[string]*slack.ChannelUnread, len(base))
+	for _, b := range base {
+		if b == nil || b.Channel.ID == "" {
+			continue
+		}
+		byID[b.Channel.ID] = b
+	}
+	for _, m := range mentions {
+		if m == nil || m.Channel.ID == "" {
+			continue
+		}
+		existing, ok := byID[m.Channel.ID]
+		if !ok {
+			base = append(base, m)
+			byID[m.Channel.ID] = m
+			continue
+		}
+		// Merge top-level messages with timestamp dedup.
+		seen := make(map[string]struct{}, len(existing.Messages))
+		for _, x := range existing.Messages {
+			seen[x.Timestamp] = struct{}{}
+		}
+		for _, msg := range m.Messages {
+			if _, dup := seen[msg.Timestamp]; dup {
+				continue
+			}
+			existing.Messages = append(existing.Messages, msg)
+		}
+		// Merge thread replies into existing buckets with ts dedup.
+		if existing.Replies == nil && len(m.Replies) > 0 {
+			existing.Replies = make(map[string][]goslack.Message)
+		}
+		for threadTS, reps := range m.Replies {
+			seenReps := make(map[string]struct{}, len(existing.Replies[threadTS]))
+			for _, x := range existing.Replies[threadTS] {
+				seenReps[x.Timestamp] = struct{}{}
+			}
+			for _, r := range reps {
+				if _, dup := seenReps[r.Timestamp]; dup {
+					continue
+				}
+				existing.Replies[threadTS] = append(existing.Replies[threadTS], r)
+			}
+		}
+	}
+	return base
 }
 
 // budgetAppend writes rendered (plus the inter-channel "\n\n" separator)

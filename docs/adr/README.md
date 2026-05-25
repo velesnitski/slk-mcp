@@ -58,3 +58,4 @@ don't rewrite history.
 - [007 — `with_thread_context` on `get_user_messages`](007-with-thread-context.md)
 - [008 — Permalink-ID short-circuit + hidden-payload markers](008-permalink-id-shortcircuit-and-payload-markers.md)
 - [009 — DM time-window override on `get_unread_summary`](009-dm-window-on-unread-summary.md)
+- [010 — Thread-mention backstop on `get_unread_summary`](010-thread-mention-backstop.md)
