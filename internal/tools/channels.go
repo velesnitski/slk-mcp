@@ -163,6 +163,56 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 			},
 		)
 	}
+
+	// archive / unarchive are write operations; gated by SLACK_READ_ONLY
+	// alongside post_message and add_reaction. Both go through the same
+	// channel-resolution path so a caller can pass either a name or a
+	// canonical channel ID (e.g. straight from list_channels output).
+	if !h.cfg.ReadOnly && !h.cfg.IsDisabled("archive_channel") {
+		s.AddTool(
+			mcp.NewTool("archive_channel",
+				mcp.WithDescription("Archive a Slack channel via conversations.archive. Reversible via unarchive_channel — Slack hides the channel from active lists and rejects new messages, but does not permanently delete it. Requires channels:manage (public) or groups:write (private) on the user token."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#general, general) or Slack channel ID (C0ABC1234DE)")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				input, err := req.RequireString("channel")
+				if err != nil {
+					return mcp.NewToolResultError("channel is required"), nil
+				}
+				channelID, err := h.Channels().ResolveID(ctx, input)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				if err := h.Channels().Archive(ctx, channelID); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				return mcp.NewToolResultText(fmt.Sprintf("archived #%s (%s) — reversible via unarchive_channel", strings.TrimPrefix(input, "#"), channelID)), nil
+			},
+		)
+	}
+
+	if !h.cfg.ReadOnly && !h.cfg.IsDisabled("unarchive_channel") {
+		s.AddTool(
+			mcp.NewTool("unarchive_channel",
+				mcp.WithDescription("Restore an archived channel via conversations.unarchive. Reverses archive_channel."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name or Slack channel ID")),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				input, err := req.RequireString("channel")
+				if err != nil {
+					return mcp.NewToolResultError("channel is required"), nil
+				}
+				channelID, err := h.Channels().ResolveID(ctx, input)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				if err := h.Channels().Unarchive(ctx, channelID); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				return mcp.NewToolResultText(fmt.Sprintf("unarchived #%s (%s)", strings.TrimPrefix(input, "#"), channelID)), nil
+			},
+		)
+	}
 }
 
 func firstLine(s string) string {

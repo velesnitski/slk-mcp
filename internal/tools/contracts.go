@@ -36,6 +36,8 @@ type ChannelClient interface {
 	List(ctx context.Context, limit int) ([]goslack.Channel, error)
 	NamesForIDs(ctx context.Context, channelIDs []string) map[string]string
 	Members(ctx context.Context, channelID string, limit int) ([]string, error)
+	Archive(ctx context.Context, channelID string) error
+	Unarchive(ctx context.Context, channelID string) error
 }
 
 // MessageClient covers reading channel history, fetching thread

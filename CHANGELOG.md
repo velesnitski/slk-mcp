@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.11] - 2026-05-26
+
+### Added — `archive_channel` and `unarchive_channel`
+
+The workspace-audit flow from v0.4.9 (`list_channels(unjoined_only=true)`)
+surfaces dead / orphan channels but had no follow-up to clean them
+up — the operator had to switch to the Slack UI. Two new write
+tools close that loop:
+
+- **`archive_channel(channel)`** — wraps Slack's
+  `conversations.archive`. Reversible; Slack hides the channel
+  from active lists and rejects new messages but does not
+  permanently delete it.
+- **`unarchive_channel(channel)`** — symmetric restore via
+  `conversations.unarchive`.
+
+Both accept either a channel name (`#general`, `general`) or a
+canonical channel ID (`C0ABC1234DE`) — they thread through
+`ChannelService.ResolveID`, which already short-circuits on
+canonical IDs (v0.4.6).
+
+Permissions: the user token needs `channels:manage` for public
+channels and `groups:write` for private ones.
+
+### Why
+Both tools are *write* operations and so are gated by
+`SLACK_READ_ONLY` and `IsDisabled(name)` checks alongside
+`post_message`, `add_reaction`, and `mark_read`. A read-only
+deployment never sees them.
+
+`ChannelClient` contract grows by `Archive` and `Unarchive` —
+matching the established pattern. The compile-time assertion in
+`contracts.go` continues to enforce that `*slack.ChannelService`
+satisfies the broader interface.
+
+ADR 013 documents the rationale.
+
 ## [0.4.10] - 2026-05-26
 
 ### Fixed — CI flake in `internal/lifecycle/parent_test.go`

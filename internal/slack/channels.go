@@ -174,6 +174,25 @@ func (s *ChannelService) Info(ctx context.Context, channelID string) (*goslack.C
 	return ch, err
 }
 
+// Archive marks a channel as archived via conversations.archive.
+// The operation is reversible by Unarchive — Slack does not truly
+// delete the channel, only hides it from active lists and prevents
+// new messages. Permissions: the user token needs `channels:manage`
+// for public channels and `groups:write` for private ones.
+func (s *ChannelService) Archive(ctx context.Context, channelID string) error {
+	return ratelimit.Do(ctx, s.log, 0, func() error {
+		return s.api.ArchiveConversationContext(ctx, channelID)
+	})
+}
+
+// Unarchive restores a previously-archived channel via
+// conversations.unarchive. Same scope requirements as Archive.
+func (s *ChannelService) Unarchive(ctx context.Context, channelID string) error {
+	return ratelimit.Do(ctx, s.log, 0, func() error {
+		return s.api.UnArchiveConversationContext(ctx, channelID)
+	})
+}
+
 // IsID reports whether a string looks like a Slack channel ID
 // (`C…` public, `G…` private; `D…` DMs are intentionally excluded —
 // callers asking for a "channel name" never mean a DM).
