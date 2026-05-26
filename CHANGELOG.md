@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-05-26
+
+### Added — channel audit on `list_channels`
+
+The previous `list_channels` output named channels and showed member
+counts but gave no signal about whether the operator was already a
+member — and no surface for "find me the channels I'm NOT in yet."
+That broke the workspace-audit use case.
+
+- New optional `unjoined_only: bool` (default `false`). When `true`,
+  the result is filtered to channels where `IsMember == false` —
+  the primary audit case.
+- Each rendered line now marks `[NOT JOINED]` for non-member
+  channels and `🔒` for private channels. Joined public channels
+  stay quiet (loud-on-anomaly, silent-on-common-case).
+- Context falls back from `Topic` → `Purpose` so a channel with no
+  topic but a real purpose still carries a description.
+- Tool description rewritten to call out the audit use case
+  explicitly so LLM consumers reach for `unjoined_only=true` when
+  asked "which channels haven't I joined."
+
+### Why
+ADR 011 documents the rationale. The fix exposes existing Slack
+`conversations.list` fields (`IsMember`, `IsPrivate`, `Purpose`)
+that the previous renderer dropped — no new API calls, no contract
+break.
+
 ## [0.4.8] - 2026-05-25
 
 ### Fixed — thread-mention backstop on `get_unread_summary`

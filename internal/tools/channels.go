@@ -9,38 +9,94 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
+
+// filterUnjoined returns only channels the operator is NOT a member of.
+// When the filter is off, the input slice is returned untouched so the
+// happy path stays allocation-free.
+func filterUnjoined(channels []goslack.Channel, unjoinedOnly bool) []goslack.Channel {
+	if !unjoinedOnly {
+		return channels
+	}
+	out := channels[:0]
+	for _, ch := range channels {
+		if !ch.IsMember {
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// renderChannelLine formats one entry of the list_channels output.
+// Layout: `- #name[🔒] (member_count) [NOT JOINED] context`
+// - 🔒 appears for private channels (a member-audit signal: which
+//   private rooms are you in vs not).
+// - [NOT JOINED] appears only when IsMember is false. Joined channels
+//   stay quiet — the marker is loud-on-anomaly, silent-on-common-case.
+// - Context falls back from topic → purpose so a channel with no
+//   topic but a real purpose still carries a description.
+func renderChannelLine(ch goslack.Channel) string {
+	var b strings.Builder
+	b.WriteString("- #")
+	b.WriteString(ch.Name)
+	if ch.IsPrivate {
+		b.WriteString(" 🔒")
+	}
+	fmt.Fprintf(&b, " (%d)", ch.NumMembers)
+	if !ch.IsMember {
+		b.WriteString(" [NOT JOINED]")
+	}
+	context := strings.TrimSpace(ch.Topic.Value)
+	if context == "" {
+		context = strings.TrimSpace(ch.Purpose.Value)
+	}
+	if len(context) > 80 {
+		context = context[:80] + "..."
+	}
+	if context != "" {
+		b.WriteByte(' ')
+		b.WriteString(context)
+	}
+	return b.String()
+}
 
 func (h *Hub) registerChannelTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("list_channels") {
 		s.AddTool(
 			mcp.NewTool("list_channels",
-				mcp.WithDescription("List Slack channels the bot can see, ordered by member count."),
+				mcp.WithDescription("List Slack channels the operator can see, ordered by member count. "+
+					"Each entry marks [NOT JOINED] for channels the operator isn't a member of, "+
+					"and 🔒 for private channels, so callers can audit membership. "+
+					"Falls back from topic to purpose when topic is empty. "+
+					"Pass unjoined_only=true to filter to channels the operator hasn't joined "+
+					"(typical channel-audit use case)."),
 				mcp.WithNumber("limit", mcp.Description("Max channels to return (default: 100)")),
+				mcp.WithBoolean("unjoined_only", mcp.Description("If true, return only channels the operator is NOT a member of. Surfaces public channels you haven't joined yet — primary use case is workspace audit. Default: false.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				limit := int(req.GetFloat("limit", 100))
+				unjoinedOnly := req.GetBool("unjoined_only", false)
 				channels, err := h.Channels().List(ctx, limit)
 				if err != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("list channels: %v", err)), nil
 				}
+				channels = filterUnjoined(channels, unjoinedOnly)
 				sort.Slice(channels, func(i, j int) bool {
 					return channels[i].NumMembers > channels[j].NumMembers
 				})
 
 				var b strings.Builder
-				fmt.Fprintf(&b, "%d channels\n", len(channels))
+				header := fmt.Sprintf("%d channels", len(channels))
+				if unjoinedOnly {
+					header += " (operator is not a member)"
+				}
+				b.WriteString(header)
+				b.WriteByte('\n')
 				for _, ch := range channels {
-					topic := strings.TrimSpace(ch.Topic.Value)
-					if len(topic) > 80 {
-						topic = topic[:80] + "..."
-					}
-					if topic != "" {
-						fmt.Fprintf(&b, "- #%s (%d) %s\n", ch.Name, ch.NumMembers, topic)
-					} else {
-						fmt.Fprintf(&b, "- #%s (%d)\n", ch.Name, ch.NumMembers)
-					}
+					b.WriteString(renderChannelLine(ch))
+					b.WriteByte('\n')
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
 			},
