@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12] - 2026-05-26
+
+### Fixed — DM-window silent-miss bug
+
+Observed in production: an outgoing message the operator just sent
+to a DM (no incoming reply yet) didn't surface in
+`get_unread_summary(dm_window_hours=12)` even though it was well
+within the time window. Two cooperating root causes:
+
+1. **`mergeDMOverride`** required `b.Channel.IsIM || b.Channel.IsMpIM`
+   on the *base* entry before letting an override replace it. Slack's
+   `users.conversations` doesn't always populate those flags for
+   read-state-stale DMs (typical for outgoing-only) — so the
+   conditional rejected a legitimate replacement and the truncated
+   unread-only view persisted.
+2. **`RecentDMActivity` worker filter** used the same brittle
+   `ch.IsIM || ch.IsMpIM` check, so a DM with the flags missing was
+   silently skipped before the history fetch could run.
+
+### What changed
+
+- Dropped the `IsIM/IsMpIM` conditional in `mergeDMOverride`. If the
+  override has a matching channel ID, replace — the override side
+  has already filtered to DMs via `isDirectMessage`.
+- New `slack.isDirectMessage(ch)` helper. Trusts `IsIM`/`IsMpIM`
+  when set; falls back to channel-ID prefix (`D…` for IM, `G…` +
+  `mpdm-` name for MPIM). `G…` channels with non-mpdm names stay
+  treated as private groups, not DMs.
+- `RecentDMActivity` worker now calls `isDirectMessage(ch)` instead
+  of inline boolean checks.
+
+### Why
+ADR 014 documents the rationale. The fix is purely a robustness
+upgrade — no API contract change, no new parameters, no surface
+growth.
+
 ## [0.4.11] - 2026-05-26
 
 ### Added — `archive_channel` and `unarchive_channel`

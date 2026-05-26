@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -349,7 +350,7 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 		go func() {
 			defer wg.Done()
 			for ch := range jobs {
-				if !ch.IsIM && !ch.IsMpIM {
+				if !isDirectMessage(ch) {
 					continue // non-DM channels handled by UnreadAll
 				}
 				cu, err := s.dmHistorySince(ctx, ch, oldest, oldestFloat, maxPerChannel)
@@ -415,6 +416,32 @@ func (s *UnreadService) dmHistorySince(ctx context.Context, ch goslack.Channel, 
 var nowUnixFn = func() int64 { return time.Now().Unix() }
 
 func (s *UnreadService) nowUnix() int64 { return nowUnixFn() }
+
+// isDirectMessage decides whether a goslack.Channel represents a
+// 1:1 DM or multi-party DM. Slack's `users.conversations` *should*
+// populate IsIM / IsMpIM correctly for every member-side DM, but in
+// practice the booleans go missing for channels whose state is
+// stale on the listing side (typical with read-state-only-outgoing
+// DMs). Falling back to the channel ID prefix preserves the
+// invariant that any user-token DM is detected:
+//
+//   - `D…` — direct message (1:1)
+//   - `G…` whose name starts with `mpdm-` — multi-party DM
+//
+// Plain `G…` channels with non-mpdm names are private group
+// channels, not DMs, so they intentionally do NOT match.
+func isDirectMessage(ch goslack.Channel) bool {
+	if ch.IsIM || ch.IsMpIM {
+		return true
+	}
+	if strings.HasPrefix(ch.ID, "D") {
+		return true
+	}
+	if strings.HasPrefix(ch.ID, "G") && strings.HasPrefix(ch.Name, "mpdm-") {
+		return true
+	}
+	return false
+}
 
 // UnreadThreadMentions catches mentions in thread replies whose parent
 // is already read — `fetchReplies` only iterates new top-level messages,

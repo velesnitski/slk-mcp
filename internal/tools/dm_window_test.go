@@ -42,15 +42,33 @@ func TestMergeDMOverride_replacesDMInBase(t *testing.T) {
 	}
 }
 
-func TestMergeDMOverride_preservesNonDMInBase(t *testing.T) {
-	// A regular channel in base with the same ID as a DM in override
-	// must not be replaced — only DM entries get the override
-	// treatment.
-	baseRegular := mkChannel("C1", false, false)
-	override := mkChannel("C1", true, false) // Slack would never re-emit a public channel as DM, but guard anyway
-	got := mergeDMOverride([]*slack.ChannelUnread{baseRegular}, []*slack.ChannelUnread{override})
-	if got[0].Channel.IsIM {
-		t.Fatalf("non-DM base must not be replaced by DM override; got IsIM=true")
+func TestMergeDMOverride_replacesEvenWhenBaseIsIMNotSet(t *testing.T) {
+	// The silent-miss bug we shipped in v0.4.7 (fixed in v0.4.12):
+	// users.conversations sometimes returns DM channels with
+	// IsIM=false (especially for outgoing-only DMs the operator
+	// already marked read). Before the fix, the merge over-defensively
+	// required base.IsIM/IsMpIM to be true before replacing — so
+	// override was silently ignored and the truncated unread-only
+	// view persisted. Trust the override side: it already filtered
+	// to DMs via the new isDirectMessage helper.
+	baseStale := mkChannel("D_RUSLAN", false, false) // IsIM not set!
+	baseStale.Messages = []goslack.Message{
+		{Msg: goslack.Msg{Text: "stale incoming", Timestamp: "1.0"}},
+	}
+	override := mkChannel("D_RUSLAN", true, false)
+	override.Messages = []goslack.Message{
+		{Msg: goslack.Msg{Text: "stale incoming", Timestamp: "1.0"}},
+		{Msg: goslack.Msg{Text: "fresh outgoing reply", Timestamp: "2.0"}},
+	}
+	got := mergeDMOverride([]*slack.ChannelUnread{baseStale}, []*slack.ChannelUnread{override})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry after merge; got %d", len(got))
+	}
+	if len(got[0].Messages) != 2 {
+		t.Fatalf("expected merge to surface override's 2 msgs (incl outgoing); got %d", len(got[0].Messages))
+	}
+	if got[0].Messages[1].Text != "fresh outgoing reply" {
+		t.Fatalf("expected fresh outgoing reply in merge; got %q", got[0].Messages[1].Text)
 	}
 }
 

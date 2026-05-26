@@ -62,3 +62,4 @@ don't rewrite history.
 - [011 — Channel audit on `list_channels`](011-list-channels-audit.md)
 - [012 — `parent_test.go` deadline raised to 5s under `-race`](012-parent-test-deadline.md)
 - [013 — `archive_channel` and `unarchive_channel`](013-archive-channel.md)
+- [014 — DM-window silent-miss bug](014-dm-window-silent-miss.md)

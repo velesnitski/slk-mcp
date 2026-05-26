@@ -356,7 +356,15 @@ func mergeDMOverride(base, override []*slack.ChannelUnread) []*slack.ChannelUnre
 		if b == nil {
 			continue
 		}
-		if replacement, ok := byID[b.Channel.ID]; ok && (b.Channel.IsIM || b.Channel.IsMpIM) {
+		// Trust the override side: RecentDMActivity already filtered
+		// to IM/MPIM channels, so any match in byID is a DM entry that
+		// should replace the truncated base view. Relying on the base
+		// channel's IsIM/IsMpIM flag was the v0.4.7 over-defensive
+		// check that caused silent misses — users.conversations doesn't
+		// always populate those flags for read-state-stale DMs, and a
+		// missing flag meant a real DM kept its old unread-only view
+		// instead of being refreshed by the time-window fetch.
+		if replacement, ok := byID[b.Channel.ID]; ok {
 			out = append(out, replacement)
 		} else {
 			out = append(out, b)
