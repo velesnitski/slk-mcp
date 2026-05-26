@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.10] - 2026-05-26
+
+### Fixed — CI flake in `internal/lifecycle/parent_test.go`
+
+`TestWatchParent_FiresWhenPpidChanges` flaked intermittently on Go
+1.23 `-race` runs (same commit passed on the dev branch CI, failed
+on main). Root cause: every async assertion in the file used a
+hard-coded `2 * time.Second` deadline, which is tight when the race
+detector adds ~5–10x goroutine scheduling overhead on a shared CI
+runner.
+
+- Extracted `testDeadline = 5 * time.Second` constant at the top
+  of `parent_test.go` with a comment explaining the rationale.
+- Replaced every `time.After(2 * time.Second)` (×7) and
+  `time.After(time.Second)` (×1) with `time.After(testDeadline)`.
+- Updated the one stale failure message that hardcoded "within
+  2s" to read "within deadline".
+
+### Why
+Same SHA producing different CI results between dev and main was a
+schedule artefact, not a code regression. The fix raises the
+ceiling for a real hang to surface (5s is still a generous bound)
+without changing any production logic. ADR 012 documents the
+rationale.
+
 ## [0.4.9] - 2026-05-26
 
 ### Added — channel audit on `list_channels`

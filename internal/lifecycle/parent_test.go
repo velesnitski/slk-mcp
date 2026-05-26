@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// testDeadline is the budget given to async test conditions (goroutine
+// startup, channel close, watcher tick). The race detector adds ~5–10x
+// scheduling overhead on shared CI runners; a 2-second budget flaked
+// intermittently on Go 1.23 -race runs while the same SHA passed on a
+// faster runner. 5 seconds is a generous-but-bounded ceiling that
+// still fails loudly on a real hang.
+const testDeadline = 5 * time.Second
+
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
@@ -39,7 +47,7 @@ func (p *pidSource) waitInitialised(t *testing.T) {
 	t.Helper()
 	select {
 	case <-p.initialised:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("watcher never read initial ppid")
 	}
 }
@@ -66,14 +74,14 @@ func TestWatchParent_FiresWhenPpidChanges(t *testing.T) {
 
 	select {
 	case <-lost:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("WatchParent did not detect ppid change within 2s")
+	case <-time.After(testDeadline):
+		t.Fatalf("WatchParent did not detect ppid change within deadline")
 	}
 
 	// onLost must also stop the watcher loop.
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("WatchParent did not return after onLost")
 	}
 }
@@ -98,7 +106,7 @@ func TestWatchParent_NoFireWhenPpidStable(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("WatchParent did not return after context cancel")
 	}
 
@@ -124,7 +132,7 @@ func TestWatchParent_StopsOnContextCancel(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("WatchParent did not exit on ctx.Done()")
 	}
 }
@@ -149,7 +157,7 @@ func TestWatchParent_FiresExactlyOnce(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("WatchParent did not return after onLost")
 	}
 
@@ -181,7 +189,7 @@ func TestWatchParent_ZeroIntervalUsesDefault(t *testing.T) {
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("watcher with interval=0 did not exit on ctx.Done()")
 	}
 }
@@ -201,7 +209,7 @@ func TestWatchParent_NilLoggerSafe(t *testing.T) {
 
 	select {
 	case <-lost:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testDeadline):
 		t.Fatalf("WatchParent with nil logger did not fire onLost")
 	}
 }

@@ -60,3 +60,4 @@ don't rewrite history.
 - [009 — DM time-window override on `get_unread_summary`](009-dm-window-on-unread-summary.md)
 - [010 — Thread-mention backstop on `get_unread_summary`](010-thread-mention-backstop.md)
 - [011 — Channel audit on `list_channels`](011-list-channels-audit.md)
+- [012 — `parent_test.go` deadline raised to 5s under `-race`](012-parent-test-deadline.md)
