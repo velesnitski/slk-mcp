@@ -63,3 +63,4 @@ don't rewrite history.
 - [012 — `parent_test.go` deadline raised to 5s under `-race`](012-parent-test-deadline.md)
 - [013 — `archive_channel` and `unarchive_channel`](013-archive-channel.md)
 - [014 — DM-window silent-miss bug](014-dm-window-silent-miss.md)
+- [015 — `parent_test.go` poll interval raised from 1ms to 10ms](015-parent-test-poll-interval.md)

@@ -18,6 +18,20 @@ import (
 // still fails loudly on a real hang.
 const testDeadline = 5 * time.Second
 
+// testPollInterval is the watcher's poll cadence inside this file's
+// tests. We deliberately do NOT use 1ms here — it's below the Linux
+// kernel scheduler's nominal granularity (~4ms under stress) and
+// gets further amplified by the race detector's goroutine-scheduling
+// barriers. A v0.4.10 deadline bump (2s → 5s) was insufficient because
+// the *interval* was the bottleneck, not the deadline: ticks on a
+// loaded CI runner were sometimes not firing at all within the budget.
+//
+// 10ms is small enough to keep the happy path under a second
+// (waitInitialised + 1 tick + onLost ≈ 30ms typical) while staying
+// safely above scheduler granularity. With testDeadline = 5s, that's
+// 500+ ticks of headroom for a real change to be detected.
+const testPollInterval = 10 * time.Millisecond
+
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
@@ -62,7 +76,7 @@ func TestWatchParent_FiresWhenPpidChanges(t *testing.T) {
 
 	go func() {
 		defer close(done)
-		WatchParent(ctx, quietLogger(), src.get, 1*time.Millisecond,
+		WatchParent(ctx, quietLogger(), src.get, testPollInterval,
 			func() { close(lost) },
 		)
 	}()
@@ -96,7 +110,7 @@ func TestWatchParent_NoFireWhenPpidStable(t *testing.T) {
 		defer close(done)
 		WatchParent(ctx, quietLogger(),
 			func() int { return 999 },
-			1*time.Millisecond,
+			testPollInterval,
 			func() { lostCount.Add(1) },
 		)
 	}()
@@ -123,7 +137,7 @@ func TestWatchParent_StopsOnContextCancel(t *testing.T) {
 		defer close(done)
 		WatchParent(ctx, quietLogger(),
 			func() int { return 1 },
-			10*time.Millisecond,
+			testPollInterval,
 			func() { t.Errorf("onLost must not fire when ppid is stable") },
 		)
 	}()
@@ -147,7 +161,7 @@ func TestWatchParent_FiresExactlyOnce(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		WatchParent(ctx, quietLogger(), src.get, 1*time.Millisecond,
+		WatchParent(ctx, quietLogger(), src.get, testPollInterval,
 			func() { calls.Add(1) },
 		)
 	}()
@@ -200,7 +214,7 @@ func TestWatchParent_NilLoggerSafe(t *testing.T) {
 
 	src := newPidSource(10)
 	lost := make(chan struct{})
-	go WatchParent(ctx, nil, src.get, 1*time.Millisecond,
+	go WatchParent(ctx, nil, src.get, testPollInterval,
 		func() { close(lost) },
 	)
 

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.13] - 2026-05-27
+
+### Fixed — `parent_test.go` flake (deeper fix after v0.4.10)
+
+v0.4.10 bumped `testDeadline` 2s → 5s thinking the deadline was too
+tight. The flake came back on the next CI run anyway: the test
+budget was a red herring — the real bottleneck was the **poll
+interval**.
+
+The watcher uses `time.NewTicker(interval)`; tests passed
+`1 * time.Millisecond`. Under the race detector on a loaded CI
+runner that interval is **below kernel scheduler granularity**
+(~4ms typical under stress) AND amplified by the race detector's
+goroutine-scheduling memory barriers. Net effect: the 1ms ticker
+sometimes didn't fire at all within 5 seconds, and the deadline
+bump just delayed the inevitable.
+
+### Change
+- New `testPollInterval = 10 * time.Millisecond` constant in
+  `parent_test.go` with a long rationale comment.
+- All 5 `1 * time.Millisecond` / `10*time.Millisecond` literals in
+  the test file replaced with the constant.
+- Production code (`WatchParent`, the lifecycle semantics) untouched.
+
+### Effect
+Happy-path latency unchanged in human terms (waitInitialised + 1
+tick + onLost ≈ 30ms typical). With `testDeadline = 5s` the budget
+now covers 500+ ticks of headroom — plenty for any real
+ppid-change detection.
+
+ADR 015 documents the lesson: **deadline budgets compensate for
+slow ticks, not absent ticks. The interval is the lever that
+matters under -race on stressed runners.**
+
 ## [0.4.12] - 2026-05-26
 
 ### Fixed — DM-window silent-miss bug
