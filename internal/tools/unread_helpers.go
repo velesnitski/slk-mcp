@@ -5,6 +5,7 @@ package tools
 
 import (
 	"context"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -101,7 +102,7 @@ func (h *Hub) filterPendingMentions(ctx context.Context, matches []goslack.Searc
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				results <- result{idx: j.idx, pending: !h.operatorReplied(ctx, j.match.Channel.ID, j.match.Timestamp, selfID)}
+				results <- result{idx: j.idx, pending: !h.operatorReplied(ctx, j.match, selfID)}
 			}
 		}()
 	}
@@ -125,21 +126,72 @@ func (h *Hub) filterPendingMentions(ctx context.Context, matches []goslack.Searc
 	return out
 }
 
-func (h *Hub) operatorReplied(ctx context.Context, channelID, mentionTS, selfID string) bool {
-	pivot, _ := strconv.ParseFloat(mentionTS, 64)
-	if pivot <= 0 || channelID == "" {
+func (h *Hub) operatorReplied(ctx context.Context, m goslack.SearchMessage, selfID string) bool {
+	return operatorRepliedSince(ctx, h.Messages(), h.log, m, selfID)
+}
+
+// operatorRepliedSince reports whether selfID posted a non-empty text
+// message in the same conversation after `m.Timestamp`. It looks in
+// two places — both are needed because conversations.history alone
+// misses thread replies:
+//
+//  1. Top-level channel/DM history newer than the mention. Catches the
+//     common case: peer pings you, you respond at the top level.
+//  2. Thread replies for the relevant root. Catches two cases the
+//     history sweep cannot see:
+//     a. The mention is itself a thread reply, and the operator
+//     replied later in the same thread (e.g. continuing a DM
+//     thread). conversations.history will not return either side
+//     of that exchange.
+//     b. The mention is a top-level message that spawned a thread,
+//     and the operator's reply landed inside that thread. Again
+//     conversations.history skips the in-thread reply.
+//
+// The thread root is taken from the mention's permalink (`thread_ts=`)
+// when available, falling back to the mention's own timestamp — the
+// latter is a no-op fetch for a non-threaded top-level message
+// (conversations.replies returns the parent alone), so the worst case
+// is one extra API call per scanned mention. Acceptable since
+// pending_only is an opt-in expensive filter already.
+func operatorRepliedSince(
+	ctx context.Context,
+	msgs MessageClient,
+	log *slog.Logger,
+	m goslack.SearchMessage,
+	selfID string,
+) bool {
+	pivot, _ := strconv.ParseFloat(m.Timestamp, 64)
+	channelID := m.Channel.ID
+	if pivot <= 0 || channelID == "" || selfID == "" {
 		return false
 	}
-	hist, err := h.Messages().History(ctx, slack.HistoryParams{
+
+	hist, err := msgs.History(ctx, slack.HistoryParams{
 		ChannelID: channelID,
 		OldestTS:  pivot,
 		Limit:     20,
 	})
 	if err != nil {
-		h.log.Debug("operator-reply check failed", "channel", channelID, "err", err)
+		log.Debug("operator-reply history check failed", "channel", channelID, "err", err)
+	} else if hasOperatorTextSince(hist, m.Timestamp, selfID) {
+		return true
+	}
+
+	threadTS := format.ExtractThreadTS(m)
+	if threadTS == "" {
 		return false
 	}
-	for _, m := range hist {
+	replies, err := msgs.ThreadReplies(ctx, channelID, threadTS)
+	if err != nil {
+		log.Debug("operator-reply thread check failed",
+			"channel", channelID, "thread_ts", threadTS, "err", err)
+		return false
+	}
+	return hasOperatorTextSince(replies, m.Timestamp, selfID)
+}
+
+func hasOperatorTextSince(msgs []goslack.Message, mentionTS, selfID string) bool {
+	for _, m := range msgs {
 		if m.Timestamp <= mentionTS {
 			continue
 		}

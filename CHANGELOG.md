@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.14] - 2026-05-28
+
+### Fixed — `get_mentions(pending_only=true)` thread-reply false positive
+
+`pending_only` flagged a mention as pending even when the operator
+had already replied — provided that reply landed inside a thread
+rather than at the top level of the channel/DM. The detector used
+`conversations.history` only, which returns top-level messages and
+deliberately omits thread replies; an in-thread answer was therefore
+invisible to it.
+
+This shipped as a silent false positive: surfaced "open" items the
+operator had already handled, and on a busy day pushed real
+unanswered asks down the list.
+
+### Root cause
+
+`operatorReplied` ran a single `conversations.history` scan with
+`Oldest = mention.ts` and looked for any newer message authored by
+the operator. Two classes of in-thread replies fell through:
+
+1. **Mention is itself a thread reply.** Its `permalink` carries
+   `?thread_ts=<root>` and any operator follow-up lives in the same
+   thread. `conversations.history` returns only the thread root, not
+   the replies — so the operator's text answer is invisible to the
+   scan.
+2. **Mention is top-level and the operator answered by opening a
+   thread on it.** Same omission, mirror direction.
+
+### Change
+
+- New helper `operatorRepliedSince(ctx, msgs, log, m, selfID)` runs a
+  two-stage check: top-level `History` first (short-circuits on hit
+  to avoid the extra call), then `ThreadReplies` against the
+  thread root extracted from the mention's permalink. The root falls
+  back to the mention's own timestamp, so the second pass also
+  catches the "operator opened a thread on the mention" case.
+- `Hub.operatorReplied` is now a one-line wrapper, keeping the
+  filter-pipeline call sites unchanged.
+- 8 new tests in `pending_reply_test.go` cover: top-level reply
+  short-circuit, both in-thread cases, none-anywhere baseline, older
+  reply chronology guard, empty-text reply guard, history-error
+  fallthrough to thread sweep, and empty-selfID early exit.
+- Worst-case API cost per mention is now 2 calls (history + replies)
+  instead of 1. `pending_only` is already an opt-in expensive filter
+  and the worker pool + ratelimit wrapper bound the throughput, so
+  the extra call is well within budget.
+
+ADR 016 documents the call shape and the reason for not gating the
+thread sweep on permalink parsing alone.
+
 ## [0.4.13] - 2026-05-27
 
 ### Fixed — `parent_test.go` flake (deeper fix after v0.4.10)
