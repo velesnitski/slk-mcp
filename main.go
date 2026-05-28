@@ -27,7 +27,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "0.4.14"
+var version = "0.4.15"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -70,8 +70,12 @@ func run() error {
 		log.Info("token mode: bot + user")
 	}
 
+	// Self-reported server name embeds the version so MCP hosts that
+	// only render the name (Claude Code's /mcp listing, error banners,
+	// tool-call prefixes in some IDEs) surface what's actually running
+	// without forcing a separate version probe.
 	mcpServer := server.NewMCPServer(
-		"slack",
+		"slack v"+version,
 		version,
 		server.WithToolCapabilities(true),
 		server.WithRecovery(),

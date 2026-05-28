@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.15] - 2026-05-28
+
+### Changed — self-reported server name embeds the version
+
+The first argument to `server.NewMCPServer` is the server's
+self-reported name, surfaced by MCP hosts (Claude Code's `/mcp`
+listing, error banners, IDE tool-call prefixes). It was the bare
+string `"slack"`, so the host had no way to show which version was
+actually running without a separate probe — annoying after a rebuild
+when verifying the new binary is the one the host reconnected to.
+
+Now the name carries the version: `"slack v0.4.15"` (etc.). One
+glance at `/mcp` reveals what's loaded. No new tools, no extra
+calls, no host-side configuration.
+
+### Caveat
+
+If callers had been keying on the *self-reported* name (e.g. host
+allow/deny lists that match `serverInfo.name`), they would need to
+match a prefix (`slack v*`) instead of an exact `slack`. In practice
+the keys MCP hosts maintain are the *config-side* IDs (the JSON key
+under `mcpServers`), which are unaffected — no breakage observed.
+
+ADR 017 documents the tradeoff.
+
 ## [0.4.14] - 2026-05-28
 
 ### Fixed — `get_mentions(pending_only=true)` thread-reply false positive
