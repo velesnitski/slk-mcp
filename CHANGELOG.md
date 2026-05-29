@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.16] - 2026-05-29
+
+### Added — `get_list_items` tool for Slack Lists
+
+Slack Lists (the new structured-table feature surfaced under
+`https://<workspace>.slack.com/lists/<team_id>/<F-id>`) was not
+accessible from slk-mcp. List rows live behind the
+`slackLists.items.list` endpoint, which slack-go v0.15.0 does not
+wrap. This release adds a thin first-class surface for reading them.
+
+### Change
+
+- New `internal/slack/lists.go` with `ListService`. Speaks raw HTTP
+  to `slackLists.items.list` (POST, JSON body, Bearer auth) because
+  the underlying SDK has no helper. Configurable `BaseURL` /
+  `Endpoint` make the service fully testable via `httptest`.
+- New `internal/tools/lists.go` registering `get_list_items` via the
+  table-driven shape. Gated on `RequiresUserToken` — `lists:read`
+  is denied on bot tokens, so the tool refuses to register without
+  a user token rather than failing with `missing_scope` at runtime.
+- Defensive decoder: each Slack-side item is kept as a `map[string]any`
+  alongside extracted fields, and a `bestEffortTitle` heuristic picks
+  the most title-like cell so single-column lists render readably
+  without the caller knowing the schema.
+- 429 rate-limit responses are wrapped in `goslack.RateLimitedError`
+  so a future `ratelimit.DoR` wrap retries transparently. Today the
+  caller surfaces the error and re-issues — Lists API is low-volume,
+  retry-in-loop would be over-engineered.
+
+### Operator action required
+
+Slack OAuth scope **`lists:read`** must be added to the app
+installation backing `SLACK_USER_TOKEN`. After re-authorization, the
+new xoxp- token replaces the old in `~/.claude.json` under
+`mcpServers.slack.env.SLACK_USER_TOKEN`. Without the scope the tool
+returns Slack's verbatim `missing_scope` error so the fix is
+unambiguous.
+
+### Tests
+
+- 8 new tests in `internal/slack/lists_test.go` cover: HasToken
+  guard, missing-token early return, missing list_id rejection,
+  happy path (item parsing + cursor + title heuristic), pagination
+  parameter forwarding, `missing_scope` surfacing, 429 →
+  `RateLimitedError`, malformed-body fragment in error, table-driven
+  `displayValue` + `bestEffortTitle` coverage, `parseRetryAfterSeconds`
+  edge cases.
+- Suite size 403 → 421 (`go test -race -count=1 ./...`).
+
+ADR 018 documents the raw-HTTP decision and the scope-gating
+contract.
+
 ## [0.4.15] - 2026-05-28
 
 ### Changed — self-reported server name embeds the version

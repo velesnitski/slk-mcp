@@ -58,6 +58,7 @@ func (h *Hub) Channels() ChannelClient { return h.client.Channels }
 func (h *Hub) Messages() MessageClient { return h.client.Messages }
 func (h *Hub) Search() SearchClient    { return h.client.Search }
 func (h *Hub) Unread() UnreadClient    { return h.client.Unread }
+func (h *Hub) Lists() ListClient       { return h.client.Lists }
 
 // RegisterAll wires every tool category onto s. Order is not
 // significant; tools register themselves conditionally based on
@@ -65,6 +66,7 @@ func (h *Hub) Unread() UnreadClient    { return h.client.Unread }
 func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerChannelTools(s)
 	h.registerDigestTools(s)
+	h.registerListTools(s)
 	h.registerSearchTools(s)
 	h.registerThreadTools(s)
 	h.registerUnreadTools(s)

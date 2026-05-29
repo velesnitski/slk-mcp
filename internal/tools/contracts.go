@@ -69,6 +69,15 @@ type UnreadClient interface {
 	MarkRead(ctx context.Context, channelID, ts string) error
 }
 
+// ListClient wraps the Slack Lists surface (the "Lists" feature with
+// F-prefix file IDs). Requires `lists:read` on the user token —
+// handlers must gate on HasToken() before issuing requests, since
+// bot tokens cannot carry this scope.
+type ListClient interface {
+	HasToken() bool
+	Items(ctx context.Context, listID, cursor string, limit int) (*slack.ListItemsResult, error)
+}
+
 // Compile-time assertions: if the concrete services in
 // `internal/slack` drift from the contracts above, the build breaks
 // with a clear `does not implement` diagnostic that names the missing
@@ -79,4 +88,5 @@ var (
 	_ MessageClient = (*slack.MessageService)(nil)
 	_ SearchClient  = (*slack.SearchService)(nil)
 	_ UnreadClient  = (*slack.UnreadService)(nil)
+	_ ListClient    = (*slack.ListService)(nil)
 )
