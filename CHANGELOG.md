@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.17] - 2026-05-29
+
+### Fixed — `parent_test.go` flake, for real this time (deterministic ticker)
+
+`TestWatchParent_NilLoggerSafe` flaked on the v0.4.16 Go 1.24 `-race`
+CI job (5s deadline hit; same SHA passed on the main run). This is
+the third flake in this family after ADR 012 (deadline 2s→5s) and
+ADR 015 (interval 1ms→10ms). Both prior fixes tuned a real-time
+constant against a real `time.NewTicker`; neither could survive a
+CI runner that stalls a goroutine past any fixed deadline.
+
+### Root cause(s)
+
+Two bugs, one masking the other:
+
+1. **Real-time dependence.** The tests asserted a wall-clock deadline
+   against a real ticker under `-race`. Inherently flaky on a loaded
+   shared runner.
+2. **A latent harness race the timing noise hid.** `pidSource.get()`
+   closed its `initialised` channel *before* reading the value, so
+   `waitInitialised` could release the test to `Store` a new pid
+   while the watcher's initial `Load` was still pending. If the store
+   won, `initial` captured the new pid, the change was never
+   detected, and `onLost` never fired. Reproduced ~1 in 50 `-race`
+   runs once the ticker noise was removed.
+
+### Change
+
+- `parent.go`: added an unexported `tickerFunc` seam. Public
+  `WatchParent` wraps `watchParent(..., newRealTicker)`; tests inject
+  a manually-driven fake. **Public API and runtime behaviour
+  unchanged**; `main.go` untouched.
+- `parent_test.go`: all tests now advance the watcher via an
+  unbuffered `tick()` (blocks until the poll is consumed) instead of
+  racing the wall clock. `testDeadline` / `testPollInterval` remain
+  only as a backstop / nominal value, no longer gating correctness.
+- `pidSource.get()` now snapshots the value before signalling
+  initialisation, closing the race in (2).
+- Two assertions newly possible with the seam: the zero-interval
+  default now asserts `DefaultParentPollInterval`, and a new
+  `TestWatchParent_StopsTickerOnReturn` verifies ticker cleanup.
+
+### Verification
+
+- `go test -race -count=200 ./internal/lifecycle/...` — 1400/1400.
+- `go test -race -count=1 ./...` ×3 — green.
+
+ADR 019 documents the move from constant-tuning to deterministic
+injection and supersedes the *approach* (not the constants) of
+ADR 012 and ADR 015.
+
 ## [0.4.16] - 2026-05-29
 
 ### Added — `get_list_items` tool for Slack Lists

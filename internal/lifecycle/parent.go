@@ -25,6 +25,27 @@ import (
 // pass interval <= 0 to WatchParent.
 const DefaultParentPollInterval = 5 * time.Second
 
+// tickerFunc produces a tick channel and a stop function for a given
+// interval. It is the seam that makes WatchParent testable without
+// real time: production uses newRealTicker (a wrapped time.Ticker);
+// tests inject a manually-driven channel so the poll loop advances
+// deterministically rather than racing the wall clock.
+//
+// This seam exists because earlier attempts to stabilise the
+// parent-watcher tests by tuning real-time constants (ADR 012 raised
+// the deadline 2s→5s, ADR 015 raised the poll interval 1ms→10ms) only
+// lowered the flake probability — a real ticker under the race
+// detector on a loaded CI runner can still stall past any fixed
+// deadline. Driving ticks deterministically removes the flake class
+// entirely. See ADR 019.
+type tickerFunc func(time.Duration) (ticks <-chan time.Time, stop func())
+
+// newRealTicker is the production tickerFunc: a real time.Ticker.
+func newRealTicker(d time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTicker(d)
+	return t.C, t.Stop
+}
+
 // WatchParent polls getPpid until the value changes, then calls onLost.
 // Returns when the context is cancelled or onLost has been invoked.
 //
@@ -40,6 +61,20 @@ func WatchParent(
 	interval time.Duration,
 	onLost func(),
 ) {
+	watchParent(ctx, log, getPpid, interval, onLost, newRealTicker)
+}
+
+// watchParent is the testable core. newTicker supplies the poll
+// cadence; production passes newRealTicker, tests pass a controllable
+// fake. Behaviour is identical to the public WatchParent.
+func watchParent(
+	ctx context.Context,
+	log *slog.Logger,
+	getPpid func() int,
+	interval time.Duration,
+	onLost func(),
+	newTicker tickerFunc,
+) {
 	if interval <= 0 {
 		interval = DefaultParentPollInterval
 	}
@@ -48,14 +83,14 @@ func WatchParent(
 		log.Debug("watching parent process", "ppid", initial, "interval", interval)
 	}
 
-	t := time.NewTicker(interval)
-	defer t.Stop()
+	ticks, stop := newTicker(interval)
+	defer stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-ticks:
 			current := getPpid()
 			if current != initial {
 				if log != nil {

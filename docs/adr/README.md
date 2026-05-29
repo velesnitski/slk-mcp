@@ -67,3 +67,4 @@ don't rewrite history.
 - [016 — `pending_only` mention filter must also check thread replies](016-pending-mentions-thread-replies.md)
 - [017 — Self-reported MCP server name embeds the version](017-server-name-embeds-version.md)
 - [018 — `get_list_items` for Slack Lists via raw HTTP](018-slack-lists-tool.md)
+- [019 — Deterministic ticker for `parent_test.go` (+ the latent race it exposed)](019-parent-test-deterministic-ticker.md)
