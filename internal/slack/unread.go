@@ -431,6 +431,16 @@ func (s *UnreadService) nowUnix() int64 { return nowUnixFn() }
 // Plain `G…` channels with non-mpdm names are private group
 // channels, not DMs, so they intentionally do NOT match.
 func isDirectMessage(ch goslack.Channel) bool {
+	return IsDirectMessage(ch)
+}
+
+// IsDirectMessage is the exported form of the DM detector, for callers
+// outside this package (e.g. the digest ranker, which gives DMs a
+// priority tier so they survive the max_chars cap ahead of log/git
+// feeds). Detection logic — flags first, channel-ID prefix as the
+// fallback for stale-listing DMs — is documented on the unexported
+// wrapper above.
+func IsDirectMessage(ch goslack.Channel) bool {
 	if ch.IsIM || ch.IsMpIM {
 		return true
 	}

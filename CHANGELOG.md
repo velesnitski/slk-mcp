@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.18] - 2026-06-01
+
+### Changed — DMs now outrank non-mention channels in `get_unread_summary`
+
+A 1:1 DM without an explicit `<@you>` mention used to sit in the same
+rank band as everything non-mention, ordered by urgency + volume. A
+busy bot/log feed (200 messages, many with "error"/"failed" keywords)
+could outrank a quiet personal DM and push it below the `max_chars`
+cap into the omitted-channels footer.
+
+Observed live: a substantive 1:1 DM was truncated into the footer
+while log feeds stayed inlined — the content existed but never
+surfaced, and a lone DM line in the footer has no context.
+
+### Change
+
+`RankUnread` gains a DM tier between mention and urgency/volume:
+
+- `mentionBonus = 1_000_000` (explicit mention — unchanged, top)
+- `dmBonus = 500_000` (1:1 / mpdm — **new**, above every non-mention channel)
+- urgency + volume (the rest, realistically < ~100k)
+
+A plain DM now always inlines ahead of log/git feeds; an explicit
+mention still beats a plain DM; a DM that also mentions you stacks
+both tiers. DM detection reuses the exported `slack.IsDirectMessage`
+(promoted from the v0.4.12 detector), so the channel-ID-prefix
+fallback covers DMs whose `IsIM` flag Slack omits — the ones most at
+risk of being dropped.
+
+### Tests
+
+4 new ranker tests: DM outranks a 200-message keyword-heavy channel;
+mention outranks a plain DM; DM+mention tops both; a flag-missing
+`D…`-prefix DM still gets the tier. Full `-race` suite green.
+
+ADR 020 documents the tier arithmetic and the detector reuse.
+
 ## [0.4.17] - 2026-05-29
 
 ### Fixed — `parent_test.go` flake, for real this time (deterministic ticker)

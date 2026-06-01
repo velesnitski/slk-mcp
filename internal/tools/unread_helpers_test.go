@@ -142,6 +142,88 @@ func TestRankUnread_RepliesCountTowardVolume(t *testing.T) {
 	}
 }
 
+// mkDM builds a 1:1 DM ChannelUnread. The IsIM flag is set so it is
+// detected as a DM regardless of channel-ID prefix.
+func mkDM(name string, msgs []goslack.Message) *slack.ChannelUnread {
+	cu := &slack.ChannelUnread{LastRead: "1700000000.000000", Messages: msgs}
+	cu.Channel.ID = "D_" + name
+	cu.Channel.Name = name
+	cu.Channel.IsIM = true
+	return cu
+}
+
+// TestRankUnread_DMOutranksNoisyChannel is the v0.4.18 guarantee: a
+// quiet 1:1 DM must outrank a high-volume non-mention channel (the
+// log/git feed case), so the max_chars cap never drops the DM in
+// favour of a noisy bot channel.
+func TestRankUnread_DMOutranksNoisyChannel(t *testing.T) {
+	dm := mkDM("peer-1", []goslack.Message{mkMsg("1.0", "U2", "quick question")})
+
+	noisy := mkChannelUnread("alerts-feed", nil, nil)
+	for i := 0; i < 200; i++ {
+		// Worst case: every message carries an urgency keyword too.
+		noisy.Messages = append(noisy.Messages, mkMsg("1.0", "UBOT", "error error failed alert"))
+	}
+
+	if digest.RankUnread(dm, "U_SELF", time.Time{}, digest.UrgencyOpts{}) <=
+		digest.RankUnread(noisy, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
+		t.Fatalf("a 1:1 DM must outrank a high-volume non-mention channel")
+	}
+}
+
+// TestRankUnread_MentionOutranksDM keeps the tier order: an explicit
+// @-mention (even in a non-DM channel) still beats a plain DM.
+func TestRankUnread_MentionOutranksDM(t *testing.T) {
+	dm := mkDM("peer", []goslack.Message{mkMsg("1.0", "U2", "hi")})
+	mentioned := mkChannelUnread("incidents",
+		[]goslack.Message{mkMsg("1.0", "U2", "ping <@U_SELF>")}, nil)
+
+	if digest.RankUnread(mentioned, "U_SELF", time.Time{}, digest.UrgencyOpts{}) <=
+		digest.RankUnread(dm, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
+		t.Fatalf("an explicit mention must outrank a plain DM")
+	}
+}
+
+// TestRankUnread_DMPlusMentionTopsAll: a DM that also mentions the
+// operator stacks both tiers and sits above a DM-only and a
+// mention-only channel.
+func TestRankUnread_DMPlusMentionTopsAll(t *testing.T) {
+	dmMention := mkDM("vip", []goslack.Message{mkMsg("1.0", "U2", "<@U_SELF> urgent")})
+	dmOnly := mkDM("peer", []goslack.Message{mkMsg("1.0", "U2", "hi")})
+	mentionOnly := mkChannelUnread("ch",
+		[]goslack.Message{mkMsg("1.0", "U2", "<@U_SELF>")}, nil)
+
+	top := digest.RankUnread(dmMention, "U_SELF", time.Time{}, digest.UrgencyOpts{})
+	if top <= digest.RankUnread(dmOnly, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
+		t.Fatalf("DM+mention must outrank a DM-only channel")
+	}
+	if top <= digest.RankUnread(mentionOnly, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
+		t.Fatalf("DM+mention must outrank a mention-only channel")
+	}
+}
+
+// TestRankUnread_FlagMissingDMStillTiered guards the v0.4.12 lesson:
+// Slack sometimes omits IsIM on stale-listing DMs. The dmBonus must
+// still apply via the channel-ID prefix fallback, otherwise the
+// exact DMs most at risk of being dropped wouldn't get the tier.
+func TestRankUnread_FlagMissingDMStillTiered(t *testing.T) {
+	// D-prefix ID but IsIM deliberately false — the stale-listing case.
+	flagless := &slack.ChannelUnread{LastRead: "1700000000.000000",
+		Messages: []goslack.Message{mkMsg("1.0", "U2", "ping")}}
+	flagless.Channel.ID = "D0STALE1234"
+	flagless.Channel.IsIM = false
+
+	noisy := mkChannelUnread("logfeed", nil, nil)
+	for i := 0; i < 100; i++ {
+		noisy.Messages = append(noisy.Messages, mkMsg("1.0", "UBOT", "error failed"))
+	}
+
+	if digest.RankUnread(flagless, "U_SELF", time.Time{}, digest.UrgencyOpts{}) <=
+		digest.RankUnread(noisy, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
+		t.Fatalf("flag-missing DM (D-prefix) must still get the DM tier")
+	}
+}
+
 // ----------------------- collectUserIDsWithReplies -----------------------
 
 func TestCollectUserIDsWithReplies_Dedupes(t *testing.T) {
