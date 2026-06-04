@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.19] - 2026-06-04
+
+### Fixed — three digest-usability papercuts (from a week of dogfooding)
+
+**1. DM drill-in was broken (real bug).** `IsChannelID` excluded
+`D…` DM IDs, so `get_thread(permalink)` and
+`get_channel_digest(channel="D…")` failed with "channel not found"
+on any direct message — the permalink-derived DM ID got routed
+through `ResolveID` as if it were a channel *name*. New
+`IsConversationID` (`C`/`G`/`D`) now drives the `ResolveID`
+short-circuit; `IsChannelID` keeps its `C`/`G` channel semantics.
+DMs are now first-class drill-in targets.
+
+**2. Automation senders polluted `get_mentions`.** A calendar bot's
+"@you Today is …" ping and Slackbot invite notices showed up as
+"pending mentions" every day — never actionable. `filterBotSenders`
+now drops `google_calendar` / `google_drive` / `slackbot` /
+`USLACKBOT` from every mentions sweep.
+
+**3. Empty "(no activity)" stubs.** A channel with no top-level
+messages (e.g. a DM pulled in by `dm_window_hours` with only stale
+thread replies) rendered an empty stub block in the aggregate
+digest. New `WithOmitEmpty` digest option suppresses it in the
+unread sweep; single-channel `get_channel_digest` still returns the
+informative "(no activity)".
+
+### Notes
+
+No public API or signature changes — `IsConversationID` and
+`WithOmitEmpty` are additive, `IsChannelID` is unchanged. The
+bot-sender filter is always on (no flag). Tests added for each fix;
+full `-race` suite green.
+
+ADR 021 documents all three and explicitly defers a `since`/delta
+digest mode as separate future work.
+
 ## [0.4.18] - 2026-06-01
 
 ### Changed — DMs now outrank non-mention channels in `get_unread_summary`

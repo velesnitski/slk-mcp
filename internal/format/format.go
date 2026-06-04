@@ -28,14 +28,14 @@ var (
 // readable, token-efficient output:
 //
 //   - <@USERID>           → @Display Name (looked up in refs; falls
-//                          back to USERID when unknown)
+//     back to USERID when unknown)
 //   - <#CHANNELID|name>   → #name (the inline pipe label, when present)
 //   - <#CHANNELID>        → #channel-name (looked up in refs) or
-//                          #CHANNELID as a last-resort fallback — never
-//                          dropped, since the ID alone is correlatable
+//     #CHANNELID as a last-resort fallback — never
+//     dropped, since the ID alone is correlatable
 //   - <url|label>         → label
 //   - <url>               → (dropped — caller can re-add a [link]
-//                          marker if needed)
+//     marker if needed)
 //
 // refs may be nil and may mix user and channel display names; Slack ID
 // prefixes (U/W vs C/G) keep the namespaces distinct so a single map is
@@ -243,9 +243,10 @@ const ReplyIndent = "    ↳ "
 // digestOpts holds optional behaviour for ChannelDigest, populated via
 // DigestOption functions so existing callers stay source-compatible.
 type digestOpts struct {
-	selfID            string
-	replies           map[string][]goslack.Message
-	threadPreviewCap  int // 0 means use ThreadPreviewReplies default
+	selfID           string
+	replies          map[string][]goslack.Message
+	threadPreviewCap int  // 0 means use ThreadPreviewReplies default
+	omitEmpty        bool // return "" instead of a "(no activity)" line
 }
 
 // DigestOption configures ChannelDigest output.
@@ -271,6 +272,18 @@ func WithThreadReplies(replies map[string][]goslack.Message) DigestOption {
 // default.
 func WithThreadPreviewReplies(n int) DigestOption {
 	return func(o *digestOpts) { o.threadPreviewCap = n }
+}
+
+// WithOmitEmpty makes ChannelDigest return "" instead of a
+// "## label\n(no activity)" block when a channel has no displayable
+// top-level messages. Callers that aggregate many channels (the
+// unread sweep) pass this so a content-less channel — e.g. a DM
+// pulled in by dm_window_hours with only stale thread replies — is
+// dropped rather than rendered as an empty stub. Single-channel
+// callers (get_channel_digest) omit it, keeping "(no activity)" as a
+// useful "you asked, there's nothing here" answer. See ADR 021.
+func WithOmitEmpty() DigestOption {
+	return func(o *digestOpts) { o.omitEmpty = true }
 }
 
 // MentionsUser reports whether msg.Text contains a Slack-style
@@ -456,6 +469,9 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		return ""
 	}
 	if len(messages) == 0 {
+		if cfg.omitEmpty {
+			return ""
+		}
 		return fmt.Sprintf("## %s\n(no activity)", channelLabel)
 	}
 	if maxShow <= 0 {
@@ -516,7 +532,7 @@ func writeReplies(b *strings.Builder, replies []goslack.Message, users map[strin
 
 // DecisionLine renders a single decision entry for a recap.
 //
-//	- #dev 2026-04-14 14:30 (alex) [approved] body preview
+//   - #dev 2026-04-14 14:30 (alex) [approved] body preview
 func DecisionLine(msg goslack.Message, channel, user, reason string) string {
 	body := collapseWhitespace(msg.Text)
 	if len(body) > 160 {

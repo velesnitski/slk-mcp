@@ -55,6 +55,45 @@ func TestFilterClosingAcks(t *testing.T) {
 	}
 }
 
+func searchMsgFrom(username, userID, text string) goslack.SearchMessage {
+	m := goslack.SearchMessage{}
+	m.Username = username
+	m.User = userID
+	m.Text = text
+	return m
+}
+
+func TestFilterBotSenders(t *testing.T) {
+	in := []goslack.SearchMessage{
+		searchMsgFrom("google_calendar", "U0BOT111111", "Today is ..."),
+		searchMsgFrom("Google_Calendar", "U1", "case-insensitive"),
+		searchMsgFrom("googledrive", "U2", "shared a file"),
+		searchMsgFrom("", "USLACKBOT", "invite request"), // slackbot via user id
+		searchMsgFrom("slackbot", "U3", "reminder"),
+		searchMsgFrom("alice", "U4", "real human mention"),
+		searchMsgFrom("bob", "U5", "another human"),
+	}
+	out := filterBotSenders(in)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 human mentions kept; got %d: %+v", len(out), out)
+	}
+	for _, m := range out {
+		if m.Username != "alice" && m.Username != "bob" {
+			t.Fatalf("unexpected sender survived filter: %q", m.Username)
+		}
+	}
+}
+
+func TestFilterBotSenders_AllHumansPassThrough(t *testing.T) {
+	in := []goslack.SearchMessage{
+		searchMsgFrom("alice", "U1", "x"),
+		searchMsgFrom("bob", "U2", "y"),
+	}
+	if got := filterBotSenders(in); len(got) != 2 {
+		t.Fatalf("human-only input should pass through untouched; got %d", len(got))
+	}
+}
+
 func TestFilterStrictMentions(t *testing.T) {
 	in := []goslack.SearchMessage{
 		searchMsg("ping <@U_SELF>"),

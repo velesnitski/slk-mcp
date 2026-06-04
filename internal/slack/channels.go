@@ -58,7 +58,7 @@ func (s *ChannelService) ResolveID(ctx context.Context, name string) (string, er
 	if name == "" {
 		return "", fmt.Errorf("empty channel name")
 	}
-	if IsChannelID(name) {
+	if IsConversationID(name) {
 		return name, nil
 	}
 
@@ -193,14 +193,35 @@ func (s *ChannelService) Unarchive(ctx context.Context, channelID string) error 
 	})
 }
 
-// IsID reports whether a string looks like a Slack channel ID
-// (`C…` public, `G…` private; `D…` DMs are intentionally excluded —
-// callers asking for a "channel name" never mean a DM).
+// IsChannelID reports whether a string looks like a public/private
+// *channel* ID (`C…` public, `G…` private). DMs (`D…`) are excluded —
+// this is the "could a caller have meant a channel by name?" check.
 func IsChannelID(s string) bool {
+	return isCanonicalID(s, "CG")
+}
+
+// IsConversationID is the broader form: any canonical Slack
+// conversation ID — `C…` public, `G…` private/mpdm, `D…` DM.
+//
+// ResolveID short-circuits on this (not the narrower IsChannelID) so
+// that a DM/mpdm ID threaded in from a permalink resolves to itself.
+// A DM has no entry in the workspace channel listing, so without this
+// `get_thread(permalink)` and `get_channel_digest(channel="D…")`
+// would fail with "channel not found". No real channel *name* matches
+// the `D[A-Z0-9]{7,}` shape (names are lowercase + hyphens), so
+// admitting `D…` here can't mis-resolve a legitimate name. See ADR 021.
+func IsConversationID(s string) bool {
+	return isCanonicalID(s, "CGD")
+}
+
+// isCanonicalID reports whether s is a Slack object ID whose first
+// letter is one of `prefixes` and whose remainder is uppercase
+// alphanumeric, within Slack's 8–16 char ID length band.
+func isCanonicalID(s, prefixes string) bool {
 	if len(s) < 8 || len(s) > 16 {
 		return false
 	}
-	if s[0] != 'C' && s[0] != 'G' {
+	if !strings.ContainsRune(prefixes, rune(s[0])) {
 		return false
 	}
 	for _, r := range s[1:] {

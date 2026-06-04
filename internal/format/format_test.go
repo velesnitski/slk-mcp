@@ -59,6 +59,42 @@ func TestChannelDigest_Empty(t *testing.T) {
 	}
 }
 
+// A channel with no top-level messages but lingering thread replies
+// (e.g. a DM pulled in by dm_window_hours) renders "(no activity)" by
+// default — useful for single-channel get_channel_digest.
+func TestChannelDigest_NoTopLevelShowsNoActivity(t *testing.T) {
+	replies := map[string][]goslack.Message{
+		"1.0": {{Msg: goslack.Msg{Timestamp: "1.1", User: "U2", Text: "stale reply"}}},
+	}
+	out := ChannelDigest("@peer", nil, nil, 5, WithThreadReplies(replies))
+	if !strings.Contains(out, "(no activity)") {
+		t.Fatalf("default should render (no activity); got %q", out)
+	}
+}
+
+// With WithOmitEmpty (the unread-sweep path), that same content-less
+// channel collapses to "" so the aggregator drops it instead of
+// emitting an empty stub block.
+func TestChannelDigest_OmitEmptySuppressesNoActivity(t *testing.T) {
+	replies := map[string][]goslack.Message{
+		"1.0": {{Msg: goslack.Msg{Timestamp: "1.1", User: "U2", Text: "stale reply"}}},
+	}
+	out := ChannelDigest("@peer", nil, nil, 5,
+		WithThreadReplies(replies), WithOmitEmpty())
+	if out != "" {
+		t.Fatalf("WithOmitEmpty must suppress the (no activity) stub; got %q", out)
+	}
+}
+
+// WithOmitEmpty must NOT affect channels that have real content.
+func TestChannelDigest_OmitEmptyKeepsRealContent(t *testing.T) {
+	msgs := []goslack.Message{{Msg: goslack.Msg{Timestamp: "1.0", User: "U1", Text: "hello"}}}
+	out := ChannelDigest("dev", msgs, map[string]string{"U1": "alex"}, 5, WithOmitEmpty())
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("WithOmitEmpty dropped real content; got %q", out)
+	}
+}
+
 func TestMentionsUser(t *testing.T) {
 	cases := []struct {
 		name string

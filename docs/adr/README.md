@@ -69,3 +69,4 @@ don't rewrite history.
 - [018 — `get_list_items` for Slack Lists via raw HTTP](018-slack-lists-tool.md)
 - [019 — Deterministic ticker for `parent_test.go` (+ the latent race it exposed)](019-parent-test-deterministic-ticker.md)
 - [020 — DMs get a priority tier in the unread ranker](020-dm-priority-tier-in-rank.md)
+- [021 — Three digest-usability fixes from a week of dogfooding](021-digest-dogfooding-fixes.md)

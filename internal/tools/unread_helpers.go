@@ -42,6 +42,40 @@ func filterClosingAcks(matches []goslack.SearchMessage) []goslack.SearchMessage 
 	return out
 }
 
+// automationSenders are bot/integration identities whose "@-mentions"
+// of the operator are never actionable items — a calendar posting
+// "@you Today is …" or Slackbot posting an invite-request notice is
+// noise in a pending-mentions sweep. Matched case-insensitively
+// against the search hit's Username, plus the Slackbot user-id
+// sentinel. See ADR 021.
+var automationSenders = map[string]struct{}{
+	"google_calendar": {},
+	"googledrive":     {},
+	"google_drive":    {},
+	"slackbot":        {},
+	"uslackbot":       {},
+}
+
+// filterBotSenders drops mentions authored by automation identities
+// (see automationSenders). Always applied to get_mentions output —
+// these senders cannot be "replied to" in any meaningful sense, so
+// they only ever pollute the list (and double as false positives
+// under pending_only). Human and real-integration mentions pass
+// through untouched.
+func filterBotSenders(matches []goslack.SearchMessage) []goslack.SearchMessage {
+	out := matches[:0]
+	for _, m := range matches {
+		if _, isBot := automationSenders[strings.ToLower(m.Username)]; isBot {
+			continue
+		}
+		if strings.EqualFold(m.User, "USLACKBOT") {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // filterStrictMentions removes matches that don't literally tag the
 // operator via <@SELFID> in the body. Slack's `to:me` search
 // occasionally surfaces channel-wide messages where you're a member

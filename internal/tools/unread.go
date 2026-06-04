@@ -172,6 +172,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 							format.WithMentionHighlight(selfID),
 							format.WithThreadReplies(r.Replies),
 							format.WithThreadPreviewReplies(replyCap),
+							format.WithOmitEmpty(),
 						)
 					}
 					if rendered == "" {
@@ -228,6 +229,11 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				}
 
 				selfID, _ := h.Unread().Self(ctx)
+
+				// Automation senders (calendar/Slackbot/Drive) can't be
+				// replied to — drop them from every mentions sweep, not
+				// just pending_only. See ADR 021.
+				matches = filterBotSenders(matches)
 
 				if pendingOnly {
 					if selfID == "" {
