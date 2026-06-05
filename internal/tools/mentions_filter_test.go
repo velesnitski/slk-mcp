@@ -65,11 +65,12 @@ func searchMsgFrom(username, userID, text string) goslack.SearchMessage {
 
 func TestFilterBotSenders(t *testing.T) {
 	in := []goslack.SearchMessage{
-		searchMsgFrom("google_calendar", "U0BOT111111", "Today is ..."),
-		searchMsgFrom("Google_Calendar", "U1", "case-insensitive"),
-		searchMsgFrom("googledrive", "U2", "shared a file"),
+		searchMsgFrom("google calendar", "U0BOT111111", "Today is ..."), // SPACE form — the v0.4.19 miss
+		searchMsgFrom("google_calendar", "U0", "underscore form"),
+		searchMsgFrom("Google Calendar", "U1", "title-case + space"),
+		searchMsgFrom("google drive", "U2", "shared a file"),
 		searchMsgFrom("", "USLACKBOT", "invite request"), // slackbot via user id
-		searchMsgFrom("slackbot", "U3", "reminder"),
+		searchMsgFrom("Slackbot", "U3", "reminder"),
 		searchMsgFrom("alice", "U4", "real human mention"),
 		searchMsgFrom("bob", "U5", "another human"),
 	}
@@ -80,6 +81,22 @@ func TestFilterBotSenders(t *testing.T) {
 	for _, m := range out {
 		if m.Username != "alice" && m.Username != "bob" {
 			t.Fatalf("unexpected sender survived filter: %q", m.Username)
+		}
+	}
+}
+
+func TestNormalizeSender(t *testing.T) {
+	cases := map[string]string{
+		"google calendar": "googlecalendar",
+		"google_calendar": "googlecalendar",
+		"Google Calendar": "googlecalendar",
+		"google-drive":    "googledrive",
+		"Slackbot":        "slackbot",
+		"alice":           "alice",
+	}
+	for in, want := range cases {
+		if got := normalizeSender(in); got != want {
+			t.Errorf("normalizeSender(%q) = %q; want %q", in, got, want)
 		}
 	}
 }

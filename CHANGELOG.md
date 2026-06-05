@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.20] - 2026-06-05
+
+### Fixed — bot-mention filter (v0.4.19 fix #2) missed the space-form handle
+
+The v0.4.19 `filterBotSenders` matched automation handles by exact
+underscore spelling (`google_calendar`). In production it still let
+the Google Calendar ping through: `search.messages` returns that
+bot's `Username` as `"google calendar"` — **with a space** — while
+the conversations listing uses the underscore. The v0.4.19 unit test
+encoded the same wrong assumption (used the underscore form), so it
+passed while live behaviour didn't.
+
+Now both the `automationSenders` set keys and the looked-up
+`Username` are run through `normalizeSender` (lowercase, strip
+` `/`_`/`-`), so every separator spelling folds to one key. The test
+asserts the **space** form explicitly, plus title-case/hyphen
+variants and a `TestNormalizeSender` table.
+
+ADR 022 records the lesson: normalize external identifiers rather
+than enumerate spellings, and test against the form the live API
+returns.
+
 ## [0.4.19] - 2026-06-04
 
 ### Fixed — three digest-usability papercuts (from a week of dogfooding)

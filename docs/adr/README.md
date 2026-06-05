@@ -70,3 +70,4 @@ don't rewrite history.
 - [019 — Deterministic ticker for `parent_test.go` (+ the latent race it exposed)](019-parent-test-deterministic-ticker.md)
 - [020 — DMs get a priority tier in the unread ranker](020-dm-priority-tier-in-rank.md)
 - [021 — Three digest-usability fixes from a week of dogfooding](021-digest-dogfooding-fixes.md)
+- [022 — Normalize sender handles in the bot-mention filter](022-normalize-bot-sender-handles.md)

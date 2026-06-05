@@ -45,15 +45,28 @@ func filterClosingAcks(matches []goslack.SearchMessage) []goslack.SearchMessage 
 // automationSenders are bot/integration identities whose "@-mentions"
 // of the operator are never actionable items — a calendar posting
 // "@you Today is …" or Slackbot posting an invite-request notice is
-// noise in a pending-mentions sweep. Matched case-insensitively
-// against the search hit's Username, plus the Slackbot user-id
-// sentinel. See ADR 021.
+// noise in a pending-mentions sweep.
+//
+// Keys are stored in NORMALIZED form (see normalizeSender): lowercase
+// with spaces/underscores/hyphens stripped. This matters because the
+// same bot surfaces under different handle spellings depending on the
+// API — search.messages returns the calendar bot's Username as
+// "google calendar" (space) while the DM listing shows
+// "google_calendar" (underscore). v0.4.19 matched only the underscore
+// form and missed the space form in live use; normalizing both sides
+// closes that gap. See ADR 021 / ADR 022.
 var automationSenders = map[string]struct{}{
-	"google_calendar": {},
-	"googledrive":     {},
-	"google_drive":    {},
-	"slackbot":        {},
-	"uslackbot":       {},
+	"googlecalendar": {},
+	"googledrive":    {},
+	"slackbot":       {},
+	"uslackbot":      {},
+}
+
+// normalizeSender folds a Slack handle/display name to the canonical
+// form used as automationSenders keys: lowercase, with the
+// separators that vary between API surfaces (' ', '_', '-') removed.
+func normalizeSender(s string) string {
+	return strings.ToLower(strings.NewReplacer(" ", "", "_", "", "-", "").Replace(s))
 }
 
 // filterBotSenders drops mentions authored by automation identities
@@ -65,7 +78,7 @@ var automationSenders = map[string]struct{}{
 func filterBotSenders(matches []goslack.SearchMessage) []goslack.SearchMessage {
 	out := matches[:0]
 	for _, m := range matches {
-		if _, isBot := automationSenders[strings.ToLower(m.Username)]; isBot {
+		if _, isBot := automationSenders[normalizeSender(m.Username)]; isBot {
 			continue
 		}
 		if strings.EqualFold(m.User, "USLACKBOT") {
