@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-11
+
+### Added — multiple Slack workspaces in one server
+
+A single Slack token only sees the workspace it was minted in. slk-mcp can
+now serve several workspaces at once. Keep your existing `SLACK_TOKEN` /
+`SLACK_USER_TOKEN` as the primary and add the rest through a new optional
+`SLACK_WORKSPACES` JSON array:
+
+```jsonc
+SLACK_WORKSPACES=[{ "name": "secondary", "user_token": "xoxp-...", "bot_token": "xoxb-..." }]
+```
+
+- `get_unread_summary` and `get_mentions` now **merge every configured
+  workspace automatically**, each under a `## [name]` heading, with a
+  `# … — N workspaces` header. Both gained an optional `workspace`
+  argument to scope the call to a single label.
+- Workspace labels live in the JSON **values** — there are no
+  per-workspace environment-variable keys. Adding a workspace never adds
+  an env var named after it.
+- The optional `SLACK_WORKSPACE_NAME` labels the primary workspace
+  (default `primary`).
+- Drill-in tools (`get_channel_digest`, `post_message`, `mark_read`, …)
+  operate on the primary workspace; writes deliberately stay primary-only.
+
+Single-workspace deployments are unaffected: with no `SLACK_WORKSPACES`
+set, the registry collapses to one workspace and output is unchanged.
+
+Internals: `config.WorkspaceViews()` derives a per-workspace `*Config`
+sharing global scalars; `slack.NewRegistry` builds one client per
+workspace; the `Hub` keeps `h.client` pointed at the primary and retargets
+other workspaces through a shallow-copy `withClient` seam, so existing
+handlers needed no changes. See ADR 023.
+
 ## [0.4.20] - 2026-06-05
 
 ### Fixed — bot-mention filter (v0.4.19 fix #2) missed the space-form handle

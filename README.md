@@ -139,6 +139,8 @@ Or via config file (`~/.claude.json`):
 |---|---|---|
 | `SLACK_TOKEN` | one of | Bot User OAuth Token (`xoxb-...`). |
 | `SLACK_USER_TOKEN` | one of | User OAuth Token (`xoxp-...`). Required for unread/mentions. At least one of `SLACK_TOKEN` / `SLACK_USER_TOKEN` must be set. |
+| `SLACK_WORKSPACE_NAME` | No | Cosmetic label for the primary workspace, shown in merged digests (default: `primary`). |
+| `SLACK_WORKSPACES` | No | JSON array of *additional* workspaces. Each entry: `{"name","bot_token","user_token","channels"}` (all but at least one token optional). Tokens are workspace-scoped, so each extra Slack space needs its own token pair. Labels live in the JSON values — no per-workspace env keys. See [Multiple workspaces](#multiple-workspaces). |
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
 | `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `mark_read` |
@@ -147,6 +149,31 @@ Or via config file (`~/.claude.json`):
 | `SLACK_COMPACT` | No | `false` to disable compact output (default: `true`) |
 | `SLACK_LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
 | `DISABLED_TOOLS` | No | Comma-separated list of tool names to hide |
+
+## Multiple workspaces
+
+A single Slack token only sees the workspace it was minted in. To read more
+than one workspace, keep your existing `SLACK_TOKEN` / `SLACK_USER_TOKEN` as
+the **primary** and add the rest through `SLACK_WORKSPACES`, a JSON array:
+
+```jsonc
+SLACK_WORKSPACES=[
+  { "name": "secondary", "user_token": "xoxp-...", "bot_token": "xoxb-..." }
+]
+```
+
+- `name` is a label only — it appears as a `[name]` heading in merged
+  output and is never used as a credential key. Workspace names live in the
+  JSON **values**, so adding a workspace never introduces a new env var.
+- Each entry needs at least one token (`user_token` for unread/mentions).
+  `channels` is an optional comma-separated allow-list, same as
+  `SLACK_CHANNELS`.
+
+With more than one workspace configured, `get_unread_summary` and
+`get_mentions` merge every workspace automatically, each under its own
+`## [name]` heading. Pass `workspace: "<name>"` to either tool to scope the
+call to one workspace. Drill-in tools (`get_channel_digest`, `post_message`,
+`mark_read`, …) operate on the primary workspace.
 
 ## Docker
 

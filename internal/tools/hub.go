@@ -11,6 +11,7 @@ package tools
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -21,17 +22,104 @@ import (
 // Hub bundles the dependencies every tool handler reads from.
 // Construct with NewHub; consumers should treat it as immutable once
 // returned.
+//
+// Multi-workspace model: `client` and `cfg` always point at the PRIMARY
+// workspace (registry[0]), so every existing handler that reads h.client
+// / h.cfg keeps targeting the primary with zero changes. `registry`
+// holds all workspaces; the digest tools loop over it, and withClient
+// produces a shallow Hub copy retargeted at a non-primary workspace.
 type Hub struct {
-	client *slack.Client
-	cfg    *config.Config
-	log    *slog.Logger
+	client   *slack.Client
+	cfg      *config.Config
+	log      *slog.Logger
+	registry []slack.Workspace
 }
 
-// NewHub builds a Hub from already-constructed dependencies. main.go
-// owns the lifecycle of those — Hub never closes the client or the
-// logger.
+// NewHub builds a Hub around a single already-constructed client. The
+// registry collapses to that one client (labelled from the config's
+// primary workspace), so single-workspace callers and existing tests
+// need no changes. main.go owns the lifecycle of the dependencies — Hub
+// never closes the client or the logger.
 func NewHub(client *slack.Client, cfg *config.Config, log *slog.Logger) *Hub {
-	return &Hub{client: client, cfg: cfg, log: log}
+	return &Hub{
+		client:   client,
+		cfg:      cfg,
+		log:      log,
+		registry: []slack.Workspace{{Name: primaryWorkspaceName(cfg), Client: client}},
+	}
+}
+
+// NewHubWithRegistry builds a Hub serving every workspace in the
+// registry. registry[0] is the primary and becomes h.client; cfg is the
+// shared (primary) config carrying the global scalars. Panics on an
+// empty registry — that is a programming error (NewRegistry always
+// returns at least one workspace for a validated config).
+func NewHubWithRegistry(registry []slack.Workspace, cfg *config.Config, log *slog.Logger) *Hub {
+	if len(registry) == 0 {
+		panic("tools.NewHubWithRegistry: empty registry")
+	}
+	return &Hub{
+		client:   registry[0].Client,
+		cfg:      cfg,
+		log:      log,
+		registry: registry,
+	}
+}
+
+// primaryWorkspaceName returns the label for workspace[0], defaulting to
+// "primary" when no workspaces are configured (hand-built test configs).
+func primaryWorkspaceName(cfg *config.Config) string {
+	if len(cfg.Workspaces) > 0 && cfg.Workspaces[0].Name != "" {
+		return cfg.Workspaces[0].Name
+	}
+	return "primary"
+}
+
+// Workspaces returns the registry (primary first). Read-only.
+func (h *Hub) Workspaces() []slack.Workspace { return h.registry }
+
+// multiWorkspace reports whether more than one workspace is served, which
+// is what flips digest output into labelled per-workspace sections.
+func (h *Hub) multiWorkspace() bool { return len(h.registry) > 1 }
+
+// withClient returns a shallow copy of the Hub retargeted at ws. Because
+// every Hub accessor and helper reads h.client / h.cfg, swapping both
+// (cfg comes from the client it was built with) makes the entire handler
+// surface operate against that workspace with no per-call plumbing. The
+// copy shares log and registry; nothing is mutated, so it is safe to use
+// concurrently with the parent.
+func (h *Hub) withClient(c *slack.Client) *Hub {
+	cp := *h
+	cp.client = c
+	cp.cfg = c.Config()
+	return &cp
+}
+
+// workspaceTargets resolves the `workspace` tool argument into the set of
+// workspaces a digest should cover. An empty name means "all workspaces".
+// A non-empty name is matched case-insensitively against the labels; an
+// unknown name returns a nil slice so the handler can report it.
+func (h *Hub) workspaceTargets(name string) []slack.Workspace {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return h.registry
+	}
+	for _, ws := range h.registry {
+		if strings.EqualFold(ws.Name, name) {
+			return []slack.Workspace{ws}
+		}
+	}
+	return nil
+}
+
+// workspaceNames returns the configured labels, primary first, for use in
+// "unknown workspace" error messages.
+func (h *Hub) workspaceNames() []string {
+	names := make([]string, len(h.registry))
+	for i, ws := range h.registry {
+		names[i] = ws.Name
+	}
+	return names
 }
 
 // Client / Config / Log expose dependencies for the very rare caller

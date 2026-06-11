@@ -2,7 +2,9 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -38,6 +40,45 @@ type Config struct {
 	// are passed and SLACK_CHANNELS is empty (the server falls back to the
 	// channels the bot/user has joined).
 	AutodiscoverLimit int
+
+	// Workspaces is the ordered list of Slack workspaces this server
+	// serves. Workspaces[0] is the primary — its tokens mirror the
+	// legacy BotToken/UserToken/Channels fields so every existing
+	// single-workspace accessor keeps working unchanged.
+	//
+	// Load populates it from the legacy SLACK_TOKEN/SLACK_USER_TOKEN pair
+	// (workspace[0]) plus the optional SLACK_WORKSPACES JSON array. A
+	// workspace's human label lives in the JSON *value* ("name"), never
+	// in an environment-variable key, so adding a workspace never
+	// introduces a product-specific env key.
+	Workspaces []WorkspaceConfig
+
+	// workspacesErr records a SLACK_WORKSPACES parse failure. Load stays
+	// error-free (its signature is value-only); Validate surfaces it.
+	workspacesErr error
+}
+
+// WorkspaceConfig is one Slack workspace's credentials and optional
+// channel scope. Tokens are workspace-scoped — a token minted in one
+// workspace cannot read another — so multi-workspace support is
+// fundamentally "one client per token set".
+type WorkspaceConfig struct {
+	// Name is a human label surfaced in merged digests (e.g. "[primary]").
+	// It is cosmetic and never used as a lookup key for credentials.
+	Name string
+
+	BotToken  string
+	UserToken string
+	Channels  []string
+}
+
+// WorkspaceView pairs a workspace label with a fully-derived *Config
+// whose token/channel fields are scoped to that workspace while every
+// global scalar (read-only, disabled tools, digest hours, …) is shared
+// with the parent. slack.NewRegistry builds one Client per view.
+type WorkspaceView struct {
+	Name string
+	Cfg  *Config
 }
 
 // ErrMissingToken is returned when neither bot nor user token is configured.
@@ -48,7 +89,7 @@ var ErrMissingToken = errors.New(
 // Load reads configuration from environment variables.
 // Validation is the caller's responsibility (use Validate).
 func Load() *Config {
-	return &Config{
+	c := &Config{
 		BotToken:              os.Getenv("SLACK_TOKEN"),
 		UserToken:             os.Getenv("SLACK_USER_TOKEN"),
 		Channels:              parseCSV(os.Getenv("SLACK_CHANNELS")),
@@ -67,12 +108,126 @@ func Load() *Config {
 			"white_check_mark", "heavy_check_mark", "eyes", "thumbsup",
 		},
 	}
+
+	extra, err := ParseWorkspaces(os.Getenv("SLACK_WORKSPACES"))
+	c.workspacesErr = err
+	c.Workspaces = buildWorkspaces(
+		os.Getenv("SLACK_WORKSPACE_NAME"),
+		c.BotToken, c.UserToken, c.Channels, extra,
+	)
+
+	// Mirror the primary workspace back onto the legacy scalar fields so
+	// every existing single-workspace accessor (PrimaryToken, HasBotToken,
+	// the slack.Client built from this Config) reads workspace[0]. This is
+	// what makes a SLACK_WORKSPACES-only config (no legacy SLACK_TOKEN)
+	// still drive the primary client.
+	if len(c.Workspaces) > 0 {
+		c.BotToken = c.Workspaces[0].BotToken
+		c.UserToken = c.Workspaces[0].UserToken
+		c.Channels = c.Workspaces[0].Channels
+	}
+
+	return c
+}
+
+// wsJSON is the on-the-wire shape of one SLACK_WORKSPACES entry. The
+// label is a value ("name"), keeping product-specific names out of env
+// keys. `channels` is an optional comma-separated allow-list.
+type wsJSON struct {
+	Name      string `json:"name"`
+	BotToken  string `json:"bot_token"`
+	UserToken string `json:"user_token"`
+	Channels  string `json:"channels"`
+}
+
+// ParseWorkspaces parses the SLACK_WORKSPACES JSON array. A blank value
+// yields (nil, nil) — multi-workspace is purely additive, so the absence
+// of the variable is the single-workspace path, not an error.
+func ParseWorkspaces(s string) ([]WorkspaceConfig, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	var raw []wsJSON
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+		return nil, fmt.Errorf("SLACK_WORKSPACES must be a JSON array of {name,bot_token,user_token,channels}: %w", err)
+	}
+	out := make([]WorkspaceConfig, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, WorkspaceConfig{
+			Name:      strings.TrimSpace(r.Name),
+			BotToken:  strings.TrimSpace(r.BotToken),
+			UserToken: strings.TrimSpace(r.UserToken),
+			Channels:  parseCSV(r.Channels),
+		})
+	}
+	return out, nil
+}
+
+// buildWorkspaces assembles the ordered workspace list: the legacy
+// SLACK_TOKEN/SLACK_USER_TOKEN pair becomes workspace[0] (when either is
+// set), followed by the SLACK_WORKSPACES entries. Empty names are filled
+// deterministically so a label is always available for digest prefixes.
+func buildWorkspaces(primaryName, botToken, userToken string, channels []string, extra []WorkspaceConfig) []WorkspaceConfig {
+	var ws []WorkspaceConfig
+	if botToken != "" || userToken != "" {
+		ws = append(ws, WorkspaceConfig{
+			Name:      strings.TrimSpace(primaryName),
+			BotToken:  botToken,
+			UserToken: userToken,
+			Channels:  channels,
+		})
+	}
+	ws = append(ws, extra...)
+	for i := range ws {
+		if ws[i].Name == "" {
+			if i == 0 {
+				ws[i].Name = "primary"
+			} else {
+				ws[i].Name = fmt.Sprintf("workspace-%d", i+1)
+			}
+		}
+	}
+	return ws
+}
+
+// WorkspaceViews returns one derived *Config per workspace: token and
+// channel fields scoped to that workspace, every global scalar shared
+// with the parent. A config with no Workspaces (e.g. a hand-built test
+// Config) yields a single "primary" view backed by the config itself, so
+// the single-workspace path needs no special-casing downstream.
+func (c *Config) WorkspaceViews() []WorkspaceView {
+	if len(c.Workspaces) == 0 {
+		return []WorkspaceView{{Name: "primary", Cfg: c}}
+	}
+	views := make([]WorkspaceView, 0, len(c.Workspaces))
+	for _, ws := range c.Workspaces {
+		wc := *c
+		wc.BotToken = ws.BotToken
+		wc.UserToken = ws.UserToken
+		wc.Channels = ws.Channels
+		wc.Workspaces = nil
+		wc.workspacesErr = nil
+		views = append(views, WorkspaceView{Name: ws.Name, Cfg: &wc})
+	}
+	return views
 }
 
 // Validate returns an error if required fields are missing.
 func (c *Config) Validate() error {
+	if c.workspacesErr != nil {
+		return c.workspacesErr
+	}
 	if c.BotToken == "" && c.UserToken == "" {
 		return ErrMissingToken
+	}
+	// Every additional workspace must carry at least one token; a
+	// token-less entry is a config typo we want to fail loudly on rather
+	// than silently build a dead client for.
+	for i, ws := range c.Workspaces {
+		if ws.BotToken == "" && ws.UserToken == "" {
+			return fmt.Errorf("workspace %d (%q): %w", i, ws.Name, ErrMissingToken)
+		}
 	}
 	return nil
 }

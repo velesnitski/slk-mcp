@@ -27,7 +27,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "0.4.20"
+var version = "0.5.0"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -58,7 +58,8 @@ func run() error {
 		return err
 	}
 
-	client := slack.New(cfg, log)
+	registry := slack.NewRegistry(cfg, log)
+	client := registry[0].Client // primary workspace
 	switch {
 	case cfg.PostsAsUser():
 		log.Info("token mode: user-only",
@@ -68,6 +69,11 @@ func run() error {
 			"hint", "set SLACK_USER_TOKEN=xoxp-... to enable unread/mentions tools")
 	default:
 		log.Info("token mode: bot + user")
+	}
+	if len(registry) > 1 {
+		// Count only — workspace labels can carry product names and we
+		// keep those out of shared logs.
+		log.Info("multi-workspace mode", "workspaces", len(registry))
 	}
 
 	// Self-reported server name embeds the version so MCP hosts that
@@ -80,7 +86,7 @@ func run() error {
 		server.WithToolCapabilities(true),
 		server.WithRecovery(),
 	)
-	tools.NewHub(client, cfg, log).RegisterAll(mcpServer)
+	tools.NewHubWithRegistry(registry, cfg, log).RegisterAll(mcpServer)
 
 	log.Info("slk-mcp ready",
 		"version", version,
@@ -89,6 +95,7 @@ func run() error {
 		"user_token", client.HasUserToken(),
 		"read_only", cfg.ReadOnly,
 		"channels_configured", len(cfg.Channels),
+		"workspaces", len(registry),
 	)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
