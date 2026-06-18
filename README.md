@@ -247,6 +247,13 @@ go test ./...
 go vet ./...
 ```
 
+A `Makefile` wraps the common flows: `make build` (version-stamped), `make test`,
+and `make install` (build + sync the `/mcp` dialog label to `slack v<version>`).
+The `/mcp` listing shows each server by its **config key** in `~/.claude.json`
+(read at session start), not the server-reported name — `make sync-label`
+keeps that key current so the dialog never displays a stale version. After
+`make install`, **restart** Claude Code (a `/mcp` reconnect isn't enough). ADR 024.
+
 ## License
 
 MIT

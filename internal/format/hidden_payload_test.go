@@ -69,6 +69,38 @@ func TestMessageLine_doesNotFlagWhenBodyHasText(t *testing.T) {
 	}
 }
 
+func TestRenderHiddenPayloadMarker_huddleBeatsBlocks(t *testing.T) {
+	// A huddle arrives as a block-kit message with empty text. It must
+	// render as "[huddle]", not the opaque "[blocks: N]".
+	m := goslack.Message{}
+	m.SubType = HuddleSubtype
+	m.Blocks.BlockSet = []goslack.Block{nil}
+	if got := renderHiddenPayloadMarker(m); got != "[huddle]" {
+		t.Fatalf("huddle should render as [huddle], not blocks; got %q", got)
+	}
+}
+
+func TestMessageLine_rendersHuddle(t *testing.T) {
+	m := goslack.Message{}
+	m.Timestamp = "1700000000.000000"
+	m.User = "U001"
+	m.SubType = HuddleSubtype
+	m.Blocks.BlockSet = []goslack.Block{nil}
+	got := MessageLine(m, "alice")
+	if !strings.Contains(got, "[huddle]") || strings.Contains(got, "[blocks") {
+		t.Fatalf("MessageLine should surface huddle, not blocks; got %q", got)
+	}
+}
+
+func TestHasContent_huddleWithoutBlocks(t *testing.T) {
+	// Even a huddle with neither text nor blocks must survive the filter.
+	m := goslack.Message{}
+	m.SubType = HuddleSubtype
+	if !HasContent(m) {
+		t.Fatal("HasContent should be true for a huddle even with no text/blocks")
+	}
+}
+
 func TestHasContent_attachmentsOnly(t *testing.T) {
 	m := goslack.Message{}
 	m.Attachments = []goslack.Attachment{{}}

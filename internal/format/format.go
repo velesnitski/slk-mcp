@@ -304,6 +304,11 @@ func MentionsUser(msg goslack.Message, userID string) bool {
 // (mobile, integrations) post structured content with an empty Text
 // field — dropping those would silently hide a real message.
 func HasContent(msg goslack.Message) bool {
+	// Huddles carry no text and sometimes no blocks — keep them anyway,
+	// otherwise a call silently vanishes from the digest.
+	if IsHuddle(msg) {
+		return true
+	}
 	if collapseWhitespace(msg.Text) != "" {
 		return true
 	}
@@ -335,6 +340,14 @@ func HasContent(msg goslack.Message) bool {
 // reachable via the permalink even if the renderer can't surface it
 // as plain text.
 func renderHiddenPayloadMarker(msg goslack.Message) string {
+	// A huddle (audio room) arrives as a block-kit message with empty
+	// text — without this it would render as a meaningless "[blocks: 1]"
+	// and a real call would be invisible in the digest. slack-go's typed
+	// Message drops the `room` object, so duration/participants aren't
+	// recoverable here; we surface the event itself. See ADR 025.
+	if IsHuddle(msg) {
+		return "[huddle]"
+	}
 	var parts []string
 	if n := len(msg.Attachments); n > 0 {
 		parts = append(parts, fmt.Sprintf("[attached: %d]", n))
@@ -343,6 +356,17 @@ func renderHiddenPayloadMarker(msg goslack.Message) string {
 		parts = append(parts, fmt.Sprintf("[blocks: %d]", n))
 	}
 	return strings.Join(parts, " ")
+}
+
+// HuddleSubtype is the message subtype Slack assigns to huddle (audio
+// room) events. slack-go has no constant for it.
+const HuddleSubtype = "huddle_thread"
+
+// IsHuddle reports whether msg is a Slack huddle event. These arrive as
+// block-kit messages with empty text; detecting the subtype lets the
+// renderer surface "[huddle]" instead of an opaque "[blocks: 1]".
+func IsHuddle(msg goslack.Message) bool {
+	return msg.SubType == HuddleSubtype
 }
 
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.

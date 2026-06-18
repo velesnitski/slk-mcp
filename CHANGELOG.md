@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-06-18
+
+### Fixed — huddles rendered as a meaningless `[blocks: 1]`
+
+A Slack **huddle** (audio session) arrives as a block-kit message with
+empty text and subtype `huddle_thread`. The empty-body fallback collapsed
+it to `[blocks: 1]`, so digests couldn't tell a call had happened — a
+23-minute huddle was even reported as "call never connected". Now
+`format.IsHuddle` detects the subtype, `renderHiddenPayloadMarker` returns
+`[huddle]` (over the generic markers), and `HasContent` never filters a
+huddle out. Duration/participants are not shown — slack-go drops the
+`room` object (documented follow-up). See ADR 025.
+
+### Tooling — `/mcp` dialog label sync
+
+The `/mcp` dialog labels servers by their **config key** in
+`~/.claude.json` (read at session start), not by the `serverInfo.name` the
+server reports — so the `"slack v<version>"` from ADR 017 never reached the
+dialog (it showed `slack`). Added `scripts/sync-mcp-label.py` + a
+`Makefile`: `make install` builds and renames the slk-mcp config key to
+`slack v<version>` (matched by binary path, version read from the binary,
+idempotent, atomic, `.bak`). A **restart** is required for the dialog to
+pick it up (a `/mcp` reconnect is not enough). Rejected hardcoding the
+version in the key (goes stale on every bump). See ADR 024.
+
 ## [0.5.0] - 2026-06-11
 
 ### Added — multiple Slack workspaces in one server
