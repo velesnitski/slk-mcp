@@ -45,6 +45,35 @@ type mentionParams struct {
 	dropAcks      bool
 }
 
+const (
+	// maxCharsAuto is the sentinel for "caller didn't set max_chars" — it
+	// triggers the auto budget in runUnreadSummary. Distinct from an
+	// explicit 0 (unlimited).
+	maxCharsAuto = -1
+
+	// DefaultTotalMaxChars bounds the combined rendered body across all
+	// workspaces when max_chars is left to auto. Chosen to stay well under
+	// the MCP host's result-size limit (a weekend backlog rendered ~57k
+	// chars and overflowed); the budget is split evenly across the
+	// workspaces being rendered. Channels beyond the cap collapse to the
+	// "+N channels omitted" footer rather than overflowing.
+	DefaultTotalMaxChars = 24000
+)
+
+// resolveMaxChars turns the max_chars sentinel into a concrete per-workspace
+// budget. <0 (auto, the default) → DefaultTotalMaxChars split across the n
+// workspaces being rendered; 0 (unlimited) and an explicit positive cap pass
+// through unchanged.
+func resolveMaxChars(maxChars, n int) int {
+	if maxChars >= 0 {
+		return maxChars
+	}
+	if n < 1 {
+		n = 1
+	}
+	return DefaultTotalMaxChars / n
+}
+
 func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 	// Register when ANY workspace carries a user token — a secondary
 	// workspace's xoxp- is reason enough to expose the tools even if the
@@ -76,7 +105,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("log_samples_per_band", mcp.Description("Max sample messages shown per severity band in log mode (default: 1; raise for more inline samples)")),
 				mcp.WithBoolean("skip_log_mode", mcp.Description("If true, omit log-mode channels (alert/error feeds) entirely. Cheap way to shrink the output when bot channels dominate (default: false)")),
 				mcp.WithBoolean("skip_git_mode", mcp.Description("If true, omit git-mode channels (CI / git-bot feeds) entirely. Cheap way to shrink the output when git activity dominates (default: false)")),
-				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters). Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. 0 = unlimited (default). Applied per workspace when several are merged.")),
+				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters), per workspace. Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. Omit (default) to auto-cap to a total budget split across workspaces so a large backlog can't overflow the result. Pass 0 for unlimited, or a positive N for a hard per-workspace cap.")),
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
@@ -90,7 +119,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					logSamples:         int(req.GetFloat("log_samples_per_band", 1)),
 					skipLog:            req.GetBool("skip_log_mode", false),
 					skipGit:            req.GetBool("skip_git_mode", false),
-					maxChars:           int(req.GetFloat("max_chars", 0)),
+					maxChars:           int(req.GetFloat("max_chars", maxCharsAuto)),
 					dmWindowHours:      int(req.GetFloat("dm_window_hours", 0)),
 					threadMentionHours: int(req.GetFloat("thread_mention_hours", 24)),
 					urg: digest.UrgencyOpts{
@@ -192,6 +221,11 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
 	}
+	// Auto-cap: when the caller didn't pass max_chars (sentinel < 0), bound
+	// the total output so a large backlog can't blow the MCP result limit,
+	// splitting the budget across the workspaces being rendered. Explicit 0
+	// stays unlimited; an explicit positive N stays a hard per-workspace cap.
+	p.maxChars = resolveMaxChars(p.maxChars, len(targets))
 	titleSuffix := ""
 	if p.mentionsOnly {
 		titleSuffix = " (mentions only)"
@@ -371,13 +405,18 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, e
 		case digest.DetectLowSignalChannel(r):
 			rendered = digest.RenderLowSignalChannel(label, r)
 		default:
-			rendered = format.ChannelDigest(
-				label, r.Messages, users, p.maxPer,
+			chOpts := []format.DigestOption{
 				format.WithMentionHighlight(selfID),
 				format.WithThreadReplies(r.Replies),
 				format.WithThreadPreviewReplies(p.replyCap),
 				format.WithOmitEmpty(),
-			)
+			}
+			// Collapse huddle noise in channels (standup/ad-hoc call pings);
+			// keep huddles inline in DMs, where the call is the signal.
+			if !slack.IsDirectMessage(r.Channel) {
+				chOpts = append(chOpts, format.WithHuddleAggregation())
+			}
+			rendered = format.ChannelDigest(label, r.Messages, users, p.maxPer, chOpts...)
 		}
 		if rendered == "" {
 			continue

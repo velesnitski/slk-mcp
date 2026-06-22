@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-06-19
+
+### Fixed — digest could overflow the result limit; huddle noise inflated channels
+
+A weekend backlog made `get_unread_summary` render ~57k chars and
+**overflow the MCP result-size limit** (spilling to a file). Two fixes:
+
+- **Auto-cap `max_chars`.** Left to default, output is now bounded to a
+  total budget (`DefaultTotalMaxChars` = 24000) split across workspaces, so
+  a big backlog degrades to the existing "+N channels omitted" footer
+  instead of overflowing. `max_chars=0` still means unlimited; a positive
+  `N` is still a hard per-workspace cap. (The **absent** case changed from
+  unlimited to auto-capped — pass `0` for the old behaviour.)
+- **Aggregate huddle noise.** The v0.5.1 huddle fix turned busy standup
+  channels into walls of `[huddle]` lines. Content-less huddle pings now
+  collapse to a single `· N huddles` line per channel
+  (`format.WithHuddleAggregation`); huddles **with replies** stay, and
+  **DM** huddles keep rendering inline (the 1:1 call is the signal). A
+  huddle-only channel is dropped from the sweep. See ADR 026.
+
 ## [0.5.1] - 2026-06-18
 
 ### Fixed — huddles rendered as a meaningless `[blocks: 1]`

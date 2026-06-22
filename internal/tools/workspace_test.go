@@ -122,6 +122,23 @@ func TestRunMentions_UnknownWorkspaceIsError(t *testing.T) {
 	}
 }
 
+func TestResolveMaxChars(t *testing.T) {
+	cases := []struct {
+		maxChars, n, want int
+	}{
+		{maxCharsAuto, 2, DefaultTotalMaxChars / 2}, // auto, 2 workspaces → split
+		{maxCharsAuto, 1, DefaultTotalMaxChars},     // auto, single workspace → full
+		{maxCharsAuto, 0, DefaultTotalMaxChars},     // guard: n<1 treated as 1
+		{0, 2, 0},                                   // explicit 0 → unlimited, untouched
+		{500, 3, 500},                               // explicit cap → hard per-workspace
+	}
+	for _, c := range cases {
+		if got := resolveMaxChars(c.maxChars, c.n); got != c.want {
+			t.Fatalf("resolveMaxChars(%d,%d)=%d want %d", c.maxChars, c.n, got, c.want)
+		}
+	}
+}
+
 func TestWorkspaceHelpers_PureFormatting(t *testing.T) {
 	if got := workspaceSection("primary", "body"); got != "## [primary]\nbody" {
 		t.Fatalf("workspaceSection: %q", got)

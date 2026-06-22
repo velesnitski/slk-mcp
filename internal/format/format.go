@@ -247,6 +247,7 @@ type digestOpts struct {
 	replies          map[string][]goslack.Message
 	threadPreviewCap int  // 0 means use ThreadPreviewReplies default
 	omitEmpty        bool // return "" instead of a "(no activity)" line
+	aggregateHuddles bool // collapse content-less huddle pings into a count
 }
 
 // DigestOption configures ChannelDigest output.
@@ -284,6 +285,25 @@ func WithThreadPreviewReplies(n int) DigestOption {
 // useful "you asked, there's nothing here" answer. See ADR 021.
 func WithOmitEmpty() DigestOption {
 	return func(o *digestOpts) { o.omitEmpty = true }
+}
+
+// WithHuddleAggregation collapses content-less huddle pings (a huddle
+// with no thread replies) into a single "· N huddles" line instead of
+// rendering each as its own "[huddle]" message. Busy channels (standups,
+// ad-hoc calls) otherwise produce a wall of huddle lines that inflate the
+// digest. Huddles that carry a reply chain are kept (the reply is the
+// signal). Callers pass this for channels and omit it for DMs, where the
+// huddle itself is the point. See ADR 026.
+func WithHuddleAggregation() DigestOption {
+	return func(o *digestOpts) { o.aggregateHuddles = true }
+}
+
+// huddleNote renders the aggregated-huddle summary fragment.
+func huddleNote(n int) string {
+	if n == 1 {
+		return "· 1 huddle"
+	}
+	return fmt.Sprintf("· %d huddles", n)
 }
 
 // MentionsUser reports whether msg.Text contains a Slack-style
@@ -489,7 +509,29 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 	}
 	messages = filtered
 
+	// Collapse content-less huddle pings into a count so a channel that
+	// huddles heavily doesn't bury the digest. Huddles with a reply chain
+	// stay in the message list (rendered normally) — the reply is content.
+	var huddleCount int
+	if cfg.aggregateHuddles {
+		kept := messages[:0]
+		for _, m := range messages {
+			if IsHuddle(m) && m.ReplyCount == 0 && len(cfg.replies[m.Timestamp]) == 0 {
+				huddleCount++
+				continue
+			}
+			kept = append(kept, m)
+		}
+		messages = kept
+	}
+
 	if len(messages) == 0 && len(cfg.replies) == 0 {
+		// A huddle-only channel: drop it in sweeps (omitEmpty), but answer
+		// a direct get_channel_digest with the huddle count rather than
+		// nothing.
+		if huddleCount > 0 && !cfg.omitEmpty {
+			return fmt.Sprintf("## %s\n%s", channelLabel, huddleNote(huddleCount))
+		}
 		return ""
 	}
 	if len(messages) == 0 {
@@ -524,6 +566,10 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 	}
 	if hidden > 0 {
 		fmt.Fprintf(&b, "... +%d more messages\n", hidden)
+	}
+	if huddleCount > 0 {
+		b.WriteString(huddleNote(huddleCount))
+		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
