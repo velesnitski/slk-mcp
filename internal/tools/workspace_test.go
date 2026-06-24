@@ -139,6 +139,64 @@ func TestResolveMaxChars(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTarget(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+
+	if got := hub.workspaceTarget(""); got == nil || got.Name != "primary" {
+		t.Fatalf("empty arg should default to primary, got %+v", got)
+	}
+	if got := hub.workspaceTarget("secondary"); got == nil || got.Name != "secondary" {
+		t.Fatalf("named arg should select that workspace, got %+v", got)
+	}
+	if got := hub.workspaceTarget("SeCoNdArY"); got == nil || got.Name != "secondary" {
+		t.Fatal("workspace match should be case-insensitive")
+	}
+	if got := hub.workspaceTarget("nope"); got != nil {
+		t.Fatalf("unknown workspace should return nil, got %+v", got)
+	}
+}
+
+func TestWorkspaceTarget_SingleDefaultsToPrimary(t *testing.T) {
+	log := testLog()
+	cfg := &config.Config{UserToken: "xoxp-a"}
+	hub := NewHub(slack.New(cfg, log), cfg, log)
+	// Empty arg on a one-workspace hub must resolve, not error.
+	if got := hub.workspaceTarget(""); got == nil || got.Client != hub.client {
+		t.Fatalf("single-workspace empty arg should resolve to the primary client, got %+v", got)
+	}
+}
+
+func TestWsLabel(t *testing.T) {
+	// Multi-workspace: label disambiguates the write target.
+	if got := twoWorkspaceHub(t).wsLabel("secondary"); got != " [secondary]" {
+		t.Fatalf("multi-workspace wsLabel: %q", got)
+	}
+	// Single-workspace: silent, so confirmations stay byte-identical to before.
+	log := testLog()
+	cfg := &config.Config{UserToken: "xoxp-a"}
+	if got := NewHub(slack.New(cfg, log), cfg, log).wsLabel("primary"); got != "" {
+		t.Fatalf("single-workspace wsLabel should be empty, got %q", got)
+	}
+}
+
+func TestRunPostMessage_UnknownWorkspaceIsError(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	// workspaceTarget returns nil before any Slack call, so this exercises
+	// the routing error path with no network.
+	res := hub.runPostMessage(context.Background(), "ghost", "general", "hi", "")
+	if res == nil || !res.IsError {
+		t.Fatalf("unknown workspace should produce an error result, got %+v", res)
+	}
+}
+
+func TestRunListChannels_UnknownWorkspaceIsError(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	res := hub.runListChannels(context.Background(), "ghost", 10, false)
+	if res == nil || !res.IsError {
+		t.Fatalf("unknown workspace should produce an error result, got %+v", res)
+	}
+}
+
 func TestWorkspaceHelpers_PureFormatting(t *testing.T) {
 	if got := workspaceSection("primary", "body"); got != "## [primary]\nbody" {
 		t.Fatalf("workspaceSection: %q", got)

@@ -204,10 +204,11 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("post_message") {
 		s.AddTool(
 			mcp.NewTool("post_message",
-				mcp.WithDescription("Post a message to a channel. Supports thread replies."),
+				mcp.WithDescription("Post a message to a channel. Supports thread replies. With several workspaces configured, pass `workspace` to target a non-primary one (default: primary)."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
 				mcp.WithString("text", mcp.Required(), mcp.Description("Message text (Slack markdown)")),
 				mcp.WithString("thread_ts", mcp.Description("Optional thread timestamp to reply in thread")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, err := req.RequireString("channel")
@@ -218,17 +219,10 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError("text is required"), nil
 				}
-				threadTS := req.GetString("thread_ts", "")
-
-				channelID, err := h.Channels().ResolveID(ctx, channel)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				ts, err := h.Messages().Post(ctx, channelID, text, threadTS)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				return mcp.NewToolResultText(fmt.Sprintf("posted to #%s (ts: %s)", channel, ts)), nil
+				return h.runPostMessage(ctx,
+					req.GetString("workspace", ""),
+					channel, text,
+					req.GetString("thread_ts", "")), nil
 			},
 		)
 	}
@@ -240,21 +234,49 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
 				mcp.WithString("timestamp", mcp.Required(), mcp.Description("Message ts")),
 				mcp.WithString("emoji", mcp.Required(), mcp.Description("Emoji name without colons (e.g. thumbsup)")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, _ := req.RequireString("channel")
 				timestamp, _ := req.RequireString("timestamp")
 				emoji, _ := req.RequireString("emoji")
 
-				channelID, err := h.Channels().ResolveID(ctx, channel)
+				wsArg := req.GetString("workspace", "")
+				ws := h.workspaceTarget(wsArg)
+				if ws == nil {
+					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				}
+				scoped := h.withClient(ws.Client)
+				channelID, err := scoped.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := h.Messages().AddReaction(ctx, channelID, timestamp, emoji); err != nil {
+				if err := scoped.Messages().AddReaction(ctx, channelID, timestamp, emoji); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s", emoji, channel)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s%s", emoji, channel, h.wsLabel(ws.Name))), nil
 			},
 		)
 	}
+}
+
+// runPostMessage resolves the target workspace (named, or primary when the
+// arg is empty), then posts into it. Factored out of the tool closure so
+// the workspace-routing — including the unknown-label error path, which
+// returns before any Slack call — is unit-testable without a live server.
+func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, threadTS string) *mcp.CallToolResult {
+	ws := h.workspaceTarget(workspace)
+	if ws == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	}
+	scoped := h.withClient(ws.Client)
+	channelID, err := scoped.Channels().ResolveID(ctx, channel)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	ts, err := scoped.Messages().Post(ctx, channelID, text, threadTS)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("posted to #%s%s (ts: %s)", channel, h.wsLabel(ws.Name), ts))
 }

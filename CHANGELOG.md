@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-06-24
+
+### Added — channel tools are now workspace-addressable
+
+ADR 023's multi-workspace support only reached the read sweeps; the
+write/single-channel tools still hard-targeted the primary workspace, so
+there was no way to `post_message` into a secondary one. Now every
+channel-addressed tool takes an optional `workspace` argument:
+
+- **`list_channels`** — empty `workspace` lists every workspace in its own
+  `## [label]` section (multi only); a named one scopes to it. A
+  single-workspace install renders the flat list exactly as before.
+- **`post_message`, `add_reaction`, `get_channel_info`, `archive_channel`,
+  `unarchive_channel`** — empty `workspace` resolves to the **primary**
+  (backward-compatible); a named one routes the call there. Confirmations
+  gain a `[label]` suffix only when multiple workspaces are configured.
+
+The asymmetry is deliberate — reads fan out across all workspaces when
+unscoped (`workspaceTargets`), writes default to the primary
+(`workspaceTarget`): you sweep all inboxes, but you post to one. Routing
+for `list_channels` / `post_message` was extracted to `runListChannels` /
+`runPostMessage` so the unknown-workspace error paths are unit-tested
+without a live server. See ADR 027.
+
 ## [0.5.2] - 2026-06-19
 
 ### Fixed — digest could overflow the result limit; huddle noise inflated channels

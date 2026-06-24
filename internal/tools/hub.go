@@ -112,6 +112,47 @@ func (h *Hub) workspaceTargets(name string) []slack.Workspace {
 	return nil
 }
 
+// workspaceTarget resolves the `workspace` argument for a SINGLE-target
+// tool — every write (post_message, add_reaction, archive/unarchive) and
+// the reads that address one channel (get_channel_info). An empty name
+// defaults to the primary (registry[0]) so existing single-workspace
+// callers are unaffected and behaviour stays backward-compatible. A
+// non-empty name is matched case-insensitively against the configured
+// labels; no match returns nil so the handler can report it via
+// unknownWorkspaceMsg. This is the write-side twin of workspaceTargets,
+// which fans a read out across every workspace when the arg is empty —
+// the asymmetry is deliberate: you sweep all inboxes, but you post to one.
+func (h *Hub) workspaceTarget(name string) *slack.Workspace {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return &h.registry[0]
+	}
+	for i := range h.registry {
+		if strings.EqualFold(h.registry[i].Name, name) {
+			return &h.registry[i]
+		}
+	}
+	return nil
+}
+
+// wsLabel returns " [name]" for a multi-workspace Hub and "" for a single
+// one, so a write confirmation names the workspace only when it would
+// otherwise be ambiguous — single-workspace output is left byte-identical
+// to the pre-multi-workspace era.
+func (h *Hub) wsLabel(name string) string {
+	if h.multiWorkspace() {
+		return " [" + name + "]"
+	}
+	return ""
+}
+
+// workspaceArg* are the shared `workspace` tool-arg descriptions, kept in
+// one place so the fan-out (all) and single-target wordings don't drift.
+const (
+	workspaceArgAll    = "Limit to a single workspace by its configured label. Default: every configured workspace."
+	workspaceArgSingle = "Target workspace by its configured label. Default: the primary workspace."
+)
+
 // workspaceNames returns the configured labels, primary first, for use in
 // "unknown workspace" error messages.
 func (h *Hub) workspaceNames() []string {

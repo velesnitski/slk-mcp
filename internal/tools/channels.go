@@ -71,34 +71,17 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 					"and 🔒 for private channels, so callers can audit membership. "+
 					"Falls back from topic to purpose when topic is empty. "+
 					"Pass unjoined_only=true to filter to channels the operator hasn't joined "+
-					"(typical channel-audit use case)."),
+					"(typical channel-audit use case). "+
+					"With several workspaces configured, omitting `workspace` lists each in its own labelled section."),
 				mcp.WithNumber("limit", mcp.Description("Max channels to return (default: 100)")),
 				mcp.WithBoolean("unjoined_only", mcp.Description("If true, return only channels the operator is NOT a member of. Surfaces public channels you haven't joined yet — primary use case is workspace audit. Default: false.")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				limit := int(req.GetFloat("limit", 100))
-				unjoinedOnly := req.GetBool("unjoined_only", false)
-				channels, err := h.Channels().List(ctx, limit)
-				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("list channels: %v", err)), nil
-				}
-				channels = filterUnjoined(channels, unjoinedOnly)
-				sort.Slice(channels, func(i, j int) bool {
-					return channels[i].NumMembers > channels[j].NumMembers
-				})
-
-				var b strings.Builder
-				header := fmt.Sprintf("%d channels", len(channels))
-				if unjoinedOnly {
-					header += " (operator is not a member)"
-				}
-				b.WriteString(header)
-				b.WriteByte('\n')
-				for _, ch := range channels {
-					b.WriteString(renderChannelLine(ch))
-					b.WriteByte('\n')
-				}
-				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+				return h.runListChannels(ctx,
+					req.GetString("workspace", ""),
+					int(req.GetFloat("limit", 100)),
+					req.GetBool("unjoined_only", false)), nil
 			},
 		)
 	}
@@ -110,12 +93,19 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops, devops) or Slack channel ID (C0ABC1234DE)")),
 				mcp.WithBoolean("include_members", mcp.Description("Resolve and list channel members (default: false)")),
 				mcp.WithNumber("members_limit", mcp.Description("Cap on members listed (default: 50, 0 = all)")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				input, err := req.RequireString("channel")
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
+				wsArg := req.GetString("workspace", "")
+				ws := h.workspaceTarget(wsArg)
+				if ws == nil {
+					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				}
+				scoped := h.withClient(ws.Client)
 				includeMembers := req.GetBool("include_members", false)
 				membersLimit := int(req.GetFloat("members_limit", 50))
 
@@ -126,12 +116,12 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if slack.IsChannelID(trimmed) {
 					channelID = trimmed
 				} else {
-					channelID, err = h.Channels().ResolveID(ctx, input)
+					channelID, err = scoped.Channels().ResolveID(ctx, input)
 					if err != nil {
 						return mcp.NewToolResultError(err.Error()), nil
 					}
 				}
-				ch, err := h.Channels().Info(ctx, channelID)
+				ch, err := scoped.Channels().Info(ctx, channelID)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -139,17 +129,17 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				created := time.Unix(int64(ch.Created), 0).Format("2006-01-02")
 				var b strings.Builder
 				fmt.Fprintf(&b,
-					"#%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
-					ch.Name, ch.NumMembers, created,
+					"#%s%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
+					ch.Name, h.wsLabel(ws.Name), ch.NumMembers, created,
 					firstLine(ch.Topic.Value), firstLine(ch.Purpose.Value), ch.IsArchived,
 				)
 
 				if includeMembers {
-					ids, err := h.Channels().Members(ctx, channelID, membersLimit)
+					ids, err := scoped.Channels().Members(ctx, channelID, membersLimit)
 					if err != nil {
 						fmt.Fprintf(&b, "\nmembers_error: %s", err.Error())
 					} else {
-						names := h.Users().NamesFor(ctx, ids)
+						names := scoped.Users().NamesFor(ctx, ids)
 						b.WriteString("\nroster:")
 						for _, id := range ids {
 							fmt.Fprintf(&b, "\n- %s", names[id])
@@ -173,20 +163,27 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 			mcp.NewTool("archive_channel",
 				mcp.WithDescription("Archive a Slack channel via conversations.archive. Reversible via unarchive_channel — Slack hides the channel from active lists and rejects new messages, but does not permanently delete it. Requires channels:manage (public) or groups:write (private) on the user token."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#general, general) or Slack channel ID (C0ABC1234DE)")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				input, err := req.RequireString("channel")
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				channelID, err := h.Channels().ResolveID(ctx, input)
+				wsArg := req.GetString("workspace", "")
+				ws := h.workspaceTarget(wsArg)
+				if ws == nil {
+					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				}
+				scoped := h.withClient(ws.Client)
+				channelID, err := scoped.Channels().ResolveID(ctx, input)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := h.Channels().Archive(ctx, channelID); err != nil {
+				if err := scoped.Channels().Archive(ctx, channelID); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("archived #%s (%s) — reversible via unarchive_channel", strings.TrimPrefix(input, "#"), channelID)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("archived #%s%s (%s) — reversible via unarchive_channel", strings.TrimPrefix(input, "#"), h.wsLabel(ws.Name), channelID)), nil
 			},
 		)
 	}
@@ -196,23 +193,86 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 			mcp.NewTool("unarchive_channel",
 				mcp.WithDescription("Restore an archived channel via conversations.unarchive. Reverses archive_channel."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name or Slack channel ID")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				input, err := req.RequireString("channel")
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				channelID, err := h.Channels().ResolveID(ctx, input)
+				wsArg := req.GetString("workspace", "")
+				ws := h.workspaceTarget(wsArg)
+				if ws == nil {
+					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				}
+				scoped := h.withClient(ws.Client)
+				channelID, err := scoped.Channels().ResolveID(ctx, input)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				if err := h.Channels().Unarchive(ctx, channelID); err != nil {
+				if err := scoped.Channels().Unarchive(ctx, channelID); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("unarchived #%s (%s)", strings.TrimPrefix(input, "#"), channelID)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("unarchived #%s%s (%s)", strings.TrimPrefix(input, "#"), h.wsLabel(ws.Name), channelID)), nil
 			},
 		)
 	}
+}
+
+// runListChannels renders the channel list for one workspace (named) or
+// every workspace (empty arg). With several workspaces and no filter, each
+// is rendered in its own labelled section, mirroring the digest sweeps; a
+// single workspace yields the flat list byte-for-byte as before. An
+// unknown label is reported rather than silently returning the primary.
+func (h *Hub) runListChannels(ctx context.Context, workspace string, limit int, unjoinedOnly bool) *mcp.CallToolResult {
+	targets := h.workspaceTargets(workspace)
+	if targets == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	}
+	multi := len(targets) > 1
+
+	var sections []string
+	for _, ws := range targets {
+		body, err := h.withClient(ws.Client).renderChannelList(ctx, limit, unjoinedOnly)
+		switch {
+		case err != nil && !multi:
+			return mcp.NewToolResultError(fmt.Sprintf("list channels: %v", err))
+		case err != nil:
+			sections = append(sections, workspaceSection(ws.Name, "_error: "+err.Error()+"_"))
+		case !multi:
+			return mcp.NewToolResultText(body)
+		default:
+			sections = append(sections, workspaceSection(ws.Name, body))
+		}
+	}
+	return mcp.NewToolResultText(strings.Join(sections, "\n\n"))
+}
+
+// renderChannelList fetches, filters, sorts and renders the channel list
+// for the workspace this Hub is scoped to. The returned body carries no
+// workspace heading so runListChannels can wrap it per workspace.
+func (h *Hub) renderChannelList(ctx context.Context, limit int, unjoinedOnly bool) (string, error) {
+	channels, err := h.Channels().List(ctx, limit)
+	if err != nil {
+		return "", err
+	}
+	channels = filterUnjoined(channels, unjoinedOnly)
+	sort.Slice(channels, func(i, j int) bool {
+		return channels[i].NumMembers > channels[j].NumMembers
+	})
+
+	var b strings.Builder
+	header := fmt.Sprintf("%d channels", len(channels))
+	if unjoinedOnly {
+		header += " (operator is not a member)"
+	}
+	b.WriteString(header)
+	b.WriteByte('\n')
+	for _, ch := range channels {
+		b.WriteString(renderChannelLine(ch))
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 func firstLine(s string) string {
