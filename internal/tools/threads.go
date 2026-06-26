@@ -258,6 +258,90 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 			},
 		)
 	}
+
+	if !h.cfg.IsDisabled("delete_message") {
+		s.AddTool(
+			mcp.NewTool("delete_message",
+				mcp.WithDescription("Delete a message via chat.delete. Pass either a Slack permalink (fills channel + timestamp in one paste — e.g. straight from search/digest output), OR channel + timestamp. IRREVERSIBLE. With a user token Slack only allows deleting messages the authenticated user posted (a bot token, only the bot's own) — that ownership check is the safety boundary. With several workspaces configured, pass `workspace` to target a non-primary one (default: primary)."),
+				mcp.WithString("channel", mcp.Description("Channel name (#general, general) or ID — required unless permalink is given")),
+				mcp.WithString("timestamp", mcp.Description("Message ts to delete (e.g. the value returned by post_message) — required unless permalink is given")),
+				mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel + timestamp on its own")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
+			),
+			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return h.runDeleteMessage(ctx,
+					req.GetString("workspace", ""),
+					req.GetString("channel", ""),
+					req.GetString("timestamp", ""),
+					req.GetString("permalink", "")), nil
+			},
+		)
+	}
+}
+
+// runDeleteMessage deletes one message, targeting it by permalink (which
+// resolves both channel and ts in a single paste) or by channel + ts.
+// Factored out of the tool closure so the input-validation and
+// workspace-routing paths — all of which return before any Slack call —
+// are unit-testable without a live server. The permalink, when supplied,
+// wins: it already carries a canonical channel ID, so no name lookup runs.
+func (h *Hub) runDeleteMessage(ctx context.Context, workspace, channel, timestamp, permalink string) *mcp.CallToolResult {
+	channelID := ""
+	if strings.TrimSpace(permalink) != "" {
+		p, err := slack.ParseSlackPermalink(permalink)
+		if err != nil {
+			return mcp.NewToolResultError("invalid permalink: " + err.Error())
+		}
+		channelID, timestamp = p.ChannelID, p.TS
+	}
+	if channelID == "" && strings.TrimSpace(channel) == "" {
+		return mcp.NewToolResultError("provide a permalink, or channel + timestamp")
+	}
+	if strings.TrimSpace(timestamp) == "" {
+		return mcp.NewToolResultError("provide a permalink, or channel + timestamp")
+	}
+
+	ws := h.workspaceTarget(workspace)
+	if ws == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	}
+	scoped := h.withClient(ws.Client)
+
+	// Resolve the name only when the permalink didn't already hand us an ID.
+	if channelID == "" {
+		id, err := scoped.Channels().ResolveID(ctx, channel)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error())
+		}
+		channelID = id
+	}
+
+	if err := scoped.Messages().Delete(ctx, channelID, timestamp); err != nil {
+		return mcp.NewToolResultError(deleteErrorHint(err))
+	}
+
+	where := strings.TrimPrefix(channel, "#")
+	if where != "" {
+		where = "#" + where
+	} else {
+		where = channelID
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("deleted message %s in %s%s", timestamp, where, h.wsLabel(ws.Name)))
+}
+
+// deleteErrorHint turns Slack's terse delete failures into something
+// actionable — the most common one (cant_delete_message) almost always
+// means the message wasn't authored by this token's identity.
+func deleteErrorHint(err error) string {
+	e := err.Error()
+	switch {
+	case strings.Contains(e, "cant_delete_message"):
+		return e + " — with a user/bot token you can only delete messages that identity posted"
+	case strings.Contains(e, "message_not_found"):
+		return e + " — no message at that channel + timestamp (already deleted, or wrong ts/channel)"
+	default:
+		return e
+	}
 }
 
 // runPostMessage resolves the target workspace (named, or primary when the

@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-15-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-16-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -124,6 +124,7 @@ Or via config file (`~/.claude.json`):
 | `get_user_messages` | Recent messages from a specific user |
 | `post_message` | Post a message (disabled in `SLACK_READ_ONLY`) |
 | `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |
+| `delete_message` | Delete a message by permalink or channel+ts — only ones this token posted (disabled in `SLACK_READ_ONLY`) |
 
 ### With user token (`SLACK_USER_TOKEN`)
 
@@ -143,7 +144,7 @@ Or via config file (`~/.claude.json`):
 | `SLACK_WORKSPACES` | No | JSON array of *additional* workspaces. Each entry: `{"name","bot_token","user_token","channels"}` (all but at least one token optional). Tokens are workspace-scoped, so each extra Slack space needs its own token pair. Labels live in the JSON values — no per-workspace env keys. See [Multiple workspaces](#multiple-workspaces). |
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
-| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `mark_read` |
+| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
 | `SLACK_COMPACT` | No | `false` to disable compact output (default: `true`) |

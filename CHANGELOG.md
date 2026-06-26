@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-06-26
+
+### Added — `delete_message` (new write tool, 15 → 16)
+Wraps `chat.delete`. The write surface could post but not clean up — so a
+couple of `post_message` calls that fired before a "don't post" instruction
+left duplicates that had to be removed by hand. Now recoverable from the
+server. ADR 028.
+
+- **Smart targeting** — pass either a Slack **permalink** (resolves channel
+  + ts in one paste, straight from search/digest output) or **channel +
+  timestamp** (e.g. the `ts` returned by `post_message`).
+- **Workspace-aware** (mirrors ADR 027): optional `workspace`, defaults to
+  primary; confirmation gets the `[label]` suffix only when multi-workspace.
+- **Write-gated** under `SLACK_READ_ONLY` alongside `post_message` /
+  `add_reaction`. **Irreversible**, but bounded server-side: Slack only
+  permits deleting messages this token's identity authored. `deleteErrorHint`
+  turns `cant_delete_message` / `message_not_found` into actionable text.
+
+Routing extracted to `runDeleteMessage` so validation + unknown-workspace
+paths are unit-tested without a live server. 466 → 471 tests.
+
 ## [0.5.3] - 2026-06-24
 
 ### Added — channel tools are now workspace-addressable

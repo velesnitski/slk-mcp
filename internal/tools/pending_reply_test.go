@@ -80,6 +80,9 @@ func (f *fakeMessageClient) Post(ctx context.Context, channelID, text, threadTS 
 func (f *fakeMessageClient) AddReaction(ctx context.Context, channelID, timestamp, emoji string) error {
 	return f.inner.addReactionCall(ctx, channelID, timestamp, emoji)
 }
+func (f *fakeMessageClient) Delete(ctx context.Context, channelID, timestamp string) error {
+	return nil
+}
 
 var _ MessageClient = (*fakeMessageClient)(nil)
 

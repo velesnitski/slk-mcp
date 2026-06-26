@@ -92,6 +92,22 @@ func (s *MessageService) Post(ctx context.Context, channelID, text, threadTS str
 	return ts, nil
 }
 
+// Delete removes a message via chat.delete. With a user token Slack only
+// permits deleting a message the token's own user authored (otherwise it
+// returns cant_delete_message); with a bot token, only the bot's own
+// messages. That server-side ownership check is the safety boundary — we
+// don't second-guess it client-side.
+func (s *MessageService) Delete(ctx context.Context, channelID, timestamp string) error {
+	err := ratelimit.Do(ctx, s.log, 0, func() error {
+		_, _, derr := s.api.DeleteMessageContext(ctx, channelID, timestamp)
+		return derr
+	})
+	if err != nil {
+		return fmt.Errorf("chat.delete: %w", err)
+	}
+	return nil
+}
+
 // AddReaction attaches an emoji reaction to a message.
 func (s *MessageService) AddReaction(ctx context.Context, channelID, timestamp, emoji string) error {
 	return ratelimit.Do(ctx, s.log, 0, func() error {

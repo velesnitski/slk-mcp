@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/velesnitski/slk-mcp/internal/config"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
@@ -196,6 +198,76 @@ func TestRunListChannels_UnknownWorkspaceIsError(t *testing.T) {
 		t.Fatalf("unknown workspace should produce an error result, got %+v", res)
 	}
 }
+
+// resultText extracts the rendered text from a tool result for assertions.
+func resultText(res *mcp.CallToolResult) string {
+	if res == nil || len(res.Content) == 0 {
+		return ""
+	}
+	if tc, ok := res.Content[0].(mcp.TextContent); ok {
+		return tc.Text
+	}
+	return ""
+}
+
+func TestRunDeleteMessage_RequiresTarget(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	// Neither a permalink nor channel+ts → guidance error, no Slack call.
+	for _, c := range []struct{ channel, ts, link string }{
+		{"", "", ""},           // nothing
+		{"general", "", ""},    // channel but no ts, no permalink
+		{"", "1700000000.1", ""}, // ts but no channel, no permalink
+	} {
+		res := hub.runDeleteMessage(context.Background(), "", c.channel, c.ts, c.link)
+		if res == nil || !res.IsError || !strings.Contains(resultText(res), "provide a permalink") {
+			t.Fatalf("missing target should ask for permalink/channel+ts, got %q", resultText(res))
+		}
+	}
+}
+
+func TestRunDeleteMessage_InvalidPermalink(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	res := hub.runDeleteMessage(context.Background(), "", "", "", "https://example.com/not-a-slack-link")
+	if res == nil || !res.IsError || !strings.Contains(resultText(res), "invalid permalink") {
+		t.Fatalf("bad permalink should error before any Slack call, got %q", resultText(res))
+	}
+}
+
+func TestRunDeleteMessage_PermalinkFillsTargetThenWorkspaceChecked(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	// A VALID permalink fills channel+ts, so we sail past the "provide target"
+	// guard and fail only at workspace resolution — proving the permalink path
+	// supplied both fields (otherwise we'd see the target error instead).
+	link := "https://x.slack.com/archives/C0ABC1234DE/p1700000000000123"
+	res := hub.runDeleteMessage(context.Background(), "ghost", "", "", link)
+	if res == nil || !res.IsError || !strings.Contains(resultText(res), "unknown workspace") {
+		t.Fatalf("valid permalink + bad workspace should reach the workspace check, got %q", resultText(res))
+	}
+}
+
+func TestRunDeleteMessage_UnknownWorkspaceIsError(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	res := hub.runDeleteMessage(context.Background(), "ghost", "general", "1700000000.000100", "")
+	if res == nil || !res.IsError {
+		t.Fatalf("unknown workspace should produce an error result, got %+v", res)
+	}
+}
+
+func TestDeleteErrorHint(t *testing.T) {
+	if got := deleteErrorHint(errString("chat.delete: cant_delete_message")); !strings.Contains(got, "only delete messages that identity posted") {
+		t.Fatalf("cant_delete_message hint missing: %q", got)
+	}
+	if got := deleteErrorHint(errString("chat.delete: message_not_found")); !strings.Contains(got, "already deleted") {
+		t.Fatalf("message_not_found hint missing: %q", got)
+	}
+	if got := deleteErrorHint(errString("boom")); got != "boom" {
+		t.Fatalf("unknown error should pass through, got %q", got)
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
 
 func TestWorkspaceHelpers_PureFormatting(t *testing.T) {
 	if got := workspaceSection("primary", "body"); got != "## [primary]\nbody" {

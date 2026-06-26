@@ -48,6 +48,7 @@ type MessageClient interface {
 	ThreadReplies(ctx context.Context, channelID, threadTS string) ([]goslack.Message, error)
 	Post(ctx context.Context, channelID, text, threadTS string) (string, error)
 	AddReaction(ctx context.Context, channelID, timestamp, emoji string) error
+	Delete(ctx context.Context, channelID, timestamp string) error
 }
 
 // SearchClient wraps search.messages. Separate from MessageClient
