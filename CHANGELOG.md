@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-06-30
+
+### Added — workspace-aware reads + `post_message` dedup
+ADR 027 made the writes multi-workspace but left the single-channel/search
+**reads** primary-only — so you could *see* a secondary workspace in the
+unread sweep but not drill into it. Now `get_channel_digest`,
+`search_messages`, and `get_thread` take the optional `workspace` arg (same
+`workspaceTarget` helper; empty → primary). Digests/threads/search finally
+work against any configured workspace.
+
+`post_message` gains **`skip_if_recent`** (minutes, default 0 = off): if you
+already posted the identical text in that channel within the window, the
+post is skipped instead of duplicated. Best-effort and fails **open** (needs
+a user token to identify self; if it can't, it posts) — and runs per
+workspace, so the guard covers non-primary channels too.
+
+Deferred (noted in ADR 029): the channel-list *sweep* tools
+(`get_multi_channel_digest`, `get_morning_recap`, `find_decisions`,
+`get_user_messages`, `mark_read`, `get_list_items`) — `search_messages
+workspace=…` covers the common cross-workspace lookup meanwhile. 471 → 472
+tests.
+
 ## [0.5.4] - 2026-06-26
 
 ### Added — `delete_message` (new write tool, 15 → 16)

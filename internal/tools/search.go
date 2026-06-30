@@ -25,6 +25,7 @@ func (h *Hub) registerSearchTools(s *server.MCPServer) {
 				mcp.WithString("query", mcp.Required(), mcp.Description("Slack search query")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 20)")),
 				mcp.WithBoolean("full_text", mcp.Description("Disable the 200-char body truncation (default: false). Use when issue IDs or URLs sit at the end of the body.")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			},
 			Handle: h.handleSearchMessages,
 		},
@@ -45,10 +46,15 @@ func (h *Hub) handleSearchMessages(ctx context.Context, req mcp.CallToolRequest)
 	if err != nil {
 		return mcp.NewToolResultError("query is required"), nil
 	}
+	wsArg := req.GetString("workspace", "")
+	ws := h.workspaceTarget(wsArg)
+	if ws == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+	}
 	limit := int(req.GetFloat("limit", 20))
 	fullText := req.GetBool("full_text", false)
 
-	matches, err := h.Search().Messages(ctx, q, limit)
+	matches, err := h.withClient(ws.Client).Search().Messages(ctx, q, limit)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

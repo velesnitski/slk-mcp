@@ -22,11 +22,17 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithNumber("max_messages", mcp.Description("Max messages to inline (default: 50)")),
 				mcp.WithString("after", mcp.Description("Absolute lower bound, YYYY-MM-DD (UTC). Overrides hours when set.")),
 				mcp.WithString("before", mcp.Description("Absolute upper bound, YYYY-MM-DD (UTC, exclusive day end). Pair with after for date ranges.")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, err := req.RequireString("channel")
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
+				}
+				wsArg := req.GetString("workspace", "")
+				ws := h.workspaceTarget(wsArg)
+				if ws == nil {
+					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
 				}
 				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 50))
@@ -37,7 +43,7 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				txt, err := h.channelDigestRange(ctx, channel, oldest, latest, maxShow)
+				txt, err := h.withClient(ws.Client).channelDigestRange(ctx, channel, oldest, latest, maxShow)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}

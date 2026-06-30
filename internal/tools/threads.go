@@ -80,11 +80,19 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				mcp.WithString("channel", mcp.Description("Channel name (optional if permalink is provided)")),
 				mcp.WithString("thread_ts", mcp.Description("Thread root timestamp (optional if permalink is provided)")),
 				mcp.WithString("permalink", mcp.Description("Slack permalink to any message in the thread — fills channel and thread_ts in one go")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel := req.GetString("channel", "")
 				threadTS := req.GetString("thread_ts", "")
 				permalink := req.GetString("permalink", "")
+
+				wsArg := req.GetString("workspace", "")
+				ws := h.workspaceTarget(wsArg)
+				if ws == nil {
+					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				}
+				scoped := h.withClient(ws.Client)
 
 				if permalink != "" {
 					p, err := slack.ParseSlackPermalink(permalink)
@@ -110,15 +118,15 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 					return mcp.NewToolResultError("thread_ts is required (or pass a permalink)"), nil
 				}
 
-				channelID, err := h.Channels().ResolveID(ctx, channel)
+				channelID, err := scoped.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				replies, err := h.Messages().ThreadReplies(ctx, channelID, threadTS)
+				replies, err := scoped.Messages().ThreadReplies(ctx, channelID, threadTS)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				users := h.resolveRefs(ctx, replies)
+				users := scoped.resolveRefs(ctx, replies)
 
 				var b strings.Builder
 				fmt.Fprintf(&b, "thread #%s (%d msgs)\n", channel, len(replies))
@@ -204,11 +212,12 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("post_message") {
 		s.AddTool(
 			mcp.NewTool("post_message",
-				mcp.WithDescription("Post a message to a channel. Supports thread replies. With several workspaces configured, pass `workspace` to target a non-primary one (default: primary)."),
+				mcp.WithDescription("Post a message to a channel. Supports thread replies. With several workspaces configured, pass `workspace` to target a non-primary one (default: primary). Pass `skip_if_recent` (minutes) to suppress a duplicate — if you already posted the identical text in that channel within the window, the post is skipped instead of repeated."),
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
 				mcp.WithString("text", mcp.Required(), mcp.Description("Message text (Slack markdown)")),
 				mcp.WithString("thread_ts", mcp.Description("Optional thread timestamp to reply in thread")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
+				mcp.WithNumber("skip_if_recent", mcp.Description("Dedup guard (minutes, default 0=off). If >0, skip posting when the authenticated user already posted the identical text in this channel within the last N minutes. Best-effort: needs a user token to identify self; if it can't, it posts.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, err := req.RequireString("channel")
@@ -222,7 +231,8 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				return h.runPostMessage(ctx,
 					req.GetString("workspace", ""),
 					channel, text,
-					req.GetString("thread_ts", "")), nil
+					req.GetString("thread_ts", ""),
+					int(req.GetFloat("skip_if_recent", 0))), nil
 			},
 		)
 	}
@@ -348,7 +358,7 @@ func deleteErrorHint(err error) string {
 // arg is empty), then posts into it. Factored out of the tool closure so
 // the workspace-routing — including the unknown-label error path, which
 // returns before any Slack call — is unit-testable without a live server.
-func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, threadTS string) *mcp.CallToolResult {
+func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, threadTS string, skipIfRecentMin int) *mcp.CallToolResult {
 	ws := h.workspaceTarget(workspace)
 	if ws == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
@@ -358,9 +368,49 @@ func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, thre
 	if err != nil {
 		return mcp.NewToolResultError(err.Error())
 	}
+	// Dedup guard: skip when the authenticated user already posted the
+	// identical text here within the window. Best-effort — fails open
+	// (posts) when self can't be identified or history can't be read.
+	if skipIfRecentMin > 0 && scoped.recentSelfDuplicate(ctx, channelID, text, skipIfRecentMin) {
+		return mcp.NewToolResultText(fmt.Sprintf("skipped #%s%s — identical message already posted by you within %dm (skip_if_recent)", channel, h.wsLabel(ws.Name), skipIfRecentMin))
+	}
 	ts, err := scoped.Messages().Post(ctx, channelID, text, threadTS)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error())
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("posted to #%s%s (ts: %s)", channel, h.wsLabel(ws.Name), ts))
+}
+
+// recentSelfDuplicate reports whether the authenticated user already
+// posted the identical (trimmed) text into channelID within the last
+// withinMin minutes. It is the engine behind post_message's
+// skip_if_recent guard and is deliberately best-effort: it needs a user
+// token to resolve "self", and any failure (no user token, auth.test or
+// history error) returns false so the caller still posts — a missed
+// dedup is recoverable, a refused post is not. h must already be scoped
+// to the target workspace.
+func (h *Hub) recentSelfDuplicate(ctx context.Context, channelID, text string, withinMin int) bool {
+	if !h.client.HasUserToken() {
+		return false // can't attribute authorship → don't suppress
+	}
+	self, err := h.Unread().Self(ctx)
+	if err != nil || self == "" {
+		return false
+	}
+	oldest := time.Now().Add(-time.Duration(withinMin) * time.Minute)
+	msgs, err := h.Messages().History(ctx, slack.HistoryParams{
+		ChannelID: channelID,
+		OldestTS:  float64(oldest.Unix()),
+		Limit:     100,
+	})
+	if err != nil {
+		return false
+	}
+	want := strings.TrimSpace(text)
+	for _, m := range msgs {
+		if m.User == self && strings.TrimSpace(m.Text) == want {
+			return true
+		}
+	}
+	return false
 }

@@ -185,7 +185,7 @@ func TestRunPostMessage_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
 	// workspaceTarget returns nil before any Slack call, so this exercises
 	// the routing error path with no network.
-	res := hub.runPostMessage(context.Background(), "ghost", "general", "hi", "")
+	res := hub.runPostMessage(context.Background(), "ghost", "general", "hi", "", 0)
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should produce an error result, got %+v", res)
 	}
@@ -242,6 +242,17 @@ func TestRunDeleteMessage_PermalinkFillsTargetThenWorkspaceChecked(t *testing.T)
 	res := hub.runDeleteMessage(context.Background(), "ghost", "", "", link)
 	if res == nil || !res.IsError || !strings.Contains(resultText(res), "unknown workspace") {
 		t.Fatalf("valid permalink + bad workspace should reach the workspace check, got %q", resultText(res))
+	}
+}
+
+func TestRecentSelfDuplicate_NoUserTokenFailsOpen(t *testing.T) {
+	// Without a user token we can't attribute authorship, so the dedup
+	// guard must fail OPEN (return false → caller still posts). No network.
+	log := testLog()
+	cfg := &config.Config{} // no user token → HasUserToken() == false
+	hub := NewHub(slack.New(cfg, log), cfg, log)
+	if hub.recentSelfDuplicate(context.Background(), "C0123456789", "hi", 30) {
+		t.Fatal("no user token must fail open (return false so the post proceeds)")
 	}
 }
 
