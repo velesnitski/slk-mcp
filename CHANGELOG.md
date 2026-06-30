@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-06-30
+
+### Added — `full_text` on `get_thread` + `get_channel_digest`
+`MessageLine` truncates long bodies to a compact preview (`+N chars`) —
+right for digests, wrong when you need the message verbatim (e.g. ingesting
+a thread into a knowledge base, where the most substantive messages were
+exactly the ones clipped). The only un-truncated path was
+`search_messages full_text`, which can't fetch a specific thread.
+
+Both tools now take `full_text` (bool, default false). Format layer:
+`MessageLineFull` (the `MessageLine` logic minus the `MessageLineLimit`
+truncation; both delegate to a shared `messageLineImpl`) and a
+`WithFullText()` `DigestOption` that also un-truncates reply chains.
+Default behaviour unchanged; `get_multi_channel_digest` / `get_morning_recap`
+stay compact by design. ADR 030. 472 → 474 tests.
+
 ## [0.5.5] - 2026-06-30
 
 ### Added — workspace-aware reads + `post_message` dedup

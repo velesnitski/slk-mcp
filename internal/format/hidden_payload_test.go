@@ -175,6 +175,47 @@ func TestChannelDigest_huddleOnlyChannel_droppedWhenOmitEmpty(t *testing.T) {
 	}
 }
 
+func TestMessageLineFull_skipsTruncation(t *testing.T) {
+	long := strings.Repeat("x", 1000)
+	m := goslack.Message{}
+	m.Timestamp = "1700000000.000000"
+	m.User = "U001"
+	m.Text = long
+
+	trunc := MessageLine(m, "alice")
+	if !strings.Contains(trunc, "chars)") {
+		t.Fatalf("MessageLine should truncate a long body with a (+N chars) marker; got %q", trunc)
+	}
+	if strings.Contains(trunc, long) {
+		t.Fatal("MessageLine must not contain the full long body")
+	}
+
+	full := MessageLineFull(m, "alice")
+	if !strings.Contains(full, long) {
+		t.Fatal("MessageLineFull must contain the complete body")
+	}
+	if strings.Contains(full, "chars)") {
+		t.Fatalf("MessageLineFull must not append a truncation marker; got %q", full)
+	}
+}
+
+func TestChannelDigest_WithFullText(t *testing.T) {
+	long := strings.Repeat("y", 1000)
+	m := goslack.Message{}
+	m.Timestamp = "1700000000.000000"
+	m.User = "U001"
+	m.Text = long
+
+	full := ChannelDigest("#x", []goslack.Message{m}, nil, 50, WithFullText())
+	if !strings.Contains(full, long) {
+		t.Fatal("ChannelDigest WithFullText should render the full body")
+	}
+	def := ChannelDigest("#x", []goslack.Message{m}, nil, 50)
+	if strings.Contains(def, long) {
+		t.Fatal("default ChannelDigest should truncate the long body")
+	}
+}
+
 func TestHasContent_attachmentsOnly(t *testing.T) {
 	m := goslack.Message{}
 	m.Attachments = []goslack.Attachment{{}}

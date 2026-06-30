@@ -81,11 +81,13 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				mcp.WithString("thread_ts", mcp.Description("Thread root timestamp (optional if permalink is provided)")),
 				mcp.WithString("permalink", mcp.Description("Slack permalink to any message in the thread — fills channel and thread_ts in one go")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
+				mcp.WithBoolean("full_text", mcp.Description("Render reply bodies in full instead of truncating long ones to a compact preview (default: false). Use when ingesting a thread verbatim — e.g. into a knowledge base.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel := req.GetString("channel", "")
 				threadTS := req.GetString("thread_ts", "")
 				permalink := req.GetString("permalink", "")
+				fullText := req.GetBool("full_text", false)
 
 				wsArg := req.GetString("workspace", "")
 				ws := h.workspaceTarget(wsArg)
@@ -131,7 +133,11 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				var b strings.Builder
 				fmt.Fprintf(&b, "thread #%s (%d msgs)\n", channel, len(replies))
 				for _, m := range replies {
-					b.WriteString(format.MessageLine(m, users[m.User]))
+					if fullText {
+						b.WriteString(format.MessageLineFull(m, users[m.User], users))
+					} else {
+						b.WriteString(format.MessageLine(m, users[m.User], users))
+					}
 					b.WriteByte('\n')
 				}
 				return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil

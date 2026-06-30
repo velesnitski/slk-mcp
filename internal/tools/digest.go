@@ -23,6 +23,7 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("after", mcp.Description("Absolute lower bound, YYYY-MM-DD (UTC). Overrides hours when set.")),
 				mcp.WithString("before", mcp.Description("Absolute upper bound, YYYY-MM-DD (UTC, exclusive day end). Pair with after for date ranges.")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
+				mcp.WithBoolean("full_text", mcp.Description("Render message bodies in full instead of truncating long ones to a compact preview (default: false). Use when ingesting a channel verbatim — e.g. into a knowledge base.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, err := req.RequireString("channel")
@@ -38,12 +39,13 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				maxShow := int(req.GetFloat("max_messages", 50))
 				after := req.GetString("after", "")
 				before := req.GetString("before", "")
+				fullText := req.GetBool("full_text", false)
 
 				oldest, latest, err := parseRange(after, before, hours)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				txt, err := h.withClient(ws.Client).channelDigestRange(ctx, channel, oldest, latest, maxShow)
+				txt, err := h.withClient(ws.Client).channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -73,7 +75,7 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 
 				var parts []string
 				for _, ch := range list {
-					txt, err := h.channelDigest(ctx, ch, hours, maxShow)
+					txt, err := h.channelDigest(ctx, ch, hours, maxShow, false)
 					if err != nil {
 						parts = append(parts, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 						continue
@@ -146,12 +148,12 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 	}
 }
 
-func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow int) (string, error) {
+func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow int, fullText bool) (string, error) {
 	oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
-	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow)
+	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow, fullText)
 }
 
-func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int) (string, error) {
+func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int, fullText bool) (string, error) {
 	channelID, err := h.Channels().ResolveID(ctx, channel)
 	if err != nil {
 		return "", err
@@ -169,7 +171,11 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 		return "", err
 	}
 	users := h.resolveRefs(ctx, msgs)
-	return format.ChannelDigest("#"+channel, msgs, users, maxShow), nil
+	var opts []format.DigestOption
+	if fullText {
+		opts = append(opts, format.WithFullText())
+	}
+	return format.ChannelDigest("#"+channel, msgs, users, maxShow, opts...), nil
 }
 
 // parseRange resolves the user's window into (oldest, latest). When
