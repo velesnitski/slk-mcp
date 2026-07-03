@@ -140,21 +140,22 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 	return saved, skipped, nil
 }
 
-// runDownloadAudio resolves the target message (permalink wins the
-// usual way: explicit args override, permalink fills gaps), fetches it,
-// and downloads its audio attachments. destDir overrides os.TempDir()
-// in tests; the tool handler passes "".
-func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
+// fetchAudioFiles is the shared front half of download_audio and
+// transcribe_audio: resolve the workspace and target message (permalink
+// wins the usual way: explicit args override, permalink fills gaps),
+// then download the audio attachments into destDir. On failure the
+// returned *mcp.CallToolResult is non-nil and ready to hand back.
+func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) (saved []savedAudio, skipped []string, wsName string, errRes *mcp.CallToolResult) {
 	ws := h.workspaceTarget(workspace)
 	if ws == nil {
-		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+		return nil, nil, "", mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
 	}
 	scoped := h.withClient(ws.Client)
 
 	if strings.TrimSpace(permalink) != "" {
 		p, err := slack.ParseSlackPermalink(permalink)
 		if err != nil {
-			return mcp.NewToolResultError("permalink could not be parsed: " + err.Error())
+			return nil, nil, "", mcp.NewToolResultError("permalink could not be parsed: " + err.Error())
 		}
 		if p != nil {
 			if channel == "" {
@@ -166,34 +167,45 @@ func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestam
 		}
 	}
 	if channel == "" || timestamp == "" {
-		return mcp.NewToolResultError("provide a permalink, or channel + timestamp")
+		return nil, nil, "", mcp.NewToolResultError("provide a permalink, or channel + timestamp")
 	}
 
 	channelID, err := scoped.Channels().ResolveID(ctx, channel)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error())
+		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
 	msg, err := scoped.Messages().MessageAt(ctx, channelID, timestamp)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error())
+		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
 	if len(msg.Files) == 0 {
-		return mcp.NewToolResultError("message has no file attachments")
+		return nil, nil, "", mcp.NewToolResultError("message has no file attachments")
 	}
 
 	if destDir == "" {
 		destDir = os.TempDir()
 	}
-	saved, skipped, err := downloadAudioFiles(ctx, scoped.Messages(), msg.Files, destDir)
+	saved, skipped, err = downloadAudioFiles(ctx, scoped.Messages(), msg.Files, destDir)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error())
+		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
 	if len(saved) == 0 {
-		return mcp.NewToolResultError("no audio attachments on this message; files present: " + strings.Join(skipped, ", "))
+		return nil, nil, "", mcp.NewToolResultError("no audio attachments on this message; files present: " + strings.Join(skipped, ", "))
+	}
+	return saved, skipped, ws.Name, nil
+}
+
+// runDownloadAudio downloads a message's audio attachments and reports
+// their local paths. destDir overrides os.TempDir() in tests; the tool
+// handler passes "".
+func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
+	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir)
+	if errRes != nil {
+		return errRes
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "downloaded %d audio file(s)%s:\n", len(saved), h.wsLabel(ws.Name))
+	fmt.Fprintf(&b, "downloaded %d audio file(s)%s:\n", len(saved), h.wsLabel(wsName))
 	for _, s := range saved {
 		fmt.Fprintf(&b, "- %s (%s, %d bytes)\n", s.Path, s.Mimetype, s.Size)
 	}

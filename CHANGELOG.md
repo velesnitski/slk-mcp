@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-07-03
+
+### Added — `transcribe_audio`: voice message → text in one call
+`download_audio` (0.5.7) made the audio reachable but still left the
+client to run the STT pipeline by hand. `transcribe_audio` (permalink or
+channel + timestamp; `language`, default auto-detect) now runs the whole
+chain server-side when a local toolchain is present: download → ffmpeg
+(16 kHz mono WAV) → whisper.cpp → transcript. The toolchain is
+host-provided and OPTIONAL — resolved via `SLACK_FFMPEG_BIN` /
+`SLACK_WHISPER_BIN` / `SLACK_WHISPER_MODEL` with PATH +
+`~/.cache/whisper/ggml-small.bin` defaults; when any piece is missing
+the tool degrades to `download_audio` behaviour (paths + a setup hint)
+instead of failing. stdout/stderr are captured separately so whisper's
+model-loading noise can't corrupt the transcript. Transcribed audio
+files are cleaned up; failed ones are kept for manual retry. ADR 032.
+484 → 494 tests.
+
 ## [0.5.7] - 2026-07-03
 
 ### Added — `download_audio`: fetch voice-message attachments for transcription

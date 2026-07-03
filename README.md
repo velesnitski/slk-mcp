@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-17-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-18-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -126,6 +126,7 @@ Or via config file (`~/.claude.json`):
 | `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |
 | `delete_message` | Delete a message by permalink or channel+ts — only ones this token posted (disabled in `SLACK_READ_ONLY`) |
 | `download_audio` | Download audio attachments (voice messages) to local temp files for transcription |
+| `transcribe_audio` | Voice message → text via a local whisper.cpp install; degrades to `download_audio` behaviour when the toolchain is missing |
 
 ### With user token (`SLACK_USER_TOKEN`)
 
@@ -137,12 +138,28 @@ Or via config file (`~/.claude.json`):
 
 ## How-to: transcribe voice messages
 
-Slack voice notes are `audio/mp4` (.m4a) attachments — `download_audio`
-fetches them with the server's own token (the token never leaves the
-server process; requires the **`files:read`** scope, or Slack answers
-with its sign-in page and the tool reports a scope error). Transcription
-is deliberately left to the client — pair the tool with any local
-speech-to-text engine. Example with [whisper.cpp](https://github.com/ggerganov/whisper.cpp):
+Slack voice notes are `audio/mp4` (.m4a) attachments, fetched with the
+server's own token (the token never leaves the server process; requires
+the **`files:read`** scope, or Slack answers with its sign-in page and
+the tool reports a scope error).
+
+**One call** — `transcribe_audio` runs the whole pipeline under the
+hood when [whisper.cpp](https://github.com/ggerganov/whisper.cpp) is
+installed:
+
+```bash
+# one-time setup (same as below); then:
+# transcribe_audio { "permalink": "https://<workspace>.slack.com/archives/D.../p...", "language": "ru" }
+# → transcript text. Missing toolchain? The tool falls back to
+#   download_audio behaviour: local file path + a setup hint.
+```
+
+Optional overrides: `SLACK_FFMPEG_BIN`, `SLACK_WHISPER_BIN` (defaults:
+PATH lookup of `ffmpeg` / `whisper-cli`) and `SLACK_WHISPER_MODEL`
+(default: `~/.cache/whisper/ggml-small.bin`).
+
+**Manual** — `download_audio` just fetches the file; pair it with any
+local speech-to-text engine:
 
 ```bash
 # one-time setup
@@ -178,6 +195,9 @@ chain from a single message permalink.
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
 | `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read` |
+| `SLACK_FFMPEG_BIN` | No | ffmpeg binary for `transcribe_audio` (default: `ffmpeg` from PATH) |
+| `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
+| `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
 | `SLACK_COMPACT` | No | `false` to disable compact output (default: `true`) |

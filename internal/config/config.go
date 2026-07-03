@@ -41,6 +41,15 @@ type Config struct {
 	// channels the bot/user has joined).
 	AutodiscoverLimit int
 
+	// FFmpegBin / WhisperBin / WhisperModel configure the optional local
+	// speech-to-text pipeline behind transcribe_audio. Empty values fall
+	// back to PATH lookup ("ffmpeg", "whisper-cli") and the conventional
+	// model location (~/.cache/whisper/ggml-small.bin). The pipeline is
+	// host-provided: nothing here is a hard dependency of the server.
+	FFmpegBin    string
+	WhisperBin   string
+	WhisperModel string
+
 	// Workspaces is the ordered list of Slack workspaces this server
 	// serves. Workspaces[0] is the primary — its tokens mirror the
 	// legacy BotToken/UserToken/Channels fields so every existing
@@ -99,6 +108,9 @@ func Load() *Config {
 		MaxMessagesPerChannel: parseIntDefault(os.Getenv("SLACK_MAX_MESSAGES"), 200),
 		CompactOutput:         parseBoolDefault(os.Getenv("SLACK_COMPACT"), true),
 		AutodiscoverLimit:     parseIntDefault(os.Getenv("SLACK_AUTODISCOVER_LIMIT"), 50),
+		FFmpegBin:             os.Getenv("SLACK_FFMPEG_BIN"),
+		WhisperBin:            os.Getenv("SLACK_WHISPER_BIN"),
+		WhisperModel:          os.Getenv("SLACK_WHISPER_MODEL"),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",

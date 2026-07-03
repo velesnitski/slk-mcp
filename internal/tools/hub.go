@@ -199,6 +199,7 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerListTools(s)
 	h.registerSearchTools(s)
 	h.registerThreadTools(s)
+	h.registerTranscribeTools(s)
 	h.registerUnreadTools(s)
 	h.registerUserTools(s)
 }
