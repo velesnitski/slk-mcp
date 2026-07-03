@@ -135,6 +135,38 @@ Or via config file (`~/.claude.json`):
 | `get_mentions` | Messages that mention you |
 | `mark_read` | Mark a channel read through a given timestamp |
 
+## How-to: transcribe voice messages
+
+Slack voice notes are `audio/mp4` (.m4a) attachments — `download_audio`
+fetches them with the server's own token (the token never leaves the
+server process; requires the **`files:read`** scope, or Slack answers
+with its sign-in page and the tool reports a scope error). Transcription
+is deliberately left to the client — pair the tool with any local
+speech-to-text engine. Example with [whisper.cpp](https://github.com/ggerganov/whisper.cpp):
+
+```bash
+# one-time setup
+brew install whisper-cpp ffmpeg
+mkdir -p ~/.cache/whisper
+curl -L -o ~/.cache/whisper/ggml-small.bin \
+  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+```
+
+```bash
+# 1. download the voice note (MCP call — returns a local temp path)
+#    download_audio { "permalink": "https://<workspace>.slack.com/archives/D.../p..." }
+
+# 2. convert to 16 kHz mono WAV and transcribe (pick your language via -l)
+ffmpeg -y -i /tmp/slk-audio-<id>-<name>.m4a -ar 16000 -ac 1 /tmp/voice.wav
+whisper-cli -m ~/.cache/whisper/ggml-small.bin -l ru -np /tmp/voice.wav
+```
+
+Model sizes trade accuracy for speed: `ggml-base.bin` (142 MB, fast),
+`ggml-small.bin` (466 MB, good multilingual balance), `ggml-medium.bin`
+(1.5 GB), `ggml-large-v3.bin` (3 GB, best). For typical voice notes,
+`small` is enough. An MCP client (e.g. Claude Code) can run the whole
+chain from a single message permalink.
+
 ## Environment variables
 
 | Variable | Required | Description |

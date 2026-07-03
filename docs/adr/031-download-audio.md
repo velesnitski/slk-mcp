@@ -59,3 +59,8 @@ with a fake client and `t.TempDir()` — same seam pattern as
   the OS temp dir with a `slk-audio-` prefix and fall to OS cleanup.
   Acceptable for the interactive use case; revisit if unattended bulk
   use appears.
+- The user token must carry `files:read`; without it Slack answers the
+  private URL with HTTP 200 + its sign-in page, which the download loop
+  detects (HTML sniff) and reports as a scope error instead of saving
+  corrupt "audio". The end-to-end client recipe (whisper.cpp + ffmpeg)
+  is documented in README "How-to: transcribe voice messages".

@@ -16,8 +16,10 @@ message, filters attachments to `audio/*`, and streams each into a local
 temp file via the server's own token — only file paths cross back to the
 client, never credentials. The client then transcribes locally (e.g.
 whisper). Service layer: `MessageService.MessageAt` (point lookup with
-thread-reply fallback) + `MessageService.DownloadFile`. ADR 031.
-474 → 483 tests.
+thread-reply fallback) + `MessageService.DownloadFile`. Downloads are
+sniffed for HTML: Slack answers 200 + a sign-in page when the token
+lacks `files:read`, which surfaces as an actionable scope error instead
+of corrupt "audio". ADR 031. 474 → 484 tests.
 
 ## [0.5.6] - 2026-06-30
 
