@@ -148,6 +148,23 @@ func TestDownloadAudioFiles_noURLIsSkipped(t *testing.T) {
 	}
 }
 
+func TestDownloadAudioFiles_htmlBodyIsScopeError(t *testing.T) {
+	// Slack answers 200 + its sign-in page when the token lacks
+	// files:read — that must surface as a scope error, not be saved
+	// as "audio".
+	dir := t.TempDir()
+	fake := &fakeAudioClient{payload: []byte("<!DOCTYPE html><html lang=\"en-US\">...")}
+	files := []goslack.File{audioFile("F6", "clip.m4a", "audio/mp4", "https://example.invalid/f6")}
+
+	_, _, err := downloadAudioFiles(context.Background(), fake, files, dir)
+	if err == nil || !strings.Contains(err.Error(), "files:read") {
+		t.Fatalf("HTML body should produce a files:read scope error, got %v", err)
+	}
+	if _, serr := os.Stat(filepath.Join(dir, "slk-audio-F6-clip.m4a")); !os.IsNotExist(serr) {
+		t.Fatal("HTML payload must not survive on disk")
+	}
+}
+
 func TestDownloadAudioFiles_downloadErrorCleansUp(t *testing.T) {
 	dir := t.TempDir()
 	fake := &fakeAudioClient{fail: true}

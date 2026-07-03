@@ -70,6 +70,23 @@ func sanitizeFilename(name string) string {
 	return out
 }
 
+// looksLikeHTML sniffs the first bytes of a downloaded file. Slack
+// serves its sign-in page with HTTP 200 when the token lacks the
+// files:read scope, so a "successful" download can silently be an HTML
+// document — without this guard it would be handed to a transcriber as
+// corrupt audio.
+func looksLikeHTML(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 256)
+	n, _ := f.Read(buf)
+	head := strings.TrimSpace(strings.ToLower(string(buf[:n])))
+	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
+}
+
 // savedAudio describes one downloaded attachment for rendering.
 type savedAudio struct {
 	Path     string
@@ -109,6 +126,10 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 		}
 		if cerr := out.Close(); cerr != nil {
 			return nil, skipped, fmt.Errorf("close %s: %w", path, cerr)
+		}
+		if looksLikeHTML(path) {
+			os.Remove(path)
+			return nil, skipped, fmt.Errorf("download %s: Slack returned an HTML sign-in page instead of the file — the token is missing the files:read scope (add it under OAuth & Permissions and reinstall the app)", f.Name)
 		}
 		var size int64
 		if info, serr := os.Stat(path); serr == nil {
