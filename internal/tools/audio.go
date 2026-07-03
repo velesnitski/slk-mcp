@@ -48,6 +48,15 @@ func isAudioFile(f goslack.File) bool {
 	return strings.HasPrefix(f.Mimetype, "audio/")
 }
 
+// isTranscribableFile widens isAudioFile to video: recorded huddles and
+// Slack clips arrive as video/mp4|webm, and ffmpeg extracts the audio
+// track with the same command that converts voice notes. Used by
+// transcribe_audio only — download_audio keeps its literal contract of
+// fetching audio files.
+func isTranscribableFile(f goslack.File) bool {
+	return isAudioFile(f) || strings.HasPrefix(f.Mimetype, "video/")
+}
+
 // sanitizeFilename keeps a filename shell- and filesystem-safe: only
 // alphanumerics, dot, dash, and underscore survive; everything else
 // (spaces, path separators, unicode) collapses to '_'. An empty result
@@ -94,15 +103,16 @@ type savedAudio struct {
 	Size     int64
 }
 
-// downloadAudioFiles filters files down to the audio attachments and
-// streams each into destDir. Factored free of the Hub (taking the
-// MessageClient contract) so tests exercise the filter/IO loop with a
-// fake client and a t.TempDir(). Non-audio files are reported in
-// skipped, not treated as errors — a voice note often travels with an
-// image preview and the caller only cares about the sound.
-func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack.File, destDir string) (saved []savedAudio, skipped []string, err error) {
+// downloadAudioFiles filters files down to the attachments accepted by
+// the caller's predicate and streams each into destDir. Factored free
+// of the Hub (taking the MessageClient contract) so tests exercise the
+// filter/IO loop with a fake client and a t.TempDir(). Rejected files
+// are reported in skipped, not treated as errors — a voice note often
+// travels with an image preview and the caller only cares about the
+// sound.
+func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack.File, destDir string, accept func(goslack.File) bool) (saved []savedAudio, skipped []string, err error) {
 	for _, f := range files {
-		if !isAudioFile(f) {
+		if !accept(f) {
 			skipped = append(skipped, fmt.Sprintf("%s (%s)", f.Name, f.Mimetype))
 			continue
 		}
@@ -143,9 +153,10 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 // fetchAudioFiles is the shared front half of download_audio and
 // transcribe_audio: resolve the workspace and target message (permalink
 // wins the usual way: explicit args override, permalink fills gaps),
-// then download the audio attachments into destDir. On failure the
-// returned *mcp.CallToolResult is non-nil and ready to hand back.
-func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) (saved []savedAudio, skipped []string, wsName string, errRes *mcp.CallToolResult) {
+// then download the attachments matched by accept into destDir. On
+// failure the returned *mcp.CallToolResult is non-nil and ready to
+// hand back.
+func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir string, accept func(goslack.File) bool) (saved []savedAudio, skipped []string, wsName string, errRes *mcp.CallToolResult) {
 	ws := h.workspaceTarget(workspace)
 	if ws == nil {
 		return nil, nil, "", mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
@@ -185,12 +196,12 @@ func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp
 	if destDir == "" {
 		destDir = os.TempDir()
 	}
-	saved, skipped, err = downloadAudioFiles(ctx, scoped.Messages(), msg.Files, destDir)
+	saved, skipped, err = downloadAudioFiles(ctx, scoped.Messages(), msg.Files, destDir, accept)
 	if err != nil {
 		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
 	if len(saved) == 0 {
-		return nil, nil, "", mcp.NewToolResultError("no audio attachments on this message; files present: " + strings.Join(skipped, ", "))
+		return nil, nil, "", mcp.NewToolResultError("no matching audio/video attachments on this message; files present: " + strings.Join(skipped, ", "))
 	}
 	return saved, skipped, ws.Name, nil
 }
@@ -199,7 +210,7 @@ func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp
 // their local paths. destDir overrides os.TempDir() in tests; the tool
 // handler passes "".
 func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir)
+	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir, isAudioFile)
 	if errRes != nil {
 		return errRes
 	}

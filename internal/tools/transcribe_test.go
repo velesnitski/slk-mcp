@@ -124,6 +124,63 @@ func TestTranscribeFile_EmptyTranscriptIsError(t *testing.T) {
 	}
 }
 
+func TestTranscribeFile_ExtractsAudioTrackFromVideo(t *testing.T) {
+	// -vn must be present so video inputs (recorded huddles/clips)
+	// contribute only their audio stream.
+	var ffmpegArgs []string
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if strings.Contains(name, "ffmpeg") {
+			ffmpegArgs = args
+			return nil, nil, nil
+		}
+		return []byte("text"), nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/w", model: "/m"}
+	if _, err := p.transcribeFile(context.Background(), "/tmp/huddle.mp4", "auto"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(strings.Join(ffmpegArgs, " "), "-vn") {
+		t.Fatalf("ffmpeg args must include -vn, got %v", ffmpegArgs)
+	}
+}
+
+func TestProbeDuration(t *testing.T) {
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		return []byte("3723.45\n"), nil, nil
+	})
+	p := &sttPipeline{ffprobe: "/bin/ffprobe"}
+	if got := p.probeDuration(context.Background(), "/tmp/a.mp4"); got != "1:02:03" {
+		t.Fatalf("probeDuration = %q, want 1:02:03", got)
+	}
+}
+
+func TestProbeDuration_ShortForm(t *testing.T) {
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		return []byte("133.2"), nil, nil
+	})
+	p := &sttPipeline{ffprobe: "/bin/ffprobe"}
+	if got := p.probeDuration(context.Background(), "/tmp/a.m4a"); got != "2:13" {
+		t.Fatalf("probeDuration = %q, want 2:13", got)
+	}
+}
+
+func TestProbeDuration_MissingFFprobeIsSilent(t *testing.T) {
+	p := &sttPipeline{ffprobe: ""}
+	if got := p.probeDuration(context.Background(), "/tmp/a.m4a"); got != "" {
+		t.Fatalf("missing ffprobe should yield empty duration, got %q", got)
+	}
+}
+
+func TestProbeDuration_GarbageIsSilent(t *testing.T) {
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		return []byte("N/A"), nil, nil
+	})
+	p := &sttPipeline{ffprobe: "/bin/ffprobe"}
+	if got := p.probeDuration(context.Background(), "/tmp/a.m4a"); got != "" {
+		t.Fatalf("unparseable ffprobe output should yield empty duration, got %q", got)
+	}
+}
+
 func TestFirstErrLine(t *testing.T) {
 	if got := firstErrLine([]byte("  one\ntwo\n")); got != "one" {
 		t.Fatalf("firstErrLine = %q", got)

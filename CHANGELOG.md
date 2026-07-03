@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.9] - 2026-07-03
+
+### Added — `transcribe_audio` accepts video: recorded huddles & clips
+A recorded huddle (or video clip) is a `video/mp4|webm` attachment on
+the same files API — it was rejected only by the `audio/*` filter.
+The download loop now takes an accept predicate: `download_audio`
+keeps its literal audio-only contract, while `transcribe_audio` widens
+to `audio/* + video/*` and passes `-vn` to ffmpeg so video inputs
+contribute exactly their audio track. `detectSTT` also picks up
+`ffprobe` when present and each transcript header gains the media
+duration ("2:13", "1:02:03") so long-call cost is visible before the
+text; a missing ffprobe silently omits the duration. Live unrecorded
+huddles remain out of scope — no file ever exists. ADR 033.
+495 → 502 tests.
+
 ## [0.5.8] - 2026-07-03
 
 ### Added — `transcribe_audio`: voice message → text in one call

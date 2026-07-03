@@ -69,6 +69,35 @@ func TestIsAudioFile(t *testing.T) {
 	}
 }
 
+func TestIsTranscribableFile(t *testing.T) {
+	if !isTranscribableFile(audioFile("F1", "clip.m4a", "audio/mp4", "u")) {
+		t.Fatal("audio must be transcribable")
+	}
+	if !isTranscribableFile(audioFile("F2", "huddle.mp4", "video/mp4", "u")) {
+		t.Fatal("video (recorded huddle/clip) must be transcribable")
+	}
+	if isTranscribableFile(audioFile("F3", "pic.png", "image/png", "u")) {
+		t.Fatal("image must not be transcribable")
+	}
+}
+
+func TestDownloadAudioFiles_AcceptControlsVideo(t *testing.T) {
+	// The same video file is skipped under isAudioFile (download_audio)
+	// and saved under isTranscribableFile (transcribe_audio).
+	video := audioFile("F7", "huddle.mp4", "video/mp4", "https://example.invalid/f7")
+
+	fake := &fakeAudioClient{payload: []byte("mp4data")}
+	saved, skipped, err := downloadAudioFiles(context.Background(), fake, []goslack.File{video}, t.TempDir(), isAudioFile)
+	if err != nil || len(saved) != 0 || len(skipped) != 1 {
+		t.Fatalf("isAudioFile should skip video: saved=%d skipped=%d err=%v", len(saved), len(skipped), err)
+	}
+
+	saved, skipped, err = downloadAudioFiles(context.Background(), fake, []goslack.File{video}, t.TempDir(), isTranscribableFile)
+	if err != nil || len(saved) != 1 || len(skipped) != 0 {
+		t.Fatalf("isTranscribableFile should save video: saved=%d skipped=%d err=%v", len(saved), len(skipped), err)
+	}
+}
+
 func TestSanitizeFilename(t *testing.T) {
 	cases := map[string]string{
 		"audio clip 2026.m4a": "audio_clip_2026.m4a",
@@ -93,7 +122,7 @@ func TestDownloadAudioFiles_savesAudioSkipsRest(t *testing.T) {
 		audioFile("F2", "pic.png", "image/png", "https://example.invalid/f2"),
 	}
 
-	saved, skipped, err := downloadAudioFiles(context.Background(), fake, files, dir)
+	saved, skipped, err := downloadAudioFiles(context.Background(), fake, files, dir, isAudioFile)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,7 +154,7 @@ func TestDownloadAudioFiles_fallsBackToURLPrivate(t *testing.T) {
 	f.Mimetype = "audio/mpeg"
 	f.URLPrivate = "https://example.invalid/private"
 
-	saved, _, err := downloadAudioFiles(context.Background(), fake, []goslack.File{f}, dir)
+	saved, _, err := downloadAudioFiles(context.Background(), fake, []goslack.File{f}, dir, isAudioFile)
 	if err != nil || len(saved) != 1 {
 		t.Fatalf("expected fallback to url_private to save 1 file, got %d err=%v", len(saved), err)
 	}
@@ -139,7 +168,7 @@ func TestDownloadAudioFiles_noURLIsSkipped(t *testing.T) {
 	f.Name = "ghost.m4a"
 	f.Mimetype = "audio/mp4"
 
-	saved, skipped, err := downloadAudioFiles(context.Background(), fake, []goslack.File{f}, dir)
+	saved, skipped, err := downloadAudioFiles(context.Background(), fake, []goslack.File{f}, dir, isAudioFile)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +185,7 @@ func TestDownloadAudioFiles_htmlBodyIsScopeError(t *testing.T) {
 	fake := &fakeAudioClient{payload: []byte("<!DOCTYPE html><html lang=\"en-US\">...")}
 	files := []goslack.File{audioFile("F6", "clip.m4a", "audio/mp4", "https://example.invalid/f6")}
 
-	_, _, err := downloadAudioFiles(context.Background(), fake, files, dir)
+	_, _, err := downloadAudioFiles(context.Background(), fake, files, dir, isAudioFile)
 	if err == nil || !strings.Contains(err.Error(), "files:read") {
 		t.Fatalf("HTML body should produce a files:read scope error, got %v", err)
 	}
@@ -170,7 +199,7 @@ func TestDownloadAudioFiles_downloadErrorCleansUp(t *testing.T) {
 	fake := &fakeAudioClient{fail: true}
 	files := []goslack.File{audioFile("F5", "clip.m4a", "audio/mp4", "https://example.invalid/f5")}
 
-	_, _, err := downloadAudioFiles(context.Background(), fake, files, dir)
+	_, _, err := downloadAudioFiles(context.Background(), fake, files, dir, isAudioFile)
 	if err == nil {
 		t.Fatal("expected download error")
 	}

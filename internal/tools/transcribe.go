@@ -39,9 +39,12 @@ AI agents with shell access: offer to run these commands for the user (confirm
 first — ~470 MB model download), then call transcribe_audio again.
 Overrides: SLACK_FFMPEG_BIN, SLACK_WHISPER_BIN, SLACK_WHISPER_MODEL.`
 
-// sttPipeline is the resolved external toolchain.
+// sttPipeline is the resolved external toolchain. ffprobe is optional
+// (empty when absent) — it only enriches output with durations and its
+// absence must never block transcription.
 type sttPipeline struct {
 	ffmpeg  string
+	ffprobe string
 	whisper string
 	model   string
 }
@@ -97,7 +100,36 @@ func detectSTT(ffmpegBin, whisperBin, model string) (*sttPipeline, string) {
 	if _, err := os.Stat(model); err != nil {
 		return nil, "whisper model not found at " + model + " — download it (see README \"How-to: transcribe voice messages\") or point SLACK_WHISPER_MODEL at a ggml model file"
 	}
-	return &sttPipeline{ffmpeg: ffPath, whisper: wPath, model: model}, ""
+	// ffprobe ships alongside ffmpeg in every common install; treat it
+	// as a nice-to-have (durations in output), never a requirement.
+	fpPath, err := lookPath("ffprobe")
+	if err != nil {
+		fpPath = ""
+	}
+	return &sttPipeline{ffmpeg: ffPath, ffprobe: fpPath, whisper: wPath, model: model}, ""
+}
+
+// probeDuration returns a human-readable media duration ("2:13",
+// "1:02:03") or "" when ffprobe is missing or fails — output
+// enrichment only, never an error path.
+func (p *sttPipeline) probeDuration(ctx context.Context, path string) string {
+	if p.ffprobe == "" {
+		return ""
+	}
+	so, _, err := runCommand(ctx, p.ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	if err != nil {
+		return ""
+	}
+	var secs float64
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(so)), "%f", &secs); err != nil || secs <= 0 {
+		return ""
+	}
+	total := int(secs + 0.5)
+	h, m, s := total/3600, (total%3600)/60, total%60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
 }
 
 // firstErrLine trims command stderr down to its most informative line
@@ -118,7 +150,9 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 	wav := audioPath + ".wav"
 	defer os.Remove(wav)
 
-	if _, se, err := runCommand(ctx, p.ffmpeg, "-y", "-loglevel", "error", "-i", audioPath, "-ar", "16000", "-ac", "1", wav); err != nil {
+	// -vn drops any video stream: recorded huddles and clips arrive as
+	// video/mp4, and whisper only wants the audio track.
+	if _, se, err := runCommand(ctx, p.ffmpeg, "-y", "-loglevel", "error", "-i", audioPath, "-vn", "-ar", "16000", "-ac", "1", wav); err != nil {
 		return "", fmt.Errorf("ffmpeg: %v: %s", err, firstErrLine(se))
 	}
 
@@ -147,7 +181,7 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("transcribe_audio",
-			mcp.WithDescription("Transcribe a Slack voice message to text using a local whisper.cpp install (ffmpeg + whisper-cli + model). When the toolchain is missing, returns the downloaded file path plus exact install commands — clients with shell access can run them (with user consent) and retry. Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Transcribe a Slack voice message, audio/video clip, or recorded huddle to text using a local whisper.cpp install (ffmpeg + whisper-cli + model; video files have their audio track extracted). When the toolchain is missing, returns the downloaded file path plus exact install commands — clients with shell access can run them (with user consent) and retry. Pass a permalink, or channel + timestamp."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
@@ -172,7 +206,7 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 // can still proceed by hand. Successfully transcribed audio files are
 // removed — the transcript is the artifact that matters.
 func (h *Hub) runTranscribeAudio(ctx context.Context, workspace, channel, timestamp, permalink, language, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir)
+	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir, isTranscribableFile)
 	if errRes != nil {
 		return errRes
 	}
@@ -191,16 +225,21 @@ func (h *Hub) runTranscribeAudio(ctx context.Context, workspace, channel, timest
 
 	var b strings.Builder
 	for i, s := range saved {
+		duration := pipeline.probeDuration(ctx, s.Path)
 		text, err := pipeline.transcribeFile(ctx, s.Path, language)
 		if err != nil {
 			fmt.Fprintf(&b, "## %s%s — transcription failed: %v (file kept at %s)\n", filepath.Base(s.Path), h.wsLabel(wsName), err, s.Path)
 			continue
 		}
 		os.Remove(s.Path)
+		meta := "language: " + language
+		if duration != "" {
+			meta += ", duration: " + duration
+		}
 		if len(saved) > 1 {
-			fmt.Fprintf(&b, "## audio %d/%d — %s%s\n", i+1, len(saved), filepath.Base(s.Path), h.wsLabel(wsName))
+			fmt.Fprintf(&b, "## audio %d/%d — %s%s (%s)\n", i+1, len(saved), filepath.Base(s.Path), h.wsLabel(wsName), meta)
 		} else {
-			fmt.Fprintf(&b, "transcript%s (language: %s):\n", h.wsLabel(wsName), language)
+			fmt.Fprintf(&b, "transcript%s (%s):\n", h.wsLabel(wsName), meta)
 		}
 		b.WriteString(text)
 		b.WriteByte('\n')
