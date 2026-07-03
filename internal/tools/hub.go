@@ -193,6 +193,7 @@ func (h *Hub) Lists() ListClient       { return h.client.Lists }
 // significant; tools register themselves conditionally based on
 // config (read-only, disabled list, user-token availability).
 func (h *Hub) RegisterAll(s *server.MCPServer) {
+	h.registerAudioTools(s)
 	h.registerChannelTools(s)
 	h.registerDigestTools(s)
 	h.registerListTools(s)

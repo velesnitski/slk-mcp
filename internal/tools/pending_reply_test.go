@@ -83,6 +83,12 @@ func (f *fakeMessageClient) AddReaction(ctx context.Context, channelID, timestam
 func (f *fakeMessageClient) Delete(ctx context.Context, channelID, timestamp string) error {
 	return nil
 }
+func (f *fakeMessageClient) MessageAt(ctx context.Context, channelID, ts string) (*goslack.Message, error) {
+	return nil, errors.New("MessageAt not supported in fake")
+}
+func (f *fakeMessageClient) DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error {
+	return errors.New("DownloadFile not supported in fake")
+}
 
 var _ MessageClient = (*fakeMessageClient)(nil)
 

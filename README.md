@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-16-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-17-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -125,6 +125,7 @@ Or via config file (`~/.claude.json`):
 | `post_message` | Post a message (disabled in `SLACK_READ_ONLY`) |
 | `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |
 | `delete_message` | Delete a message by permalink or channel+ts — only ones this token posted (disabled in `SLACK_READ_ONLY`) |
+| `download_audio` | Download audio attachments (voice messages) to local temp files for transcription |
 
 ### With user token (`SLACK_USER_TOKEN`)
 

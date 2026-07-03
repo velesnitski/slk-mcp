@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-07-03
+
+### Added — `download_audio`: fetch voice-message attachments for transcription
+Voice notes rendered as an opaque `[📎 file.m4a]` marker — the audio itself
+was unreachable from the MCP client, and fetching it out-of-band would mean
+handling the Slack token outside the server process. New `download_audio`
+tool (permalink, or channel + timestamp; workspace-aware) resolves the
+message, filters attachments to `audio/*`, and streams each into a local
+temp file via the server's own token — only file paths cross back to the
+client, never credentials. The client then transcribes locally (e.g.
+whisper). Service layer: `MessageService.MessageAt` (point lookup with
+thread-reply fallback) + `MessageService.DownloadFile`. ADR 031.
+474 → 483 tests.
+
 ## [0.5.6] - 2026-06-30
 
 ### Added — `full_text` on `get_thread` + `get_channel_digest`

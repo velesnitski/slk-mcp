@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"strconv"
 
@@ -104,6 +105,53 @@ func (s *MessageService) Delete(ctx context.Context, channelID, timestamp string
 	})
 	if err != nil {
 		return fmt.Errorf("chat.delete: %w", err)
+	}
+	return nil
+}
+
+// MessageAt returns the single message posted at ts in channelID. A
+// point lookup via conversations.history (inclusive latest, limit 1)
+// covers top-level messages; thread replies never appear in channel
+// history, so on a ts mismatch we fall back to conversations.replies
+// rooted at ts and scan for the exact match.
+func (s *MessageService) MessageAt(ctx context.Context, channelID, ts string) (*goslack.Message, error) {
+	params := &goslack.GetConversationHistoryParameters{
+		ChannelID: channelID,
+		Latest:    ts,
+		Inclusive: true,
+		Limit:     1,
+	}
+	resp, err := ratelimit.DoR(ctx, s.log, func() (*goslack.GetConversationHistoryResponse, error) {
+		return s.api.GetConversationHistoryContext(ctx, params)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("conversations.history: %w", err)
+	}
+	if len(resp.Messages) > 0 && resp.Messages[0].Timestamp == ts {
+		return &resp.Messages[0], nil
+	}
+	replies, err := s.ThreadReplies(ctx, channelID, ts)
+	if err != nil {
+		return nil, fmt.Errorf("no message at ts %s (and thread lookup failed: %w)", ts, err)
+	}
+	for i := range replies {
+		if replies[i].Timestamp == ts {
+			return &replies[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no message found at ts %s", ts)
+}
+
+// DownloadFile streams a url_private / url_private_download asset into
+// w, authenticating with this client's token. The token never leaves
+// the server process — callers receive bytes, not credentials. The
+// caller owns w (creation and close).
+func (s *MessageService) DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error {
+	err := ratelimit.Do(ctx, s.log, 0, func() error {
+		return s.api.GetFileContext(ctx, downloadURL, w)
+	})
+	if err != nil {
+		return fmt.Errorf("file download: %w", err)
 	}
 	return nil
 }

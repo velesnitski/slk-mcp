@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"io"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack"
@@ -49,6 +50,8 @@ type MessageClient interface {
 	Post(ctx context.Context, channelID, text, threadTS string) (string, error)
 	AddReaction(ctx context.Context, channelID, timestamp, emoji string) error
 	Delete(ctx context.Context, channelID, timestamp string) error
+	MessageAt(ctx context.Context, channelID, ts string) (*goslack.Message, error)
+	DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error
 }
 
 // SearchClient wraps search.messages. Separate from MessageClient
