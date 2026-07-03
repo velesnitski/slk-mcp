@@ -35,6 +35,12 @@ embedding an engine:
    tool returns the downloaded paths plus an actionable install hint —
    i.e. it behaves exactly like `download_audio`. A missing local model
    must never make a voice message *less* reachable than 0.5.7 did.
+   The hint is written for the *calling agent*: it carries the complete
+   one-time install (brew + model download) and an explicit instruction
+   that shell-capable clients may run it with user consent and retry —
+   so a fresh machine self-heals in one round-trip. The server itself
+   never executes installers: a Slack-facing process must not be able
+   to invoke package managers.
 5. Cleanup: transcribed audio (and the intermediate WAV) is removed —
    the transcript is the artifact. Files whose transcription failed are
    kept for manual retry, and the error carries the first stderr line.

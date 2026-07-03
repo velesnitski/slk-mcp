@@ -133,6 +133,22 @@ func TestFirstErrLine(t *testing.T) {
 	}
 }
 
+func TestSTTSetupHint_IsSelfContained(t *testing.T) {
+	// The degraded response must carry everything an agent needs to
+	// install the toolchain and retry — guard the hint against
+	// accidental truncation.
+	for _, want := range []string{
+		"brew install ffmpeg whisper-cpp",
+		"ggml-small.bin",
+		"SLACK_WHISPER_MODEL",
+		"transcribe_audio",
+	} {
+		if !strings.Contains(sttSetupHint, want) {
+			t.Fatalf("sttSetupHint missing %q", want)
+		}
+	}
+}
+
 func TestRunTranscribeAudio_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
 	res := hub.runTranscribeAudio(context.Background(), "ghost", "#general", "1.1", "", "auto", "")

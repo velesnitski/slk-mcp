@@ -21,6 +21,24 @@ import (
 // missing. That keeps the server dependency-free while making the
 // common case one tool call.
 
+// sttSetupHint is the complete one-time toolchain install, emitted
+// whenever transcribe_audio degrades to download-only. It is written
+// FOR THE CALLING AGENT: an MCP client with shell access (e.g. Claude
+// Code) can offer to run these commands and retry, which makes the
+// missing-toolchain case self-healing for new users. The server itself
+// deliberately never installs anything — executing package managers
+// from a Slack-facing process is not a power this tool should have.
+const sttSetupHint = `
+to enable transcription, install the local toolchain (one-time, macOS/Homebrew;
+other platforms: see the whisper.cpp README):
+  brew install ffmpeg whisper-cpp
+  mkdir -p ~/.cache/whisper
+  curl -L -o ~/.cache/whisper/ggml-small.bin \
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+AI agents with shell access: offer to run these commands for the user (confirm
+first — ~470 MB model download), then call transcribe_audio again.
+Overrides: SLACK_FFMPEG_BIN, SLACK_WHISPER_BIN, SLACK_WHISPER_MODEL.`
+
 // sttPipeline is the resolved external toolchain.
 type sttPipeline struct {
 	ffmpeg  string
@@ -129,7 +147,7 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("transcribe_audio",
-			mcp.WithDescription("Transcribe a Slack voice message to text using a local whisper.cpp install (ffmpeg + whisper-cli + model). Falls back to download_audio behaviour (file path + setup hint) when the toolchain is missing. Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Transcribe a Slack voice message to text using a local whisper.cpp install (ffmpeg + whisper-cli + model). When the toolchain is missing, returns the downloaded file path plus exact install commands — clients with shell access can run them (with user consent) and retry. Pass a permalink, or channel + timestamp."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
@@ -167,6 +185,7 @@ func (h *Hub) runTranscribeAudio(ctx context.Context, workspace, channel, timest
 		for _, s := range saved {
 			fmt.Fprintf(&b, "- %s (%s, %d bytes)\n", s.Path, s.Mimetype, s.Size)
 		}
+		b.WriteString(sttSetupHint)
 		return mcp.NewToolResultText(b.String())
 	}
 
