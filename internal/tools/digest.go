@@ -60,28 +60,14 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("channels", mcp.Description("Comma-separated channel names; uses SLACK_CHANNELS if empty")),
 				mcp.WithNumber("hours", mcp.Description("Lookback window in hours (default: SLACK_DIGEST_HOURS or 24)")),
 				mcp.WithNumber("max_messages", mcp.Description("Max messages per channel (default: 20)")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list, _, err := h.resolveTargetChannels(ctx, req.GetString("channels", ""))
-				if err != nil {
-					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
-				}
-				if len(list) == 0 {
-					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
-				}
-				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
-				maxShow := int(req.GetFloat("max_messages", 20))
-
-				var parts []string
-				for _, ch := range list {
-					txt, err := h.channelDigest(ctx, ch, hours, maxShow, false)
-					if err != nil {
-						parts = append(parts, fmt.Sprintf("## #%s\nerror: %v", ch, err))
-						continue
-					}
-					parts = append(parts, txt)
-				}
-				return mcp.NewToolResultText(strings.Join(parts, "\n\n")), nil
+				return h.runMultiChannelDigest(ctx,
+					req.GetString("workspace", ""),
+					req.GetString("channels", ""),
+					int(req.GetFloat("hours", float64(h.cfg.DigestHours))),
+					int(req.GetFloat("max_messages", 20))), nil
 			},
 		)
 	}
@@ -93,58 +79,150 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("channels", mcp.Description("Comma-separated channel names; uses SLACK_CHANNELS if empty")),
 				mcp.WithNumber("hours", mcp.Description("Lookback window in hours (default: SLACK_DIGEST_HOURS or 24)")),
 				mcp.WithNumber("max_messages", mcp.Description("Max messages per channel (default: 15)")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				list, _, err := h.resolveTargetChannels(ctx, req.GetString("channels", ""))
-				if err != nil {
-					return mcp.NewToolResultError("auto-discover channels: " + err.Error()), nil
-				}
-				if len(list) == 0 {
-					return mcp.NewToolResultError("no channels available — pass channels, set SLACK_CHANNELS, or join some channels"), nil
-				}
-				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
-				maxShow := int(req.GetFloat("max_messages", 15))
-				oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
-
-				var decisions []string
-				var digests []string
-
-				for _, ch := range list {
-					channelID, err := h.Channels().ResolveID(ctx, ch)
-					if err != nil {
-						digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
-						continue
-					}
-					msgs, err := h.Messages().History(ctx, slack.HistoryParams{
-						ChannelID: channelID,
-						OldestTS:  float64(oldest.Unix()),
-						Limit:     h.cfg.MaxMessagesPerChannel,
-					})
-					if err != nil {
-						digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
-						continue
-					}
-					users := h.resolveRefs(ctx, msgs)
-					digests = append(digests, format.ChannelDigest("#"+ch, msgs, users, maxShow))
-					decisions = append(decisions, detectDecisions(h.cfg, ch, msgs, users, format.DecisionLine)...)
-				}
-
-				var b strings.Builder
-				fmt.Fprintf(&b, "# Morning Recap (last %dh)\n\n", hours)
-				if len(decisions) > 0 {
-					b.WriteString("## Decisions\n")
-					for _, line := range decisions {
-						b.WriteString(line)
-						b.WriteByte('\n')
-					}
-					b.WriteByte('\n')
-				}
-				b.WriteString("## Activity\n")
-				b.WriteString(strings.Join(digests, "\n\n"))
-				return mcp.NewToolResultText(b.String()), nil
+				return h.runMorningRecap(ctx,
+					req.GetString("workspace", ""),
+					req.GetString("channels", ""),
+					int(req.GetFloat("hours", float64(h.cfg.DigestHours))),
+					int(req.GetFloat("max_messages", 15))), nil
 			},
 		)
 	}
+}
+
+// runMultiChannelDigest fans the multi-channel digest across the
+// requested workspaces — empty arg means every workspace, mirroring the
+// unread sweep and list_channels. A single workspace (the common case,
+// or an explicit label) renders the flat body byte-for-byte as before;
+// two or more nest each under a `## [label]` heading. Per-workspace the
+// channel set resolves against THAT workspace's config / joined
+// channels, so `SLACK_CHANNELS` and auto-discovery stay workspace-local.
+func (h *Hub) runMultiChannelDigest(ctx context.Context, workspace, channels string, hours, maxShow int) *mcp.CallToolResult {
+	targets := h.workspaceTargets(workspace)
+	if targets == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	}
+	multi := len(targets) > 1
+
+	var sections []string
+	for _, ws := range targets {
+		body, err := h.withClient(ws.Client).multiChannelDigestBody(ctx, channels, hours, maxShow)
+		switch {
+		case err != nil && !multi:
+			return mcp.NewToolResultError(err.Error())
+		case err != nil:
+			sections = append(sections, workspaceSection(ws.Name, "_error: "+err.Error()+"_"))
+		case !multi:
+			return mcp.NewToolResultText(body)
+		default:
+			sections = append(sections, workspaceSection(ws.Name, body))
+		}
+	}
+	return mcp.NewToolResultText(strings.Join(sections, "\n\n"))
+}
+
+// multiChannelDigestBody renders the digest for the single workspace
+// this Hub is scoped to. Empty result-channel set is an error the
+// caller surfaces (per workspace in the multi case).
+func (h *Hub) multiChannelDigestBody(ctx context.Context, channels string, hours, maxShow int) (string, error) {
+	list, _, err := h.resolveTargetChannels(ctx, channels)
+	if err != nil {
+		return "", fmt.Errorf("auto-discover channels: %w", err)
+	}
+	if len(list) == 0 {
+		return "", fmt.Errorf("no channels available — pass channels, set SLACK_CHANNELS, or join some channels")
+	}
+	var parts []string
+	for _, ch := range list {
+		txt, err := h.channelDigest(ctx, ch, hours, maxShow, false)
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("## #%s\nerror: %v", ch, err))
+			continue
+		}
+		parts = append(parts, txt)
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+// runMorningRecap is the get_morning_recap analogue of
+// runMultiChannelDigest: same fan-out contract, but the per-workspace
+// body carries its own Decisions + Activity subsections. The top
+// "# Morning Recap" title is owned here so single-workspace output is
+// unchanged and the multi case shows it once above the labelled
+// sections.
+func (h *Hub) runMorningRecap(ctx context.Context, workspace, channels string, hours, maxShow int) *mcp.CallToolResult {
+	targets := h.workspaceTargets(workspace)
+	if targets == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	}
+	multi := len(targets) > 1
+	title := fmt.Sprintf("# Morning Recap (last %dh)\n\n", hours)
+
+	var sections []string
+	for _, ws := range targets {
+		body, err := h.withClient(ws.Client).morningRecapBody(ctx, channels, hours, maxShow)
+		switch {
+		case err != nil && !multi:
+			return mcp.NewToolResultError(err.Error())
+		case err != nil:
+			sections = append(sections, workspaceSection(ws.Name, "_error: "+err.Error()+"_"))
+		case !multi:
+			return mcp.NewToolResultText(title + body)
+		default:
+			sections = append(sections, workspaceSection(ws.Name, body))
+		}
+	}
+	return mcp.NewToolResultText(title + strings.Join(sections, "\n\n"))
+}
+
+// morningRecapBody renders the decisions + activity recap for the
+// single workspace this Hub is scoped to, without the top-level title.
+func (h *Hub) morningRecapBody(ctx context.Context, channels string, hours, maxShow int) (string, error) {
+	list, _, err := h.resolveTargetChannels(ctx, channels)
+	if err != nil {
+		return "", fmt.Errorf("auto-discover channels: %w", err)
+	}
+	if len(list) == 0 {
+		return "", fmt.Errorf("no channels available — pass channels, set SLACK_CHANNELS, or join some channels")
+	}
+	oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	var decisions []string
+	var digests []string
+	for _, ch := range list {
+		channelID, err := h.Channels().ResolveID(ctx, ch)
+		if err != nil {
+			digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
+			continue
+		}
+		msgs, err := h.Messages().History(ctx, slack.HistoryParams{
+			ChannelID: channelID,
+			OldestTS:  float64(oldest.Unix()),
+			Limit:     h.cfg.MaxMessagesPerChannel,
+		})
+		if err != nil {
+			digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
+			continue
+		}
+		users := h.resolveRefs(ctx, msgs)
+		digests = append(digests, format.ChannelDigest("#"+ch, msgs, users, maxShow))
+		decisions = append(decisions, detectDecisions(h.cfg, ch, msgs, users, format.DecisionLine)...)
+	}
+
+	var b strings.Builder
+	if len(decisions) > 0 {
+		b.WriteString("## Decisions\n")
+		for _, line := range decisions {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("## Activity\n")
+	b.WriteString(strings.Join(digests, "\n\n"))
+	return b.String(), nil
 }
 
 func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow int, fullText bool) (string, error) {

@@ -308,6 +308,19 @@ The `/mcp` listing shows each server by its **config key** in `~/.claude.json`
 keeps that key current so the dialog never displays a stale version. After
 `make install`, **restart** Claude Code (a `/mcp` reconnect isn't enough). ADR 024.
 
+## Compatibility (1.0)
+
+SemVer applies to the **machine surface**: tool names, argument
+names/types/defaults, call semantics, and environment-variable names. A
+breaking change to any of these bumps the major version.
+
+The **rendered output text is not contractual** — digests, summaries,
+headers, and section labels target an LLM and will keep changing for
+density in minor/patch releases. Do not regex the human-readable body;
+integrate against the typed arguments and the structured tokens the
+tools emit (permalinks, the `cursor:` timestamp, issue IDs under
+`include_refs`). See ADR 037.
+
 ## License
 
 MIT

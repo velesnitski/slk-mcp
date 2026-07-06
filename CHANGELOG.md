@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2026-07-06
+## [1.0.0] - 2026-07-06
+
+First stable release. **Compatibility contract (ADR 037):** SemVer
+governs the machine surface — tool names, argument names/types/defaults,
+call semantics, and env-var names. The **rendered output text is
+expressly non-contractual** (it targets an LLM, not a parser) and will
+keep evolving for density in minor/patch releases — do not regex the
+body; use the typed args and structured tokens (permalinks, `cursor:`
+ts, issue IDs). Folds in the unreleased 0.6.0 delta-cursor work.
+
+### Added — workspace-aware `get_multi_channel_digest` / `get_morning_recap`
+The last two read tools without a `workspace` argument now have one
+(empty = every workspace, like the unread sweep). Single-workspace
+output is byte-unchanged; multi-workspace nests each under a `## [label]`
+heading, with channel resolution kept workspace-local. Closes the
+surface asymmetry noted in ADR 034 so the 1.0 read surface is uniform.
+ADR 036.
 
 ### Added — `get_unread_summary`: `after` delta cursor + `include_refs` gate
 Token-effectiveness pass on the highest-traffic tool. Same-day re-pulls
@@ -22,7 +38,7 @@ re-emitted ~80% identical content and the always-on References block
   into issue IDs.
 Purely subtractive, defaults to the cheaper behaviour; existing output
 changes only by the one-line `cursor:` header and the now-off refs
-footer. ADR 035. 502 → 510 tests.
+footer. ADR 035. 502 → 510 tests. (was staged as 0.6.0)
 
 ### Changed — internal: workspace scoping & permalink resolution consolidated
 Architecture pass after the 0.5.x run. The single-target scoping triple
