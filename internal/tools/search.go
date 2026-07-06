@@ -46,15 +46,14 @@ func (h *Hub) handleSearchMessages(ctx context.Context, req mcp.CallToolRequest)
 	if err != nil {
 		return mcp.NewToolResultError("query is required"), nil
 	}
-	wsArg := req.GetString("workspace", "")
-	ws := h.workspaceTarget(wsArg)
-	if ws == nil {
-		return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+	scoped, _, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+	if errRes != nil {
+		return errRes, nil
 	}
 	limit := int(req.GetFloat("limit", 20))
 	fullText := req.GetBool("full_text", false)
 
-	matches, err := h.withClient(ws.Client).Search().Messages(ctx, q, limit)
+	matches, err := scoped.Search().Messages(ctx, q, limit)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

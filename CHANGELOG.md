@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — internal: workspace scoping & permalink resolution consolidated
+Architecture pass after the 0.5.x run. The single-target scoping triple
+(`workspaceTarget → unknown-label check → withClient`, ~10 copies) is
+now `scopedWorkspace()`, and the "explicit args win, permalink fills
+the gaps" contract (3 copies, with already-drifted error text) is now
+`resolveMessageRef()`. `delete_message` keeps its documented
+permalink-overrides variant, now explicitly cross-referenced. No
+schema or behaviour changes (one error-message normalization in
+download/transcribe audio). Registration dual-style (table-driven
+pilot vs raw AddTool) reviewed and blessed as cosmetic. ADR 034.
+502 → 504 tests.
+
 ## [0.5.9] - 2026-07-03
 
 ### Added — `transcribe_audio` accepts video: recorded huddles & clips

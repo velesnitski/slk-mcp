@@ -135,6 +135,59 @@ func (h *Hub) workspaceTarget(name string) *slack.Workspace {
 	return nil
 }
 
+// scopedWorkspace is the one true spelling of the single-target
+// scoping sequence (workspaceTarget → unknown-label check → withClient)
+// that every single-target handler performs. Empty name scopes to the
+// primary. errRes is non-nil — and ready to hand straight back — exactly
+// when the label matches no configured workspace. Handlers needing the
+// raw *slack.Workspace (none today) can still use workspaceTarget.
+func (h *Hub) scopedWorkspace(name string) (scoped *Hub, wsName string, errRes *mcp.CallToolResult) {
+	ws := h.workspaceTarget(name)
+	if ws == nil {
+		return nil, "", mcp.NewToolResultError(unknownWorkspaceMsg(name, h.workspaceNames()))
+	}
+	return h.withClient(ws.Client), ws.Name, nil
+}
+
+// resolveMessageRef fills (channel, ts) from a Slack permalink under
+// the shared contract: explicit arguments win, the permalink only
+// fills what the caller left empty. useThreadTS selects the thread
+// root (get_thread) over the message's own ts (mark_read, audio) and
+// also names the field in error messages. delete_message deliberately
+// does NOT use this helper — there the permalink overrides explicit
+// args and short-circuits name resolution (see runDeleteMessage).
+func resolveMessageRef(permalink, channel, ts string, useThreadTS bool) (string, string, *mcp.CallToolResult) {
+	if strings.TrimSpace(permalink) != "" {
+		p, err := slack.ParseSlackPermalink(permalink)
+		if err != nil {
+			return "", "", mcp.NewToolResultError("permalink could not be parsed: " + err.Error())
+		}
+		if p != nil {
+			if channel == "" {
+				channel = p.ChannelID
+			}
+			if ts == "" {
+				if useThreadTS {
+					ts = p.ThreadTS
+				} else {
+					ts = p.TS
+				}
+			}
+		}
+	}
+	tsField := "timestamp"
+	if useThreadTS {
+		tsField = "thread_ts"
+	}
+	if channel == "" {
+		return "", "", mcp.NewToolResultError("channel is required (or pass a permalink)")
+	}
+	if ts == "" {
+		return "", "", mcp.NewToolResultError(tsField + " is required (or pass a permalink)")
+	}
+	return channel, ts, nil
+}
+
 // wsLabel returns " [name]" for a multi-workspace Hub and "" for a single
 // one, so a write confirmation names the workspace only when it would
 // otherwise be ambiguous — single-workspace output is left byte-identical

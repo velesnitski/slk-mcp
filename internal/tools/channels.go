@@ -100,12 +100,10 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				wsArg := req.GetString("workspace", "")
-				ws := h.workspaceTarget(wsArg)
-				if ws == nil {
-					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				scoped, wsName, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				if errRes != nil {
+					return errRes, nil
 				}
-				scoped := h.withClient(ws.Client)
 				includeMembers := req.GetBool("include_members", false)
 				membersLimit := int(req.GetFloat("members_limit", 50))
 
@@ -130,7 +128,7 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				var b strings.Builder
 				fmt.Fprintf(&b,
 					"#%s%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
-					ch.Name, h.wsLabel(ws.Name), ch.NumMembers, created,
+					ch.Name, h.wsLabel(wsName), ch.NumMembers, created,
 					firstLine(ch.Topic.Value), firstLine(ch.Purpose.Value), ch.IsArchived,
 				)
 
@@ -170,12 +168,10 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				wsArg := req.GetString("workspace", "")
-				ws := h.workspaceTarget(wsArg)
-				if ws == nil {
-					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				scoped, wsName, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				if errRes != nil {
+					return errRes, nil
 				}
-				scoped := h.withClient(ws.Client)
 				channelID, err := scoped.Channels().ResolveID(ctx, input)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
@@ -183,7 +179,7 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if err := scoped.Channels().Archive(ctx, channelID); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("archived #%s%s (%s) — reversible via unarchive_channel", strings.TrimPrefix(input, "#"), h.wsLabel(ws.Name), channelID)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("archived #%s%s (%s) — reversible via unarchive_channel", strings.TrimPrefix(input, "#"), h.wsLabel(wsName), channelID)), nil
 			},
 		)
 	}
@@ -200,12 +196,10 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				wsArg := req.GetString("workspace", "")
-				ws := h.workspaceTarget(wsArg)
-				if ws == nil {
-					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				scoped, wsName, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				if errRes != nil {
+					return errRes, nil
 				}
-				scoped := h.withClient(ws.Client)
 				channelID, err := scoped.Channels().ResolveID(ctx, input)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
@@ -213,7 +207,7 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if err := scoped.Channels().Unarchive(ctx, channelID); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("unarchived #%s%s (%s)", strings.TrimPrefix(input, "#"), h.wsLabel(ws.Name), channelID)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("unarchived #%s%s (%s)", strings.TrimPrefix(input, "#"), h.wsLabel(wsName), channelID)), nil
 			},
 		)
 	}

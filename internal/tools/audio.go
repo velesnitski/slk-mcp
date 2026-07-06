@@ -10,7 +10,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
-	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
 // registerAudioTools wires download_audio — fetching voice-note (or any
@@ -157,28 +156,14 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 // failure the returned *mcp.CallToolResult is non-nil and ready to
 // hand back.
 func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir string, accept func(goslack.File) bool) (saved []savedAudio, skipped []string, wsName string, errRes *mcp.CallToolResult) {
-	ws := h.workspaceTarget(workspace)
-	if ws == nil {
-		return nil, nil, "", mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	scoped, wsName, errRes := h.scopedWorkspace(workspace)
+	if errRes != nil {
+		return nil, nil, "", errRes
 	}
-	scoped := h.withClient(ws.Client)
 
-	if strings.TrimSpace(permalink) != "" {
-		p, err := slack.ParseSlackPermalink(permalink)
-		if err != nil {
-			return nil, nil, "", mcp.NewToolResultError("permalink could not be parsed: " + err.Error())
-		}
-		if p != nil {
-			if channel == "" {
-				channel = p.ChannelID
-			}
-			if timestamp == "" {
-				timestamp = p.TS
-			}
-		}
-	}
-	if channel == "" || timestamp == "" {
-		return nil, nil, "", mcp.NewToolResultError("provide a permalink, or channel + timestamp")
+	channel, timestamp, errRes = resolveMessageRef(permalink, channel, timestamp, false)
+	if errRes != nil {
+		return nil, nil, "", errRes
 	}
 
 	channelID, err := scoped.Channels().ResolveID(ctx, channel)
@@ -203,7 +188,7 @@ func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp
 	if len(saved) == 0 {
 		return nil, nil, "", mcp.NewToolResultError("no matching audio/video attachments on this message; files present: " + strings.Join(skipped, ", "))
 	}
-	return saved, skipped, ws.Name, nil
+	return saved, skipped, wsName, nil
 }
 
 // runDownloadAudio downloads a message's audio attachments and reports

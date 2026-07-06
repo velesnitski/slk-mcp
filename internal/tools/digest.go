@@ -30,10 +30,9 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError("channel is required"), nil
 				}
-				wsArg := req.GetString("workspace", "")
-				ws := h.workspaceTarget(wsArg)
-				if ws == nil {
-					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				scoped, _, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				if errRes != nil {
+					return errRes, nil
 				}
 				hours := int(req.GetFloat("hours", float64(h.cfg.DigestHours)))
 				maxShow := int(req.GetFloat("max_messages", 50))
@@ -45,7 +44,7 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				txt, err := h.withClient(ws.Client).channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText)
+				txt, err := scoped.channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}

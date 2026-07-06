@@ -106,6 +106,59 @@ func TestWithClient_RetargetsClientAndConfig(t *testing.T) {
 	}
 }
 
+func TestScopedWorkspace(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+
+	scoped, name, errRes := hub.scopedWorkspace("")
+	if errRes != nil || name != "primary" || scoped.client != hub.Workspaces()[0].Client {
+		t.Fatalf("empty arg should scope to primary, got name=%q errRes=%v", name, errRes)
+	}
+
+	scoped, name, errRes = hub.scopedWorkspace("SeCoNdArY")
+	if errRes != nil || name != "secondary" || scoped.client != hub.Workspaces()[1].Client {
+		t.Fatalf("named arg should scope case-insensitively, got name=%q errRes=%v", name, errRes)
+	}
+
+	if _, _, errRes = hub.scopedWorkspace("ghost"); errRes == nil || !errRes.IsError {
+		t.Fatal("unknown workspace should yield a ready error result")
+	}
+}
+
+func TestResolveMessageRef(t *testing.T) {
+	const link = "https://example.slack.com/archives/C0TESTCHAN/p1714000000000123?thread_ts=1713990000.000111"
+
+	// Permalink fills both; useThreadTS picks the thread root.
+	ch, ts, errRes := resolveMessageRef(link, "", "", true)
+	if errRes != nil || ch != "C0TESTCHAN" || ts != "1713990000.000111" {
+		t.Fatalf("thread mode: got ch=%q ts=%q errRes=%v", ch, ts, errRes)
+	}
+
+	// useThreadTS=false takes the message's own ts.
+	_, ts, errRes = resolveMessageRef(link, "", "", false)
+	if errRes != nil || ts != "1714000000.000123" {
+		t.Fatalf("message mode: got ts=%q errRes=%v", ts, errRes)
+	}
+
+	// Explicit args win over the permalink.
+	ch, ts, errRes = resolveMessageRef(link, "general", "9.9", false)
+	if errRes != nil || ch != "general" || ts != "9.9" {
+		t.Fatalf("explicit args must win, got ch=%q ts=%q errRes=%v", ch, ts, errRes)
+	}
+
+	// Unparseable permalink is an error.
+	if _, _, errRes = resolveMessageRef("not a permalink", "", "", false); errRes == nil || !errRes.IsError {
+		t.Fatal("garbage permalink should error")
+	}
+
+	// Nothing provided → field-specific errors.
+	if _, _, errRes = resolveMessageRef("", "", "", false); errRes == nil || !errRes.IsError {
+		t.Fatal("missing channel should error")
+	}
+	if _, _, errRes = resolveMessageRef("", "general", "", true); errRes == nil || !errRes.IsError {
+		t.Fatal("missing thread_ts should error")
+	}
+}
+
 func TestRunUnreadSummary_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
 	// workspaceTargets returns nil before any API call, so this exercises

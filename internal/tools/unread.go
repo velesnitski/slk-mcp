@@ -173,30 +173,13 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				ts := req.GetString("timestamp", "")
 				permalink := req.GetString("permalink", "")
 
-				if permalink != "" {
-					p, err := slack.ParseSlackPermalink(permalink)
-					if err != nil {
-						return mcp.NewToolResultError("permalink could not be parsed: " + err.Error()), nil
-					}
-					if p != nil {
-						// mark_read advances the read cursor up to a specific
-						// message — we want the message's own ts, not its thread
-						// root, so use TS even when the permalink points to a
-						// reply.
-						if channel == "" {
-							channel = p.ChannelID
-						}
-						if ts == "" {
-							ts = p.TS
-						}
-					}
-				}
-
-				if channel == "" {
-					return mcp.NewToolResultError("channel is required (or pass a permalink)"), nil
-				}
-				if ts == "" {
-					return mcp.NewToolResultError("timestamp is required (or pass a permalink)"), nil
+				// mark_read advances the read cursor up to a specific
+				// message — we want the message's own ts, not its thread
+				// root, so useThreadTS is false even for reply permalinks.
+				var errRes *mcp.CallToolResult
+				channel, ts, errRes = resolveMessageRef(permalink, channel, ts, false)
+				if errRes != nil {
+					return errRes, nil
 				}
 
 				channelID, err := h.Channels().ResolveID(ctx, channel)

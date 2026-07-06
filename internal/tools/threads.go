@@ -89,35 +89,14 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				permalink := req.GetString("permalink", "")
 				fullText := req.GetBool("full_text", false)
 
-				wsArg := req.GetString("workspace", "")
-				ws := h.workspaceTarget(wsArg)
-				if ws == nil {
-					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
-				}
-				scoped := h.withClient(ws.Client)
-
-				if permalink != "" {
-					p, err := slack.ParseSlackPermalink(permalink)
-					if err != nil {
-						return mcp.NewToolResultError("permalink could not be parsed: " + err.Error()), nil
-					}
-					if p != nil {
-						// Explicit args still win when both are passed; permalink
-						// only fills what the caller did not provide.
-						if channel == "" {
-							channel = p.ChannelID
-						}
-						if threadTS == "" {
-							threadTS = p.ThreadTS
-						}
-					}
+				scoped, _, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				if errRes != nil {
+					return errRes, nil
 				}
 
-				if channel == "" {
-					return mcp.NewToolResultError("channel is required (or pass a permalink)"), nil
-				}
-				if threadTS == "" {
-					return mcp.NewToolResultError("thread_ts is required (or pass a permalink)"), nil
+				channel, threadTS, errRes = resolveMessageRef(permalink, channel, threadTS, true)
+				if errRes != nil {
+					return errRes, nil
 				}
 
 				channelID, err := scoped.Channels().ResolveID(ctx, channel)
@@ -257,12 +236,10 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				timestamp, _ := req.RequireString("timestamp")
 				emoji, _ := req.RequireString("emoji")
 
-				wsArg := req.GetString("workspace", "")
-				ws := h.workspaceTarget(wsArg)
-				if ws == nil {
-					return mcp.NewToolResultError(unknownWorkspaceMsg(wsArg, h.workspaceNames())), nil
+				scoped, wsName, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				if errRes != nil {
+					return errRes, nil
 				}
-				scoped := h.withClient(ws.Client)
 				channelID, err := scoped.Channels().ResolveID(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
@@ -270,7 +247,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				if err := scoped.Messages().AddReaction(ctx, channelID, timestamp, emoji); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s%s", emoji, channel, h.wsLabel(ws.Name))), nil
+				return mcp.NewToolResultText(fmt.Sprintf("added :%s: on #%s%s", emoji, channel, h.wsLabel(wsName))), nil
 			},
 		)
 	}
@@ -317,11 +294,10 @@ func (h *Hub) runDeleteMessage(ctx context.Context, workspace, channel, timestam
 		return mcp.NewToolResultError("provide a permalink, or channel + timestamp")
 	}
 
-	ws := h.workspaceTarget(workspace)
-	if ws == nil {
-		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	scoped, wsName, errRes := h.scopedWorkspace(workspace)
+	if errRes != nil {
+		return errRes
 	}
-	scoped := h.withClient(ws.Client)
 
 	// Resolve the name only when the permalink didn't already hand us an ID.
 	if channelID == "" {
@@ -342,7 +318,7 @@ func (h *Hub) runDeleteMessage(ctx context.Context, workspace, channel, timestam
 	} else {
 		where = channelID
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("deleted message %s in %s%s", timestamp, where, h.wsLabel(ws.Name)))
+	return mcp.NewToolResultText(fmt.Sprintf("deleted message %s in %s%s", timestamp, where, h.wsLabel(wsName)))
 }
 
 // deleteErrorHint turns Slack's terse delete failures into something
@@ -365,11 +341,10 @@ func deleteErrorHint(err error) string {
 // the workspace-routing — including the unknown-label error path, which
 // returns before any Slack call — is unit-testable without a live server.
 func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, threadTS string, skipIfRecentMin int) *mcp.CallToolResult {
-	ws := h.workspaceTarget(workspace)
-	if ws == nil {
-		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	scoped, wsName, errRes := h.scopedWorkspace(workspace)
+	if errRes != nil {
+		return errRes
 	}
-	scoped := h.withClient(ws.Client)
 	channelID, err := scoped.Channels().ResolveID(ctx, channel)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error())
@@ -378,13 +353,13 @@ func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, thre
 	// identical text here within the window. Best-effort — fails open
 	// (posts) when self can't be identified or history can't be read.
 	if skipIfRecentMin > 0 && scoped.recentSelfDuplicate(ctx, channelID, text, skipIfRecentMin) {
-		return mcp.NewToolResultText(fmt.Sprintf("skipped #%s%s — identical message already posted by you within %dm (skip_if_recent)", channel, h.wsLabel(ws.Name), skipIfRecentMin))
+		return mcp.NewToolResultText(fmt.Sprintf("skipped #%s%s — identical message already posted by you within %dm (skip_if_recent)", channel, h.wsLabel(wsName), skipIfRecentMin))
 	}
 	ts, err := scoped.Messages().Post(ctx, channelID, text, threadTS)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error())
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("posted to #%s%s (ts: %s)", channel, h.wsLabel(ws.Name), ts))
+	return mcp.NewToolResultText(fmt.Sprintf("posted to #%s%s (ts: %s)", channel, h.wsLabel(wsName), ts))
 }
 
 // recentSelfDuplicate reports whether the authenticated user already
