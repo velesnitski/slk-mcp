@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-07-06
+
+### Added — `get_unread_summary`: `after` delta cursor + `include_refs` gate
+Token-effectiveness pass on the highest-traffic tool. Same-day re-pulls
+re-emitted ~80% identical content and the always-on References block
+(~100 IDs) cost tokens few callers used. Now:
+- **`after`** (Slack ts) prunes messages/replies at or before it and
+  drops emptied channels — but keeps a channel on a fresh reply to an
+  old parent. Applied after the DM/thread-mention merges. Fail-open on
+  unparseable ts.
+- Each pull emits a `cursor: <newest ts>` header line; feed it back as
+  `after` for a self-perpetuating delta loop (no wall-clock tracking).
+- **`include_refs`** (default false) gates the trailing References
+  block. `RenderReferences` stays one flag away for callers that chain
+  into issue IDs.
+Purely subtractive, defaults to the cheaper behaviour; existing output
+changes only by the one-line `cursor:` header and the now-off refs
+footer. ADR 035. 502 → 510 tests.
 
 ### Changed — internal: workspace scoping & permalink resolution consolidated
 Architecture pass after the 0.5.x run. The single-target scoping triple

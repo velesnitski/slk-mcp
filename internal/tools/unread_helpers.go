@@ -363,6 +363,94 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 	return out
 }
 
+// newestTS returns the maximum Slack timestamp across every message
+// and thread reply in results, or "" when there is nothing to place in
+// time. It is the cursor a caller feeds back as `after` on the next
+// pull to get only what arrived since — so the delta loop is
+// self-perpetuating without the caller tracking wall-clock time.
+func newestTS(results []*slack.ChannelUnread) string {
+	var maxTS string
+	var maxVal float64
+	consider := func(ts string) {
+		v, err := strconv.ParseFloat(ts, 64)
+		if err != nil {
+			return
+		}
+		if maxTS == "" || v > maxVal {
+			maxTS, maxVal = ts, v
+		}
+	}
+	for _, r := range results {
+		for _, m := range r.Messages {
+			consider(m.Timestamp)
+		}
+		for _, replies := range r.Replies {
+			for _, rep := range replies {
+				consider(rep.Timestamp)
+			}
+		}
+	}
+	return maxTS
+}
+
+// tsAfter reports whether Slack timestamp ts is strictly newer than
+// cursor. Slack ts ("1783086043.190149") sorts chronologically as a
+// float; an unparseable ts is treated as newer (fail-open — a delta
+// pull must never silently drop a message it couldn't place in time).
+func tsAfter(ts, cursor string) bool {
+	c, err := strconv.ParseFloat(cursor, 64)
+	if err != nil {
+		return true // unusable cursor → keep everything
+	}
+	v, err := strconv.ParseFloat(ts, 64)
+	if err != nil {
+		return true // unplaceable message → keep it
+	}
+	return v > c
+}
+
+// filterAfter drops every message (and thread reply) at or before the
+// cursor timestamp, then drops any channel left with nothing to show.
+// This is the engine behind get_unread_summary's `after` delta cursor:
+// re-pulling the same day returns only what arrived since the last
+// pull instead of re-emitting the whole backlog. cursor == "" is a
+// no-op (full sweep). A channel surviving only on thread replies is
+// kept — a reply to an old parent is still fresh signal.
+func filterAfter(results []*slack.ChannelUnread, cursor string) []*slack.ChannelUnread {
+	if strings.TrimSpace(cursor) == "" {
+		return results
+	}
+	out := results[:0]
+	for _, r := range results {
+		msgs := r.Messages[:0]
+		for _, m := range r.Messages {
+			if tsAfter(m.Timestamp, cursor) {
+				msgs = append(msgs, m)
+			}
+		}
+		r.Messages = msgs
+
+		for parent, replies := range r.Replies {
+			kept := replies[:0]
+			for _, rep := range replies {
+				if tsAfter(rep.Timestamp, cursor) {
+					kept = append(kept, rep)
+				}
+			}
+			if len(kept) == 0 {
+				delete(r.Replies, parent)
+			} else {
+				r.Replies[parent] = kept
+			}
+		}
+
+		if len(r.Messages) > 0 || len(r.Replies) > 0 {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // resolveRefsWithReplies is the unread-channel counterpart of
 // resolveRefs: gathers user IDs and channel IDs across top-level
 // messages AND inlined thread replies, then merges the resolved
