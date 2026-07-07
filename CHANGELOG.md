@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-07
+
+### Fixed — `list_users` silently ignored `workspace`
+The one reader missed by the ADR 027/029 workspace pass: it declared no
+`workspace` argument, so MCP hosts passed the arg through and the tool
+listed the PRIMARY workspace regardless. Now it fans out like
+`list_channels` (empty = every workspace under `## [label]` headings,
+named label = that workspace, unknown = error), and `with_activity`'s
+per-user search runs against the correct workspace's index. Additive
+argument ⇒ minor release under the ADR 037 contract. ADR 038.
+513 → 514 tests.
+
 ## [1.0.0] - 2026-07-06
 
 First stable release. **Compatibility contract (ADR 037):** SemVer
