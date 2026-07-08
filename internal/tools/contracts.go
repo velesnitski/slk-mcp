@@ -82,6 +82,16 @@ type ListClient interface {
 	Items(ctx context.Context, listID, cursor string, limit int) (*slack.ListItemsResult, error)
 }
 
+// StatusClient sets the authenticated user's custom status and
+// presence (users.profile.set / users.setPresence). These are personal
+// actions requiring a user-scope token, so handlers gate on Enabled()
+// per workspace before issuing requests.
+type StatusClient interface {
+	Enabled() bool
+	SetCustomStatus(ctx context.Context, text, emoji string, expiration int64) error
+	SetPresence(ctx context.Context, away bool) error
+}
+
 // Compile-time assertions: if the concrete services in
 // `internal/slack` drift from the contracts above, the build breaks
 // with a clear `does not implement` diagnostic that names the missing
@@ -93,4 +103,5 @@ var (
 	_ SearchClient  = (*slack.SearchService)(nil)
 	_ UnreadClient  = (*slack.UnreadService)(nil)
 	_ ListClient    = (*slack.ListService)(nil)
+	_ StatusClient  = (*slack.StatusService)(nil)
 )

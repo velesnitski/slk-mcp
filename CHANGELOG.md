@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-08
+
+### Added — `set_status`: custom status + presence (AFK)
+Set/clear your Slack custom status (text + emoji + auto-expiry) and,
+optionally, presence (away/auto). Three deliberate choices: (1) a
+status is you-global, so empty `workspace` fans out to EVERY workspace
+(the opposite of `post_message`) — you're away from all at once;
+(2) the server owns the clock — `clear_after_minutes` computes the
+expiry timestamp server-side so "AFK till tomorrow" doesn't depend on
+the agent guessing wall-time; (3) presence is opt-in (`set_presence`)
+and separable from status. Built on a user-token-only `StatusService`;
+a bot-only workspace reports "skipped: no user token" instead of a
+silent no-op. Registers only with a user token and outside
+`SLACK_READ_ONLY`. ADR 039. 514 → 518 tests.
+
 ## [1.1.0] - 2026-07-07
 
 ### Fixed — `list_users` silently ignored `workspace`
