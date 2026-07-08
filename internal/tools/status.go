@@ -73,6 +73,18 @@ func normalizeEmoji(e string) string {
 	return ":" + strings.Trim(e, ":") + ":"
 }
 
+// statusErrorHint maps Slack's terse status-write failures to an
+// actionable message. missing_scope is the one every fresh install
+// hits: the user token needs users.profile:write (status) and
+// users:write (presence), which the pre-1.2 manifest never asked for.
+func statusErrorHint(err error) string {
+	e := err.Error()
+	if strings.Contains(e, "missing_scope") {
+		return e + " — the user token lacks the profile scopes: add users.profile:write (status) and users:write (presence) under OAuth & Permissions → User Token Scopes, reinstall the app, then retry"
+	}
+	return e
+}
+
 // describeStatus renders a human-readable confirmation of what was set.
 func describeStatus(text, emoji string) string {
 	if text == "" && emoji == "" {
@@ -125,9 +137,9 @@ func (h *Hub) runSetStatus(ctx context.Context, p statusParams, now time.Time) *
 		}
 		if err := scoped.Status().SetCustomStatus(ctx, p.text, p.emoji, expiration); err != nil {
 			if !multi {
-				return mcp.NewToolResultError(err.Error())
+				return mcp.NewToolResultError(statusErrorHint(err))
 			}
-			lines = append(lines, fmt.Sprintf("- error%s: %v", label, err))
+			lines = append(lines, fmt.Sprintf("- error%s: %s", label, statusErrorHint(err)))
 			continue
 		}
 		line := "- " + describeStatus(p.text, p.emoji) + label

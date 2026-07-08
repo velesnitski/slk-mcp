@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -48,5 +49,14 @@ func TestRunSetStatus_UnknownWorkspaceIsError(t *testing.T) {
 	res := hub.runSetStatus(context.Background(), statusParams{workspace: "ghost", text: "AFK"}, time.Unix(1000, 0))
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should error, got %+v", res)
+	}
+}
+
+func TestStatusErrorHint(t *testing.T) {
+	if got := statusErrorHint(errors.New("missing_scope")); !strings.Contains(got, "users.profile:write") {
+		t.Fatalf("missing_scope should carry the scope fix, got %q", got)
+	}
+	if got := statusErrorHint(errors.New("ratelimited")); got != "ratelimited" {
+		t.Fatalf("other errors pass through, got %q", got)
 	}
 }
