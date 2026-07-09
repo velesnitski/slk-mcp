@@ -10,12 +10,13 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// registerStatusTools wires set_status — the authenticated user's
-// custom status + presence. Registered only when at least one workspace
-// carries a user token (a bot token cannot set a human's status) and
-// only when not read-only (it mutates the profile).
+// registerStatusTools wires set_status and set_presence — the
+// authenticated user's custom status + presence. Registered only when
+// at least one workspace carries a user token (a bot token cannot set a
+// human's status) and only when not read-only (they mutate the
+// profile).
 func (h *Hub) registerStatusTools(s *server.MCPServer) {
-	if h.cfg.ReadOnly || h.cfg.IsDisabled("set_status") {
+	if h.cfg.ReadOnly {
 		return
 	}
 	anyUserToken := false
@@ -29,6 +30,11 @@ func (h *Hub) registerStatusTools(s *server.MCPServer) {
 		return
 	}
 
+	h.registerSetPresence(s)
+
+	if h.cfg.IsDisabled("set_status") {
+		return
+	}
 	s.AddTool(
 		mcp.NewTool("set_status",
 			mcp.WithDescription("Set (or clear) your Slack custom status and, optionally, presence. Unlike posting, a status is a property of YOU — so an empty workspace sets it on EVERY configured workspace at once (you are away from all of them). Clear the status by passing empty text and emoji. Requires a user token (xoxp-)."),
@@ -50,6 +56,61 @@ func (h *Hub) registerStatusTools(s *server.MCPServer) {
 			}, time.Now()), nil
 		},
 	)
+}
+
+// registerSetPresence wires set_presence — flip the away/auto dot
+// WITHOUT touching the custom status. set_status can also set presence
+// (for setting an AFK status + dot in one call), but that path clears
+// the status when no text is given; set_presence is the standalone way
+// to go away/back while keeping whatever status is already up.
+func (h *Hub) registerSetPresence(s *server.MCPServer) {
+	if h.cfg.IsDisabled("set_presence") {
+		return
+	}
+	s.AddTool(
+		mcp.NewTool("set_presence",
+			mcp.WithDescription("Set your Slack presence to away (the grey dot) or auto, WITHOUT changing your custom status. Presence is a property of YOU, so an empty workspace applies it to every configured workspace. Use set_status when you want to change the status text too. Requires a user token (xoxp-)."),
+			mcp.WithBoolean("away", mcp.Description("true (default) = force presence to 'away' (grey dot); false = restore automatic presence (Slack flips to away on idle again).")),
+			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): apply to EVERY workspace — presence is you-global.")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return h.runSetPresence(ctx, req.GetString("workspace", ""), req.GetBool("away", true)), nil
+		},
+	)
+}
+
+// runSetPresence flips presence across the requested workspaces (empty =
+// all, you-global) and leaves the custom status untouched.
+func (h *Hub) runSetPresence(ctx context.Context, workspace string, away bool) *mcp.CallToolResult {
+	targets := h.workspaceTargets(workspace)
+	if targets == nil {
+		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
+	}
+	want := "auto"
+	if away {
+		want = "away"
+	}
+
+	var lines []string
+	applied := 0
+	for _, ws := range targets {
+		scoped := h.withClient(ws.Client)
+		label := h.wsLabel(ws.Name)
+		if !scoped.Status().Enabled() {
+			lines = append(lines, fmt.Sprintf("- skipped%s: no user token for this workspace", label))
+			continue
+		}
+		if err := scoped.Status().SetPresence(ctx, away); err != nil {
+			lines = append(lines, fmt.Sprintf("- error%s: %s", label, statusErrorHint(err)))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- presence: %s%s", want, label))
+		applied++
+	}
+	if applied == 0 {
+		return mcp.NewToolResultError("no workspace has a user token; cannot set presence:\n" + strings.Join(lines, "\n"))
+	}
+	return mcp.NewToolResultText(strings.Join(lines, "\n"))
 }
 
 // statusParams bundles the parsed set_status arguments.

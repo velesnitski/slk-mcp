@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-09
+
+### Added — `set_presence`: flip the dot without touching status
+`set_status` can set presence too, but empty status text *clears* the
+status — so "go away but keep my current status" meant re-issuing the
+whole status with a hand-recomputed expiry (hit in real use: lunch
+status up, then wanting the grey dot). `set_presence` (`away` bool,
+default true; you-global like `set_status`) calls only
+`users.setPresence` and leaves the status alone. `set_status` keeps its
+combined AFK path; the two tools split cleanly — "change my status" vs
+"just flip the dot." Shares gating with `set_status` (user token,
+skipped under `SLACK_READ_ONLY`). ADR 042. 524 → 525 tests.
+
 ## [1.3.0] - 2026-07-09
 
 ### Added — `view_image`: see image attachments inline

@@ -60,3 +60,11 @@ func TestStatusErrorHint(t *testing.T) {
 		t.Fatalf("other errors pass through, got %q", got)
 	}
 }
+
+func TestRunSetPresence_UnknownWorkspaceIsError(t *testing.T) {
+	hub := twoWorkspaceHub(t)
+	res := hub.runSetPresence(context.Background(), "ghost", true)
+	if res == nil || !res.IsError {
+		t.Fatalf("unknown workspace should error, got %+v", res)
+	}
+}
