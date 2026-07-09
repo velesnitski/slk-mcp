@@ -267,8 +267,8 @@ func TestRunDeleteMessage_RequiresTarget(t *testing.T) {
 	hub := twoWorkspaceHub(t)
 	// Neither a permalink nor channel+ts → guidance error, no Slack call.
 	for _, c := range []struct{ channel, ts, link string }{
-		{"", "", ""},           // nothing
-		{"general", "", ""},    // channel but no ts, no permalink
+		{"", "", ""},             // nothing
+		{"general", "", ""},      // channel but no ts, no permalink
 		{"", "1700000000.1", ""}, // ts but no channel, no permalink
 	} {
 		res := hub.runDeleteMessage(context.Background(), "", c.channel, c.ts, c.link)

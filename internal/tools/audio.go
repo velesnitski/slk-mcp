@@ -47,6 +47,13 @@ func isAudioFile(f goslack.File) bool {
 	return strings.HasPrefix(f.Mimetype, "audio/")
 }
 
+// isImageFile reports whether a Slack attachment is an image
+// (image/png, image/jpeg, …). Used by view_image to filter a message's
+// attachments down to the pictures the caller wants to see.
+func isImageFile(f goslack.File) bool {
+	return strings.HasPrefix(f.Mimetype, "image/")
+}
+
 // isTranscribableFile widens isAudioFile to video: recorded huddles and
 // Slack clips arrive as video/mp4|webm, and ffmpeg extracts the audio
 // track with the same command that converts voice notes. Used by
@@ -95,7 +102,7 @@ func looksLikeHTML(path string) bool {
 	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
 }
 
-// confinedAudioPath builds the local temp path for a downloaded
+// confinedTempPath builds the local temp path for a downloaded
 // attachment and proves it stays inside destDir. Both untrusted inputs
 // — the Slack file ID and name — are run through sanitizeFilename so a
 // slash or ".." cannot survive into the joined path, and a final
@@ -103,8 +110,8 @@ func looksLikeHTML(path string) bool {
 // against any future format change: a write must never land outside the
 // intended directory. Mirrors the yt-mcp ADR-027 confinement pattern
 // after GHSA-99mq-fjjc-6v9j flagged caller-influenced paths as a class.
-func confinedAudioPath(destDir, fileID, fileName string) (string, error) {
-	base := fmt.Sprintf("slk-audio-%s-%s", sanitizeFilename(fileID), sanitizeFilename(fileName))
+func confinedTempPath(destDir, prefix, fileID, fileName string) (string, error) {
+	base := fmt.Sprintf("%s-%s-%s", prefix, sanitizeFilename(fileID), sanitizeFilename(fileName))
 	path := filepath.Join(destDir, base)
 	rel, err := filepath.Rel(destDir, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
@@ -113,21 +120,21 @@ func confinedAudioPath(destDir, fileID, fileName string) (string, error) {
 	return path, nil
 }
 
-// savedAudio describes one downloaded attachment for rendering.
-type savedAudio struct {
+// savedFile describes one downloaded attachment for rendering.
+type savedFile struct {
 	Path     string
 	Mimetype string
 	Size     int64
 }
 
-// downloadAudioFiles filters files down to the attachments accepted by
+// downloadFiles filters files down to the attachments accepted by
 // the caller's predicate and streams each into destDir. Factored free
 // of the Hub (taking the MessageClient contract) so tests exercise the
 // filter/IO loop with a fake client and a t.TempDir(). Rejected files
 // are reported in skipped, not treated as errors — a voice note often
 // travels with an image preview and the caller only cares about the
 // sound.
-func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack.File, destDir string, accept func(goslack.File) bool) (saved []savedAudio, skipped []string, err error) {
+func downloadFiles(ctx context.Context, msgs MessageClient, files []goslack.File, destDir, prefix string, accept func(goslack.File) bool) (saved []savedFile, skipped []string, err error) {
 	for _, f := range files {
 		if !accept(f) {
 			skipped = append(skipped, fmt.Sprintf("%s (%s)", f.Name, f.Mimetype))
@@ -141,7 +148,7 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 			skipped = append(skipped, f.Name+" (no private URL)")
 			continue
 		}
-		path, perr := confinedAudioPath(destDir, f.ID, f.Name)
+		path, perr := confinedTempPath(destDir, prefix, f.ID, f.Name)
 		if perr != nil {
 			return nil, skipped, perr
 		}
@@ -165,18 +172,18 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 		if info, serr := os.Stat(path); serr == nil {
 			size = info.Size()
 		}
-		saved = append(saved, savedAudio{Path: path, Mimetype: f.Mimetype, Size: size})
+		saved = append(saved, savedFile{Path: path, Mimetype: f.Mimetype, Size: size})
 	}
 	return saved, skipped, nil
 }
 
-// fetchAudioFiles is the shared front half of download_audio and
+// fetchFiles is the shared front half of download_audio and
 // transcribe_audio: resolve the workspace and target message (permalink
 // wins the usual way: explicit args override, permalink fills gaps),
 // then download the attachments matched by accept into destDir. On
 // failure the returned *mcp.CallToolResult is non-nil and ready to
 // hand back.
-func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir string, accept func(goslack.File) bool) (saved []savedAudio, skipped []string, wsName string, errRes *mcp.CallToolResult) {
+func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir, prefix string, accept func(goslack.File) bool) (saved []savedFile, skipped []string, wsName string, errRes *mcp.CallToolResult) {
 	scoped, wsName, errRes := h.scopedWorkspace(workspace)
 	if errRes != nil {
 		return nil, nil, "", errRes
@@ -202,7 +209,7 @@ func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp
 	if destDir == "" {
 		destDir = os.TempDir()
 	}
-	saved, skipped, err = downloadAudioFiles(ctx, scoped.Messages(), msg.Files, destDir, accept)
+	saved, skipped, err = downloadFiles(ctx, scoped.Messages(), msg.Files, destDir, prefix, accept)
 	if err != nil {
 		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
@@ -216,7 +223,7 @@ func (h *Hub) fetchAudioFiles(ctx context.Context, workspace, channel, timestamp
 // their local paths. destDir overrides os.TempDir() in tests; the tool
 // handler passes "".
 func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir, isAudioFile)
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, destDir, "slk-audio", isAudioFile)
 	if errRes != nil {
 		return errRes
 	}

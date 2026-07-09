@@ -31,12 +31,12 @@ func filterUnjoined(channels []goslack.Channel, unjoinedOnly bool) []goslack.Cha
 
 // renderChannelLine formats one entry of the list_channels output.
 // Layout: `- #name[🔒] (member_count) [NOT JOINED] context`
-// - 🔒 appears for private channels (a member-audit signal: which
-//   private rooms are you in vs not).
-// - [NOT JOINED] appears only when IsMember is false. Joined channels
-//   stay quiet — the marker is loud-on-anomaly, silent-on-common-case.
-// - Context falls back from topic → purpose so a channel with no
-//   topic but a real purpose still carries a description.
+//   - 🔒 appears for private channels (a member-audit signal: which
+//     private rooms are you in vs not).
+//   - [NOT JOINED] appears only when IsMember is false. Joined channels
+//     stay quiet — the marker is loud-on-anomaly, silent-on-common-case.
+//   - Context falls back from topic → purpose so a channel with no
+//     topic but a real purpose still carries a description.
 func renderChannelLine(ch goslack.Channel) string {
 	var b strings.Builder
 	b.WriteString("- #")

@@ -248,6 +248,7 @@ func (h *Hub) Status() StatusClient    { return h.client.Status }
 // config (read-only, disabled list, user-token availability).
 func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerAudioTools(s)
+	h.registerImageTools(s)
 	h.registerChannelTools(s)
 	h.registerDigestTools(s)
 	h.registerListTools(s)

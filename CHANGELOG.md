@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-07-09
+
+### Added — `view_image`: see image attachments inline
+The visual counterpart of `transcribe_audio`. Fetches a message's
+`image/*` attachments (screenshots, photos, business cards) with the
+server's token and returns them as **inline MCP image content** so the
+model sees them directly — a follow-up to the `[🖼 …]` markers digests
+already surface. Oversized images (> 6 MB) fall back to a local file
+path instead of inlining; under the cap the temp file is removed once
+its bytes are in the response. The result leads with a text summary
+(count, sizes, skipped non-images) so it reads sensibly even before the
+images render. Internally, the audio download plumbing was generalised
+(`fetchFiles` / `downloadFiles` / `confinedTempPath` + a temp-filename
+`prefix`) — audio filenames stay byte-identical. ADR 041.
+520 → 524 tests.
+
 ## [1.2.1] - 2026-07-09
 
 ### Security (hardening) — confine `download_audio` write paths

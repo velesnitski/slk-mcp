@@ -206,7 +206,7 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 // can still proceed by hand. Successfully transcribed audio files are
 // removed — the transcript is the artifact that matters.
 func (h *Hub) runTranscribeAudio(ctx context.Context, workspace, channel, timestamp, permalink, language, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchAudioFiles(ctx, workspace, channel, timestamp, permalink, destDir, isTranscribableFile)
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, destDir, "slk-audio", isTranscribableFile)
 	if errRes != nil {
 		return errRes
 	}
