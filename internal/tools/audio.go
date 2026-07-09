@@ -95,6 +95,24 @@ func looksLikeHTML(path string) bool {
 	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
 }
 
+// confinedAudioPath builds the local temp path for a downloaded
+// attachment and proves it stays inside destDir. Both untrusted inputs
+// — the Slack file ID and name — are run through sanitizeFilename so a
+// slash or ".." cannot survive into the joined path, and a final
+// containment check (filepath.Rel must not escape) is defence-in-depth
+// against any future format change: a write must never land outside the
+// intended directory. Mirrors the yt-mcp ADR-027 confinement pattern
+// after GHSA-99mq-fjjc-6v9j flagged caller-influenced paths as a class.
+func confinedAudioPath(destDir, fileID, fileName string) (string, error) {
+	base := fmt.Sprintf("slk-audio-%s-%s", sanitizeFilename(fileID), sanitizeFilename(fileName))
+	path := filepath.Join(destDir, base)
+	rel, err := filepath.Rel(destDir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("refusing to write outside the temp dir: %q", base)
+	}
+	return path, nil
+}
+
 // savedAudio describes one downloaded attachment for rendering.
 type savedAudio struct {
 	Path     string
@@ -123,7 +141,10 @@ func downloadAudioFiles(ctx context.Context, msgs MessageClient, files []goslack
 			skipped = append(skipped, f.Name+" (no private URL)")
 			continue
 		}
-		path := filepath.Join(destDir, fmt.Sprintf("slk-audio-%s-%s", f.ID, sanitizeFilename(f.Name)))
+		path, perr := confinedAudioPath(destDir, f.ID, f.Name)
+		if perr != nil {
+			return nil, skipped, perr
+		}
 		out, cerr := os.Create(path)
 		if cerr != nil {
 			return nil, skipped, fmt.Errorf("create %s: %w", path, cerr)

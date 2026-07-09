@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-07-09
+
+### Security (hardening) — confine `download_audio` write paths
+Audit prompted by a sibling repo's path-traversal advisory
+(yt-mcp GHSA-99mq-fjjc-6v9j). No exploitable equivalent here — the
+download source is a Slack-resolved file object, not a caller URL, and
+no tool reads-and-exfiltrates a local file. Closed one theoretical gap:
+the temp write path sanitized the file name but interpolated the Slack
+file ID raw. `confinedAudioPath` now sanitizes BOTH inputs and asserts
+the result stays inside `os.TempDir()` (a `filepath.Rel` escape check),
+so a write can never land outside the temp dir regardless of Slack's ID
+format. Defence-in-depth, byte-identical filenames for real files, no
+API change. ADR 040. 519 → 520 tests.
+
 ## [1.2.0] - 2026-07-08
 
 ### Added — `set_status`: custom status + presence (AFK)

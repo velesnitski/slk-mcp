@@ -98,6 +98,35 @@ func TestDownloadAudioFiles_AcceptControlsVideo(t *testing.T) {
 	}
 }
 
+func TestConfinedAudioPath_staysInsideDestDir(t *testing.T) {
+	dir := "/tmp/scratch"
+
+	// Normal case: one component under destDir.
+	got, err := confinedAudioPath(dir, "F123", "clip.m4a")
+	if err != nil || got != filepath.Join(dir, "slk-audio-F123-clip.m4a") {
+		t.Fatalf("normal path: got %q err=%v", got, err)
+	}
+
+	// Hostile file ID and name: slashes/dots must not survive into a
+	// traversal — both are sanitized to a single safe component.
+	for _, tc := range []struct{ id, name string }{
+		{"../../etc", "passwd"},
+		{"F1", "../../../etc/passwd"},
+		{"..", ".."},
+		{"/abs/id", "/abs/name"},
+	} {
+		got, err := confinedAudioPath(dir, tc.id, tc.name)
+		if err != nil {
+			// A refusal is an acceptable outcome; the key invariant is
+			// that we never return a path outside dir.
+			continue
+		}
+		if rel, _ := filepath.Rel(dir, got); strings.HasPrefix(rel, "..") {
+			t.Fatalf("confinedAudioPath(%q,%q) escaped destDir: %q (rel %q)", tc.id, tc.name, got, rel)
+		}
+	}
+}
+
 func TestSanitizeFilename(t *testing.T) {
 	cases := map[string]string{
 		"audio clip 2026.m4a": "audio_clip_2026.m4a",
