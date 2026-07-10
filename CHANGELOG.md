@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-07-10
+
+### Changed — `analyze_audio_tone` pitch is now native Go (no aubio)
+The optional aubio pitch path (ADR 043) turned out to pull ~1–2 GB of
+Homebrew deps (the GCC toolchain + openblas + numpy) for one number.
+Replaced with an in-process **YIN** f0 estimator over the PCM ffmpeg
+already decodes — zero new system dependencies, and pitch is no longer
+optional: it works wherever ffmpeg does. Reports mean f0, variability
+(std — a second arousal signal), and voiced fraction. YIN is unit-tested
+against synthetic tones (recovers 90/150/220/330 Hz within 2 Hz).
+ADR 044. 532 → 535 tests.
+
 ## [1.5.0] - 2026-07-10
 
 ### Added — `analyze_audio_tone`: is the voice message calm or shouting?

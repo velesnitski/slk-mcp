@@ -130,7 +130,7 @@ Or via config file (`~/.claude.json`):
 | `download_audio` | Download audio attachments (voice messages) to local temp files for transcription |
 | `view_image` | Fetch image attachments (screenshots, photos, cards) and return them inline so the model can see them |
 | `transcribe_audio` | Voice message, audio/video clip, or recorded huddle → text via a local whisper.cpp install; degrades to `download_audio` behaviour when the toolchain is missing |
-| `analyze_audio_tone` | Vocal tone of a voice message — loudness range (LRA) + optional pitch — to gauge calm vs agitated/shouting; needs ffmpeg (aubio adds pitch) |
+| `analyze_audio_tone` | Vocal tone of a voice message — loudness range (LRA) + native pitch (f0 mean/variability) — to gauge calm vs agitated/shouting; needs only ffmpeg |
 
 ### With user token (`SLACK_USER_TOKEN`)
 

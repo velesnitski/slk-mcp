@@ -14,13 +14,28 @@ import (
 )
 
 // analyze_audio_tone measures the PROSODY of a voice message — loudness
-// dynamics and (when aubio is present) pitch — to estimate vocal arousal
-// (calm/controlled vs agitated/shouting) that a transcript cannot
-// capture. It orchestrates ffmpeg (required) and aubiopitch (optional),
-// both host-provided, and degrades to a plain download when ffmpeg is
-// missing. The metrics chosen survive the auto-normalization phone voice
-// notes apply: absolute loudness is meaningless after normalization, but
-// the RELATIVE spread (EBU R128 loudness range) and pitch do not lie.
+// dynamics and pitch — to estimate vocal arousal (calm/controlled vs
+// agitated/shouting) that a transcript cannot capture. It orchestrates
+// ffmpeg (required, already host-provided for transcribe_audio) and
+// nothing else: pitch (f0) is computed natively in Go via YIN over the
+// PCM ffmpeg decodes, so there is ZERO extra system dependency (no
+// aubio → no gcc/openblas/numpy toolchain). The metrics chosen survive
+// the auto-normalization phone voice notes apply: absolute loudness is
+// meaningless after normalization, but the RELATIVE loudness spread
+// (EBU R128 loudness range) and pitch do not lie.
+
+// Pitch estimation config. Human speech f0 sits ~70–400 Hz; framing at
+// 1024/512 (window/hop) resolves that range at 16 kHz while keeping the
+// per-frame YIN cost small.
+const (
+	pitchSampleRate = 16000
+	pitchFmin       = 70.0
+	pitchFmax       = 400.0
+	pitchWindow     = 1024
+	pitchHop        = 512
+	yinThreshold    = 0.15
+	pitchRMSGate    = 0.01 // skip near-silent frames
+)
 
 // toneMetrics is the parsed acoustic summary for one clip.
 type toneMetrics struct {
@@ -30,6 +45,8 @@ type toneMetrics struct {
 	RMSLevelDB     float64
 	PeakLevelDB    float64
 	PitchMeanHz    float64
+	PitchStdHz     float64 // f0 variability — a second arousal signal
+	PitchVoiced    float64 // fraction of frames with a confident pitch
 	PitchHasData   bool
 }
 
@@ -43,9 +60,9 @@ func (m toneMetrics) CrestDB() float64 {
 }
 
 // lraLabel maps the loudness range to a plain-language arousal band. The
-// bands come from observed speech: a controlled delivery clusters low
-// (a steady voice barely varies its loudness), an animated or shouting
-// one swings wide.
+// bands come from observed speech: a controlled delivery clusters low (a
+// steady voice barely varies its loudness), an animated or shouting one
+// swings wide.
 func lraLabel(lra float64) string {
 	switch {
 	case lra < 4:
@@ -59,9 +76,9 @@ func lraLabel(lra float64) string {
 	}
 }
 
-// ffmpeg stderr / aubio stdout parsers. ebur128 and astats print their
-// figures repeatedly (per-frame) then in a final summary; taking the
-// LAST match lands on the summary value.
+// ffmpeg stderr parsers. ebur128 and astats print their figures
+// repeatedly (per-frame) then in a final summary; taking the LAST match
+// lands on the summary value.
 var (
 	reLRA        = regexp.MustCompile(`LRA:\s*(-?\d+(?:\.\d+)?)\s*LU`)
 	reIntegrated = regexp.MustCompile(`\bI:\s*(-?\d+(?:\.\d+)?)\s*LUFS`)
@@ -84,7 +101,7 @@ func lastFloat(re *regexp.Regexp, s string) (float64, bool) {
 	return v, true
 }
 
-// parseToneStderr pulls the acoustic metrics out of the combined
+// parseToneStderr pulls the loudness metrics out of the combined
 // astats+ebur128 ffmpeg stderr. Missing fields stay at their zero value;
 // the renderer omits anything that didn't parse rather than lying.
 func parseToneStderr(stderr string) toneMetrics {
@@ -107,28 +124,133 @@ func parseToneStderr(stderr string) toneMetrics {
 	return m
 }
 
-// parseAubioPitch averages the non-zero pitch estimates from aubiopitch
-// stdout ("<time> <freqHz>" per line). Unvoiced frames read 0 and are
-// dropped so silence/consonants don't drag the mean down.
-func parseAubioPitch(stdout string) (float64, bool) {
-	var sum float64
-	var n int
-	for _, line := range strings.Split(stdout, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 {
-			continue
-		}
-		hz, err := strconv.ParseFloat(f[1], 64)
-		if err != nil || hz <= 0 {
-			continue
-		}
-		sum += hz
-		n++
+// pcmFromInt16LE turns raw signed-16-bit little-endian mono PCM bytes
+// into normalized [-1,1) float samples.
+func pcmFromInt16LE(b []byte) []float64 {
+	n := len(b) / 2
+	s := make([]float64, n)
+	for i := 0; i < n; i++ {
+		v := int16(uint16(b[2*i]) | uint16(b[2*i+1])<<8)
+		s[i] = float64(v) / 32768.0
 	}
-	if n == 0 {
+	return s
+}
+
+// frameRMS is the root-mean-square amplitude of a frame — the voicing/
+// energy gate that keeps silence and breaths out of the pitch average.
+func frameRMS(x []float64) float64 {
+	var sum float64
+	for _, v := range x {
+		sum += v * v
+	}
+	return math.Sqrt(sum / float64(len(x)))
+}
+
+// parabolicMin refines the integer minimum at tau to sub-sample accuracy
+// by fitting a parabola through its neighbours — YIN's standard step 5.
+func parabolicMin(c []float64, tau int) float64 {
+	if tau <= 0 || tau >= len(c)-1 {
+		return float64(tau)
+	}
+	s0, s1, s2 := c[tau-1], c[tau], c[tau+1]
+	denom := s0 - 2*s1 + s2
+	if denom == 0 {
+		return float64(tau)
+	}
+	return float64(tau) + 0.5*(s0-s2)/denom
+}
+
+// yinF0 estimates the fundamental frequency of one frame with the YIN
+// cumulative-mean-normalized difference (de Cheveigné & Kawahara 2002).
+// Returns (f0Hz, true) on a confident pitch inside [fmin,fmax], else
+// (0,false) — the voicing decision is the threshold: no dip below it
+// means no periodicity, i.e. unvoiced.
+func yinF0(x []float64, sampleRate int, fmin, fmax, threshold float64) (float64, bool) {
+	tauMin := int(float64(sampleRate) / fmax)
+	tauMax := int(float64(sampleRate) / fmin)
+	if tauMax >= len(x) {
+		tauMax = len(x) - 1
+	}
+	if tauMin < 1 {
+		tauMin = 1
+	}
+	if tauMax <= tauMin {
 		return 0, false
 	}
-	return sum / float64(n), true
+
+	// Difference function d(tau).
+	d := make([]float64, tauMax+1)
+	for tau := 1; tau <= tauMax; tau++ {
+		var sum float64
+		for j := 0; j+tau < len(x); j++ {
+			diff := x[j] - x[j+tau]
+			sum += diff * diff
+		}
+		d[tau] = sum
+	}
+
+	// Cumulative mean normalized difference d'(tau).
+	cmnd := make([]float64, tauMax+1)
+	cmnd[0] = 1
+	var run float64
+	for tau := 1; tau <= tauMax; tau++ {
+		run += d[tau]
+		if run == 0 {
+			cmnd[tau] = 1
+		} else {
+			cmnd[tau] = d[tau] * float64(tau) / run
+		}
+	}
+
+	// Absolute threshold: first tau below it (in range), stepped to the
+	// local minimum, then parabolically refined.
+	for tau := tauMin; tau <= tauMax; tau++ {
+		if cmnd[tau] < threshold {
+			for tau+1 <= tauMax && cmnd[tau+1] < cmnd[tau] {
+				tau++
+			}
+			f0 := float64(sampleRate) / parabolicMin(cmnd, tau)
+			if f0 >= fmin && f0 <= fmax {
+				return f0, true
+			}
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+// estimatePitch runs YIN over overlapping frames and aggregates the
+// voiced ones into mean f0, its standard deviation (variability — an
+// arousal signal: agitated speech moves its pitch more), and the voiced
+// fraction. ok is false when nothing voiced was found.
+func estimatePitch(samples []float64, sampleRate int) (mean, std, voicedFrac float64, ok bool) {
+	if len(samples) < pitchWindow {
+		return 0, 0, 0, false
+	}
+	var f0s []float64
+	frames := 0
+	for start := 0; start+pitchWindow <= len(samples); start += pitchHop {
+		frame := samples[start : start+pitchWindow]
+		frames++
+		if frameRMS(frame) < pitchRMSGate {
+			continue
+		}
+		if f0, voiced := yinF0(frame, sampleRate, pitchFmin, pitchFmax, yinThreshold); voiced {
+			f0s = append(f0s, f0)
+		}
+	}
+	if len(f0s) == 0 || frames == 0 {
+		return 0, 0, 0, false
+	}
+	for _, v := range f0s {
+		mean += v
+	}
+	mean /= float64(len(f0s))
+	for _, v := range f0s {
+		std += (v - mean) * (v - mean)
+	}
+	std = math.Sqrt(std / float64(len(f0s)))
+	return mean, std, float64(len(f0s)) / float64(frames), true
 }
 
 func (h *Hub) registerToneTools(s *server.MCPServer) {
@@ -137,7 +259,7 @@ func (h *Hub) registerToneTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("analyze_audio_tone",
-			mcp.WithDescription("Estimate the VOCAL TONE of a Slack voice message — loudness dynamics (EBU R128 loudness range) and, when aubio is installed, pitch — to gauge whether the speaker is calm/controlled or agitated/shouting, which a transcript can't tell you. Requires ffmpeg; aubio (aubiopitch) adds pitch. Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Estimate the VOCAL TONE of a Slack voice message — loudness dynamics (EBU R128 loudness range) and pitch (native f0, mean + variability) — to gauge whether the speaker is calm/controlled or agitated/shouting, which a transcript can't tell you. Needs only ffmpeg (pitch is computed in-process, no extra install). Pass a permalink, or channel + timestamp."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
@@ -154,9 +276,9 @@ func (h *Hub) registerToneTools(s *server.MCPServer) {
 	)
 }
 
-// analyzeTone runs the ffmpeg (+ optional aubio) acoustic pass over one
-// audio file. ffmpegBin is required; aubioBin empty disables pitch.
-func analyzeTone(ctx context.Context, ffmpegBin, aubioBin, path string) (toneMetrics, error) {
+// analyzeTone runs the ffmpeg loudness pass and the native pitch pass
+// over one audio file. ffmpegBin is required.
+func analyzeTone(ctx context.Context, ffmpegBin, path string) (toneMetrics, error) {
 	_, stderr, err := runCommand(ctx, ffmpegBin, "-hide_banner", "-nostats", "-i", path,
 		"-af", "astats=metadata=1,ebur128", "-f", "null", "-")
 	if err != nil {
@@ -164,17 +286,13 @@ func analyzeTone(ctx context.Context, ffmpegBin, aubioBin, path string) (toneMet
 	}
 	m := parseToneStderr(string(stderr))
 
-	if aubioBin != "" {
-		wav := path + ".tone.wav"
-		if _, se, cerr := runCommand(ctx, ffmpegBin, "-y", "-loglevel", "error", "-i", path, "-ar", "16000", "-ac", "1", wav); cerr == nil {
-			if so, _, aerr := runCommand(ctx, aubioBin, "-i", wav); aerr == nil {
-				if hz, ok := parseAubioPitch(string(so)); ok {
-					m.PitchMeanHz, m.PitchHasData = hz, true
-				}
-			}
-			os.Remove(wav)
-		} else {
-			_ = se // pitch is best-effort; ffmpeg already succeeded above
+	// Native pitch: decode to raw mono PCM, then YIN in-process — no
+	// external pitch binary. A decode failure only drops pitch; the
+	// loudness read above already succeeded.
+	if pcm, _, perr := runCommand(ctx, ffmpegBin, "-loglevel", "error", "-i", path,
+		"-ac", "1", "-ar", strconv.Itoa(pitchSampleRate), "-f", "s16le", "-"); perr == nil {
+		if mean, std, voiced, ok := estimatePitch(pcmFromInt16LE(pcm), pitchSampleRate); ok {
+			m.PitchMeanHz, m.PitchStdHz, m.PitchVoiced, m.PitchHasData = mean, std, voiced, true
 		}
 	}
 	return m, nil
@@ -203,11 +321,10 @@ func (h *Hub) runAnalyzeTone(ctx context.Context, workspace, channel, timestamp,
 		}
 		return mcp.NewToolResultText(b.String())
 	}
-	aubioPath, _ := lookPath("aubiopitch") // optional; empty disables pitch
 
 	var b strings.Builder
 	for i, sf := range saved {
-		m, aerr := analyzeTone(ctx, ffPath, aubioPath, sf.Path)
+		m, aerr := analyzeTone(ctx, ffPath, sf.Path)
 		os.Remove(sf.Path)
 		if aerr != nil {
 			fmt.Fprintf(&b, "## %s%s — analysis failed: %v\n", fileBase(sf.Path), h.wsLabel(wsName), aerr)
@@ -222,12 +339,13 @@ func (h *Hub) runAnalyzeTone(ctx context.Context, workspace, channel, timestamp,
 		fmt.Fprintf(&b, "- crest factor: %.1f dB (peaks over average)\n", m.CrestDB())
 		fmt.Fprintf(&b, "- integrated loudness: %.1f LUFS; RMS %.1f dB; peak %.1f dB\n", m.IntegratedLUFS, m.RMSLevelDB, m.PeakLevelDB)
 		if m.PitchHasData {
-			fmt.Fprintf(&b, "- mean pitch: %.0f Hz\n", m.PitchMeanHz)
+			fmt.Fprintf(&b, "- pitch (f0): mean %.0f Hz, variability ±%.0f Hz (voiced %.0f%%)\n",
+				m.PitchMeanHz, m.PitchStdHz, m.PitchVoiced*100)
 		} else {
-			b.WriteString("- pitch: unavailable (install aubio — brew install aubio — for f0)\n")
+			b.WriteString("- pitch (f0): no voiced frames detected\n")
 		}
 	}
-	b.WriteString("\nnote: proxy, not an emotion model. Phone voice notes are auto-normalized, so absolute loudness is unreliable — read LRA (spread) and pitch, not the dB level. High LRA + high/variable pitch = agitated; low LRA + steady pitch = controlled.")
+	b.WriteString("\nnote: proxy, not an emotion model. Phone voice notes are auto-normalized, so absolute loudness is unreliable — read LRA (loudness spread) and pitch, not the dB level. Low LRA + steady pitch = controlled; high LRA + high pitch variability = agitated/shouting.")
 	if len(skipped) > 0 {
 		fmt.Fprintf(&b, "\nskipped non-audio: %s", strings.Join(skipped, ", "))
 	}
