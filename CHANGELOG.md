@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-07-10
+
+### Added — `analyze_audio_tone`: is the voice message calm or shouting?
+`transcribe_audio` gives words, not delivery. `analyze_audio_tone`
+measures vocal prosody so you can tell an even, controlled voice from an
+agitated/shouting one — a signal a transcript can't carry. One ffmpeg
+`astats,ebur128` pass yields the crest factor and the EBU R128 loudness
+range (LRA); optional `aubiopitch` adds mean f0. The metric choice
+matters: phone voice notes auto-normalize, so absolute loudness is
+meaningless — LRA (loudness *spread*) and pitch survive normalization, so
+those drive the read (low LRA + steady pitch = controlled; high LRA +
+variable pitch = agitated). Reuses the download plumbing; ffmpeg-only
+(independent of whisper), degrades to download when ffmpeg is missing;
+ships the "proxy, not an emotion model" caveat in every result. ADR 043.
+525 → 532 tests.
+
 ## [1.4.0] - 2026-07-09
 
 ### Added — `set_presence`: flip the dot without touching status

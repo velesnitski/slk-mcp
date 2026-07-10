@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-21-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-22-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -130,6 +130,7 @@ Or via config file (`~/.claude.json`):
 | `download_audio` | Download audio attachments (voice messages) to local temp files for transcription |
 | `view_image` | Fetch image attachments (screenshots, photos, cards) and return them inline so the model can see them |
 | `transcribe_audio` | Voice message, audio/video clip, or recorded huddle → text via a local whisper.cpp install; degrades to `download_audio` behaviour when the toolchain is missing |
+| `analyze_audio_tone` | Vocal tone of a voice message — loudness range (LRA) + optional pitch — to gauge calm vs agitated/shouting; needs ffmpeg (aubio adds pitch) |
 
 ### With user token (`SLACK_USER_TOKEN`)
 
