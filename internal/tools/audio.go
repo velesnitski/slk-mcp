@@ -24,10 +24,11 @@ func (h *Hub) registerAudioTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("download_audio",
-			mcp.WithDescription("Download audio attachments (voice messages) from a Slack message into local temp files for transcription. Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Download audio attachments (voice messages) from a Slack message into local temp files for transcription. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest voice note."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
-			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
+			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
+			mcp.WithString("from", mcp.Description("Restrict latest-mode to one author: a @handle, or \"me\" for your own last voice note. Ignored when a permalink/timestamp is given.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -36,6 +37,7 @@ func (h *Hub) registerAudioTools(s *server.MCPServer) {
 				req.GetString("channel", ""),
 				req.GetString("timestamp", ""),
 				req.GetString("permalink", ""),
+				req.GetString("from", ""),
 				""), nil
 		},
 	)
@@ -184,7 +186,7 @@ func downloadFiles(ctx context.Context, msgs MessageClient, files []goslack.File
 // then download the attachments matched by accept into destDir. On
 // failure the returned *mcp.CallToolResult is non-nil and ready to
 // hand back.
-func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, permalink, destDir, prefix string, accept func(goslack.File) bool) (saved []savedFile, skipped []string, wsName string, errRes *mcp.CallToolResult) {
+func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, permalink, from, destDir, prefix string, accept func(goslack.File) bool) (saved []savedFile, skipped []string, wsName string, errRes *mcp.CallToolResult) {
 	scoped, wsName, errRes := h.scopedWorkspace(workspace)
 	if errRes != nil {
 		return nil, nil, "", errRes
@@ -204,14 +206,27 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 		if ferr != nil {
 			return nil, nil, "", mcp.NewToolResultError(ferr.Error())
 		}
-		saved, skipped, err := downloadFiles(ctx, scoped.Messages(), []goslack.File{f}, destDir, prefix, accept)
-		if err != nil {
-			return nil, nil, "", mcp.NewToolResultError(err.Error())
+		return finishFetch(ctx, scoped, []goslack.File{f}, destDir, prefix, accept, wsName)
+	}
+
+	// Latest-mode: channel alone (no permalink, no ts) means "the newest
+	// matching attachment in this conversation" — the "read my last voice
+	// note in this DM" path, with no ts to hunt for. `from` restricts by
+	// author (a handle, or "me").
+	if strings.TrimSpace(permalink) == "" && strings.TrimSpace(timestamp) == "" && strings.TrimSpace(channel) != "" {
+		channelID, cerr := h.resolveConversation(ctx, scoped, channel)
+		if cerr != nil {
+			return nil, nil, "", mcp.NewToolResultError(cerr.Error())
 		}
-		if len(saved) == 0 {
-			return nil, nil, "", mcp.NewToolResultError("the linked file is not the expected type; got: " + strings.Join(skipped, ", "))
+		fromID, ferr := h.resolveAuthor(ctx, scoped, from)
+		if ferr != nil {
+			return nil, nil, "", mcp.NewToolResultError(ferr.Error())
 		}
-		return saved, skipped, wsName, nil
+		msg, merr := scoped.Messages().LatestFileMessage(ctx, channelID, accept, fromID)
+		if merr != nil {
+			return nil, nil, "", mcp.NewToolResultError(merr.Error())
+		}
+		return finishFetch(ctx, scoped, msg.Files, destDir, prefix, accept, wsName)
 	}
 
 	channel, timestamp, errRes = resolveMessageRef(permalink, channel, timestamp, false)
@@ -230,25 +245,63 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	if len(msg.Files) == 0 {
 		return nil, nil, "", mcp.NewToolResultError("message has no file attachments")
 	}
+	return finishFetch(ctx, scoped, msg.Files, destDir, prefix, accept, wsName)
+}
 
-	if destDir == "" {
-		destDir = os.TempDir()
-	}
-	saved, skipped, err = downloadFiles(ctx, scoped.Messages(), msg.Files, destDir, prefix, accept)
+// finishFetch downloads the matched attachments and shapes the shared
+// (saved, skipped, wsName, err) return, so every resolution path
+// (file URL, latest-mode, message) ends the same way.
+func finishFetch(ctx context.Context, scoped *Hub, files []goslack.File, destDir, prefix string, accept func(goslack.File) bool, wsName string) ([]savedFile, []string, string, *mcp.CallToolResult) {
+	saved, skipped, err := downloadFiles(ctx, scoped.Messages(), files, destDir, prefix, accept)
 	if err != nil {
 		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
 	if len(saved) == 0 {
-		return nil, nil, "", mcp.NewToolResultError("no matching audio/video attachments on this message; files present: " + strings.Join(skipped, ", "))
+		return nil, nil, "", mcp.NewToolResultError("no matching attachment; files present: " + strings.Join(skipped, ", "))
 	}
 	return saved, skipped, wsName, nil
+}
+
+// resolveConversation turns a channel reference into a conversation ID.
+// A leading '@' means a DM: resolve the handle to a user and open the
+// DM. Otherwise defer to ResolveID (which already handles #names and
+// canonical C/G/D IDs).
+func (h *Hub) resolveConversation(ctx context.Context, scoped *Hub, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "@") {
+		uid, err := scoped.Users().IDForHandle(ctx, ref)
+		if err != nil {
+			return "", err
+		}
+		return scoped.Channels().OpenDM(ctx, uid)
+	}
+	return scoped.Channels().ResolveID(ctx, ref)
+}
+
+// resolveAuthor turns the `from` filter into a user ID. Empty = no
+// filter. "me" = the authenticated user (needs a user token). Anything
+// else is treated as a handle.
+func (h *Hub) resolveAuthor(ctx context.Context, scoped *Hub, from string) (string, error) {
+	from = strings.TrimSpace(from)
+	switch {
+	case from == "":
+		return "", nil
+	case strings.EqualFold(from, "me"):
+		self, err := scoped.Unread().Self(ctx)
+		if err != nil || self == "" {
+			return "", fmt.Errorf("cannot resolve from=me: %v (needs a user token)", err)
+		}
+		return self, nil
+	default:
+		return scoped.Users().IDForHandle(ctx, from)
+	}
 }
 
 // runDownloadAudio downloads a message's audio attachments and reports
 // their local paths. destDir overrides os.TempDir() in tests; the tool
 // handler passes "".
-func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, destDir, "slk-audio", isAudioFile)
+func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, from, destDir string) *mcp.CallToolResult {
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-audio", isAudioFile)
 	if errRes != nil {
 		return errRes
 	}

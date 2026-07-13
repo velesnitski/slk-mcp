@@ -92,6 +92,9 @@ func (f *fakeMessageClient) DownloadFile(ctx context.Context, downloadURL string
 func (f *fakeMessageClient) FileInfo(ctx context.Context, fileID string) (goslack.File, error) {
 	return goslack.File{}, errors.New("FileInfo not supported in fake")
 }
+func (f *fakeMessageClient) LatestFileMessage(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string) (*goslack.Message, error) {
+	return nil, errors.New("LatestFileMessage not supported in fake")
+}
 
 var _ MessageClient = (*fakeMessageClient)(nil)
 

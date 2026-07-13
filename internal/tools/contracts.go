@@ -28,6 +28,7 @@ type UserClient interface {
 	NamesFor(ctx context.Context, userIDs []string) map[string]string
 	Name(ctx context.Context, userID string) string
 	List(ctx context.Context) ([]goslack.User, error)
+	IDForHandle(ctx context.Context, handle string) (string, error)
 }
 
 // ChannelClient is the channel-resolution / introspection surface.
@@ -39,6 +40,7 @@ type ChannelClient interface {
 	Members(ctx context.Context, channelID string, limit int) ([]string, error)
 	Archive(ctx context.Context, channelID string) error
 	Unarchive(ctx context.Context, channelID string) error
+	OpenDM(ctx context.Context, userID string) (string, error)
 }
 
 // MessageClient covers reading channel history, fetching thread
@@ -53,6 +55,7 @@ type MessageClient interface {
 	MessageAt(ctx context.Context, channelID, ts string) (*goslack.Message, error)
 	DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error
 	FileInfo(ctx context.Context, fileID string) (goslack.File, error)
+	LatestFileMessage(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string) (*goslack.Message, error)
 }
 
 // SearchClient wraps search.messages. Separate from MessageClient

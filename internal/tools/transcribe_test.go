@@ -208,7 +208,7 @@ func TestSTTSetupHint_IsSelfContained(t *testing.T) {
 
 func TestRunTranscribeAudio_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runTranscribeAudio(context.Background(), "ghost", "#general", "1.1", "", "auto", "")
+	res := hub.runTranscribeAudio(context.Background(), "ghost", "#general", "1.1", "", "", "auto", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should error, got %+v", res)
 	}
@@ -216,7 +216,7 @@ func TestRunTranscribeAudio_UnknownWorkspaceIsError(t *testing.T) {
 
 func TestRunTranscribeAudio_MissingTargetIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runTranscribeAudio(context.Background(), "", "", "", "", "auto", "")
+	res := hub.runTranscribeAudio(context.Background(), "", "", "", "", "", "auto", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("missing target should error, got %+v", res)
 	}

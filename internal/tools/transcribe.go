@@ -181,10 +181,11 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("transcribe_audio",
-			mcp.WithDescription("Transcribe a Slack voice message, audio/video clip, or recorded huddle to text using a local whisper.cpp install (ffmpeg + whisper-cli + model; video files have their audio track extracted). When the toolchain is missing, returns the downloaded file path plus exact install commands — clients with shell access can run them (with user consent) and retry. Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Transcribe a Slack voice message, audio/video clip, or recorded huddle to text using a local whisper.cpp install (ffmpeg + whisper-cli + model; video files have their audio track extracted). When the toolchain is missing, returns the downloaded file path plus exact install commands — clients with shell access can run them (with user consent) and retry. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest voice note."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
-			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
+			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
+			mcp.WithString("from", mcp.Description("Restrict latest-mode to one author: a @handle, or \"me\" for your own last voice note. Ignored when a permalink/timestamp is given.")),
 			mcp.WithString("language", mcp.Description("Speech language as an ISO code (e.g. ru, en) or auto (default: auto)")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 		),
@@ -194,6 +195,7 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 				req.GetString("channel", ""),
 				req.GetString("timestamp", ""),
 				req.GetString("permalink", ""),
+				req.GetString("from", ""),
 				req.GetString("language", "auto"),
 				""), nil
 		},
@@ -205,8 +207,8 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 // the downloaded paths plus the missing-toolchain reason so the caller
 // can still proceed by hand. Successfully transcribed audio files are
 // removed — the transcript is the artifact that matters.
-func (h *Hub) runTranscribeAudio(ctx context.Context, workspace, channel, timestamp, permalink, language, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, destDir, "slk-audio", isTranscribableFile)
+func (h *Hub) runTranscribeAudio(ctx context.Context, workspace, channel, timestamp, permalink, from, language, destDir string) *mcp.CallToolResult {
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-audio", isTranscribableFile)
 	if errRes != nil {
 		return errRes
 	}

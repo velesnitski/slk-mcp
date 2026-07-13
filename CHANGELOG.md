@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-13
+
+### Added — read the newest attachment straight from a conversation
+`download_audio` / `transcribe_audio` / `view_image` /
+`analyze_audio_tone` could resolve an attachment from a message
+(permalink or channel+ts) or, since 1.6.0, a file URL — but the most
+common ask is "read my last voice note in this DM," where you have
+neither a ts nor a file link, only the conversation. `fetchFiles` gains a
+**latest-mode**: pass a `channel` with no `permalink` and no `timestamp`
+and it downloads the newest matching attachment in that conversation. A
+`@handle` channel opens the DM (`OpenDM` via `conversations.open`); a new
+`from` arg restricts by author — a `@handle`, or `"me"` for your own last
+voice note (needs a user token). Newest-first selection over a 60-message
+window (`LatestFileMessage`). One change, all four tools. The three
+resolution paths (file URL, latest-mode, message) converge on a single
+`finishFetch` tail. Selection and handle-matching extracted into pure,
+unit-tested helpers (`selectLatestFileMessage`, `matchHandle`). Purely
+additive — a `channel` + `timestamp` still hits the exact-message path.
+See ADR 046. 536 → 542 tests.
+
 ## [1.6.0] - 2026-07-13
 
 ### Added — audio/image tools accept Slack file URLs

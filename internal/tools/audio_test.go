@@ -48,6 +48,9 @@ func (f *fakeAudioClient) DownloadFile(ctx context.Context, downloadURL string, 
 func (f *fakeAudioClient) FileInfo(ctx context.Context, fileID string) (goslack.File, error) {
 	return goslack.File{}, errors.New("FileInfo not supported in fake")
 }
+func (f *fakeAudioClient) LatestFileMessage(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string) (*goslack.Message, error) {
+	return nil, errors.New("LatestFileMessage not supported in fake")
+}
 
 var _ MessageClient = (*fakeAudioClient)(nil)
 
@@ -242,7 +245,7 @@ func TestDownloadAudioFiles_downloadErrorCleansUp(t *testing.T) {
 
 func TestRunDownloadAudio_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runDownloadAudio(context.Background(), "ghost", "#general", "1.1", "", "")
+	res := hub.runDownloadAudio(context.Background(), "ghost", "#general", "1.1", "", "", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should error, got %+v", res)
 	}
@@ -250,7 +253,7 @@ func TestRunDownloadAudio_UnknownWorkspaceIsError(t *testing.T) {
 
 func TestRunDownloadAudio_MissingTargetIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runDownloadAudio(context.Background(), "", "", "", "", "")
+	res := hub.runDownloadAudio(context.Background(), "", "", "", "", "", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("missing channel+ts+permalink should error, got %+v", res)
 	}
@@ -258,7 +261,7 @@ func TestRunDownloadAudio_MissingTargetIsError(t *testing.T) {
 
 func TestRunDownloadAudio_BadPermalinkIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runDownloadAudio(context.Background(), "", "", "", "not a permalink", "")
+	res := hub.runDownloadAudio(context.Background(), "", "", "", "not a permalink", "", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("unparseable permalink should error, got %+v", res)
 	}

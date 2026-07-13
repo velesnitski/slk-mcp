@@ -30,10 +30,11 @@ func (h *Hub) registerImageTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("view_image",
-			mcp.WithDescription("Fetch image attachments (screenshots, photos, business cards) from a Slack message and return them inline so the model can see them. Downloaded with the server's own token (needs files:read). Oversized images fall back to a local file path instead of inlining. Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Fetch image attachments (screenshots, photos, business cards) from a Slack message and return them inline so the model can see them. Downloaded with the server's own token (needs files:read). Oversized images fall back to a local file path instead of inlining. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest image."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
-			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
+			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the image(s) (optional if permalink is provided)")),
+			mcp.WithString("from", mcp.Description("Restrict latest-mode to one author: a @handle, or \"me\" for your own last image. Ignored when a permalink/timestamp is given.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -42,6 +43,7 @@ func (h *Hub) registerImageTools(s *server.MCPServer) {
 				req.GetString("channel", ""),
 				req.GetString("timestamp", ""),
 				req.GetString("permalink", ""),
+				req.GetString("from", ""),
 				""), nil
 		},
 	)
@@ -54,8 +56,8 @@ func (h *Hub) registerImageTools(s *server.MCPServer) {
 // path so the caller can read it deliberately. A leading text block
 // summarises what was returned so the result is self-describing even
 // before the images render.
-func (h *Hub) runViewImage(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, destDir, "slk-image", isImageFile)
+func (h *Hub) runViewImage(ctx context.Context, workspace, channel, timestamp, permalink, from, destDir string) *mcp.CallToolResult {
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-image", isImageFile)
 	if errRes != nil {
 		return errRes
 	}

@@ -193,6 +193,22 @@ func (s *ChannelService) Unarchive(ctx context.Context, channelID string) error 
 	})
 }
 
+// OpenDM opens (or resumes) the direct-message conversation with a
+// single user and returns its channel ID (`D…`). Idempotent — Slack
+// returns the existing DM if one is already open.
+func (s *ChannelService) OpenDM(ctx context.Context, userID string) (string, error) {
+	ch, _, _, err := s.api.OpenConversationContext(ctx, &goslack.OpenConversationParameters{
+		Users: []string{userID},
+	})
+	if err != nil {
+		return "", fmt.Errorf("conversations.open: %w", err)
+	}
+	if ch == nil {
+		return "", fmt.Errorf("conversations.open: no channel returned for user %s", userID)
+	}
+	return ch.ID, nil
+}
+
 // IsChannelID reports whether a string looks like a public/private
 // *channel* ID (`C…` public, `G…` private). DMs (`D…`) are excluded —
 // this is the "could a caller have meant a channel by name?" check.

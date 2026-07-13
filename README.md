@@ -156,6 +156,11 @@ installed:
 # transcribe_audio { "permalink": "https://<workspace>.slack.com/archives/D.../p...", "language": "ru" }
 # → transcript text. Missing toolchain? The tool falls back to
 #   download_audio behaviour: local file path + a setup hint.
+#
+# No permalink and no ts? Point at the conversation and get its newest
+# voice note (latest-mode) — ideal for empty-text memos search can't find:
+# transcribe_audio { "channel": "@teammate", "from": "me", "language": "ru" }
+#   channel: a DM as @handle, or a #name / C·G·D id. from: @handle or "me".
 ```
 
 Optional overrides: `SLACK_FFMPEG_BIN`, `SLACK_WHISPER_BIN` (defaults:

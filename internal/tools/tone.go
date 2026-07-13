@@ -259,10 +259,11 @@ func (h *Hub) registerToneTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("analyze_audio_tone",
-			mcp.WithDescription("Estimate the VOCAL TONE of a Slack voice message — loudness dynamics (EBU R128 loudness range) and pitch (native f0, mean + variability) — to gauge whether the speaker is calm/controlled or agitated/shouting, which a transcript can't tell you. Needs only ffmpeg (pitch is computed in-process, no extra install). Pass a permalink, or channel + timestamp."),
+			mcp.WithDescription("Estimate the VOCAL TONE of a Slack voice message — loudness dynamics (EBU R128 loudness range) and pitch (native f0, mean + variability) — to gauge whether the speaker is calm/controlled or agitated/shouting, which a transcript can't tell you. Needs only ffmpeg (pitch is computed in-process, no extra install). Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest voice note."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
-			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
+			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
+			mcp.WithString("from", mcp.Description("Restrict latest-mode to one author: a @handle, or \"me\" for your own last voice note. Ignored when a permalink/timestamp is given.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -271,6 +272,7 @@ func (h *Hub) registerToneTools(s *server.MCPServer) {
 				req.GetString("channel", ""),
 				req.GetString("timestamp", ""),
 				req.GetString("permalink", ""),
+				req.GetString("from", ""),
 				""), nil
 		},
 	)
@@ -301,8 +303,8 @@ func analyzeTone(ctx context.Context, ffmpegBin, path string) (toneMetrics, erro
 // runAnalyzeTone downloads the message's audio and reports the acoustic
 // tone. When ffmpeg is missing it degrades to download-only (paths +
 // hint), mirroring transcribe_audio. Analysed files are cleaned up.
-func (h *Hub) runAnalyzeTone(ctx context.Context, workspace, channel, timestamp, permalink, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, destDir, "slk-tone", isTranscribableFile)
+func (h *Hub) runAnalyzeTone(ctx context.Context, workspace, channel, timestamp, permalink, from, destDir string) *mcp.CallToolResult {
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-tone", isTranscribableFile)
 	if errRes != nil {
 		return errRes
 	}

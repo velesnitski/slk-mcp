@@ -164,7 +164,7 @@ func TestAnalyzeTone_ffmpegFailure(t *testing.T) {
 
 func TestRunAnalyzeTone_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runAnalyzeTone(context.Background(), "ghost", "#c", "1.1", "", "")
+	res := hub.runAnalyzeTone(context.Background(), "ghost", "#c", "1.1", "", "", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should error, got %+v", res)
 	}

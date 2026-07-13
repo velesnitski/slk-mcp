@@ -32,7 +32,7 @@ func TestConfinedTempPath_prefixIsApplied(t *testing.T) {
 
 func TestRunViewImage_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runViewImage(context.Background(), "ghost", "#general", "1.1", "", "")
+	res := hub.runViewImage(context.Background(), "ghost", "#general", "1.1", "", "", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should error, got %+v", res)
 	}

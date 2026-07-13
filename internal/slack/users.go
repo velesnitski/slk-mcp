@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -84,6 +85,50 @@ func (s *UserService) List(ctx context.Context) ([]goslack.User, error) {
 		out = append(out, u)
 	}
 	return out, nil
+}
+
+// IDForHandle resolves a @handle (or bare username / display name) to a
+// user ID by scanning the workspace roster. The leading '@' is
+// optional. Matching is case-insensitive and tries, in order: exact
+// handle (Name), display name, then real name — the first exact match
+// wins. Returns an error naming the unresolved handle when nothing
+// matches, so the caller can surface it.
+func (s *UserService) IDForHandle(ctx context.Context, handle string) (string, error) {
+	if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(handle), "@")) == "" {
+		return "", fmt.Errorf("empty handle")
+	}
+	users, err := s.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	if id, ok := matchHandle(users, handle); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("no user matches handle %q", handle)
+}
+
+// matchHandle finds the user whose handle matches want (leading '@'
+// optional, case-insensitive). Exact username (Name) wins over display
+// name / real name, and username matches are preferred across the whole
+// roster before falling back — so a display-name collision can't shadow
+// the real @handle. Split out of IDForHandle for unit testing without a
+// live roster fetch. Returns ("", false) when nothing matches.
+func matchHandle(users []goslack.User, handle string) (string, bool) {
+	want := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
+	if want == "" {
+		return "", false
+	}
+	for _, u := range users {
+		if strings.ToLower(u.Name) == want {
+			return u.ID, true
+		}
+	}
+	for _, u := range users {
+		if strings.ToLower(u.Profile.DisplayName) == want || strings.ToLower(u.RealName) == want {
+			return u.ID, true
+		}
+	}
+	return "", false
 }
 
 // formatUserDisplay renders a user as "Real Name (handle)" so the

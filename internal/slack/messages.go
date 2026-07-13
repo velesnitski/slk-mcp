@@ -142,6 +142,43 @@ func (s *MessageService) MessageAt(ctx context.Context, channelID, ts string) (*
 	return nil, fmt.Errorf("no message found at ts %s", ts)
 }
 
+// LatestFileMessage returns the most recent message in channelID whose
+// attachments satisfy accept — the "grab my last voice note in this DM"
+// engine. History returns newest-first, so the first qualifying message
+// is the latest. fromUserID, when non-empty, restricts to that author
+// (so "my" voice memo wins over the other party's newer one). Returns
+// an error when nothing in the recent window qualifies.
+func (s *MessageService) LatestFileMessage(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string) (*goslack.Message, error) {
+	msgs, err := s.History(ctx, HistoryParams{ChannelID: channelID, Limit: 60})
+	if err != nil {
+		return nil, err
+	}
+	if m := selectLatestFileMessage(msgs, accept, fromUserID); m != nil {
+		return m, nil
+	}
+	return nil, fmt.Errorf("no recent message with a matching attachment in this conversation")
+}
+
+// selectLatestFileMessage returns the first message in msgs (which
+// conversations.history delivers newest-first) that carries an accepted
+// attachment and, when fromUserID is set, was authored by that user.
+// Split out from LatestFileMessage so the selection rule is unit-tested
+// without a live history fetch. Returns nil when nothing qualifies.
+func selectLatestFileMessage(msgs []goslack.Message, accept func(goslack.File) bool, fromUserID string) *goslack.Message {
+	for i := range msgs {
+		m := &msgs[i]
+		if fromUserID != "" && m.User != fromUserID {
+			continue
+		}
+		for _, f := range m.Files {
+			if accept(f) {
+				return m
+			}
+		}
+	}
+	return nil
+}
+
 // FileInfo resolves a Slack file by its ID (files.info), returning the
 // file object with its private download URL and mimetype — the direct
 // path for a /files/<user>/<F…> URL that needs no message lookup.

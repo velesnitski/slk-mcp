@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	goslack "github.com/slack-go/slack"
@@ -35,6 +36,15 @@ func (f *fakeUsers) Name(ctx context.Context, id string) string {
 
 func (f *fakeUsers) List(ctx context.Context) ([]goslack.User, error) {
 	return nil, nil
+}
+
+func (f *fakeUsers) IDForHandle(ctx context.Context, handle string) (string, error) {
+	for id, name := range f.names {
+		if name == handle {
+			return id, nil
+		}
+	}
+	return "", errors.New("no user matches handle")
 }
 
 func TestUserClient_AcceptsFakeImplementation(t *testing.T) {
