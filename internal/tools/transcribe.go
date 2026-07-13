@@ -182,7 +182,7 @@ func (h *Hub) registerTranscribeTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("transcribe_audio",
 			mcp.WithDescription("Transcribe a Slack voice message, audio/video clip, or recorded huddle to text using a local whisper.cpp install (ffmpeg + whisper-cli + model; video files have their audio track extracted). When the toolchain is missing, returns the downloaded file path plus exact install commands — clients with shell access can run them (with user consent) and retry. Pass a permalink, or channel + timestamp."),
-			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
+			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
 			mcp.WithString("language", mcp.Description("Speech language as an ISO code (e.g. ru, en) or auto (default: auto)")),

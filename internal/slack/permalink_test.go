@@ -62,8 +62,8 @@ func TestParseSlackPermalink_EmptyIsNoOp(t *testing.T) {
 
 func TestParseSlackPermalink_NotAPermalink(t *testing.T) {
 	cases := []string{
-		"https://example.com/",                 // no /archives/
-		"https://example.slack.com/archives/",  // no channel
+		"https://example.com/",                            // no /archives/
+		"https://example.slack.com/archives/",             // no channel
 		"https://example.slack.com/archives/C0ABC1234DE/", // no p<ts>
 		"random gibberish",
 	}
@@ -85,5 +85,21 @@ func TestDecodePermalinkTS(t *testing.T) {
 		if got := DecodePermalinkTS(in); got != want {
 			t.Errorf("DecodePermalinkTS(%q)=%q; want %q", in, got, want)
 		}
+	}
+}
+
+func TestParseSlackFileURL(t *testing.T) {
+	id, ok := ParseSlackFileURL("https://example.slack.com/files/UAAAA1111/FBBBB2222/audio_message.m4a")
+	if !ok || id != "FBBBB2222" {
+		t.Fatalf("file URL should yield FBBBB2222, got %q ok=%v", id, ok)
+	}
+	if _, ok := ParseSlackFileURL("https://example.slack.com/archives/C0AB1234DEF/p1714000000000123"); ok {
+		t.Fatal("a message permalink must NOT parse as a file URL")
+	}
+	if _, ok := ParseSlackFileURL(""); ok {
+		t.Fatal("empty input is not a file URL")
+	}
+	if _, ok := ParseSlackFileURL("  https://x.slack.com/files/UZZ/F123ABC/clip.m4a  "); !ok {
+		t.Fatal("surrounding whitespace should be tolerated")
 	}
 }

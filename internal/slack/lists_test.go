@@ -207,9 +207,9 @@ func TestParseRetryAfterSeconds(t *testing.T) {
 		want int
 	}{
 		{"5", 5},
-		{"", 1},     // default
-		{"abc", 1},  // unparseable → default
-		{"-2", 1},   // non-positive → default
+		{"", 1},      // default
+		{"abc", 1},   // unparseable → default
+		{"-2", 1},    // non-positive → default
 		{"  9  ", 9}, // trimmed
 	}
 	for _, c := range cases {

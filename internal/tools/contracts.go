@@ -52,6 +52,7 @@ type MessageClient interface {
 	Delete(ctx context.Context, channelID, timestamp string) error
 	MessageAt(ctx context.Context, channelID, ts string) (*goslack.Message, error)
 	DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error
+	FileInfo(ctx context.Context, fileID string) (goslack.File, error)
 }
 
 // SearchClient wraps search.messages. Separate from MessageClient

@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
 // registerAudioTools wires download_audio — fetching voice-note (or any
@@ -24,7 +25,7 @@ func (h *Hub) registerAudioTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("download_audio",
 			mcp.WithDescription("Download audio attachments (voice messages) from a Slack message into local temp files for transcription. Pass a permalink, or channel + timestamp."),
-			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
+			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
@@ -187,6 +188,30 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	scoped, wsName, errRes := h.scopedWorkspace(workspace)
 	if errRes != nil {
 		return nil, nil, "", errRes
+	}
+
+	if destDir == "" {
+		destDir = os.TempDir()
+	}
+
+	// File-URL fast path: a "…/files/<user>/<F…>/name" link points
+	// straight at an attachment, so resolve it by ID (files.info) and
+	// skip channel/message lookup entirely. This is what a right-click
+	// "Copy link" on an uploaded voice memo gives — search never
+	// indexes those, so a message permalink isn't always obtainable.
+	if fileID, ok := slack.ParseSlackFileURL(permalink); ok {
+		f, ferr := scoped.Messages().FileInfo(ctx, fileID)
+		if ferr != nil {
+			return nil, nil, "", mcp.NewToolResultError(ferr.Error())
+		}
+		saved, skipped, err := downloadFiles(ctx, scoped.Messages(), []goslack.File{f}, destDir, prefix, accept)
+		if err != nil {
+			return nil, nil, "", mcp.NewToolResultError(err.Error())
+		}
+		if len(saved) == 0 {
+			return nil, nil, "", mcp.NewToolResultError("the linked file is not the expected type; got: " + strings.Join(skipped, ", "))
+		}
+		return saved, skipped, wsName, nil
 	}
 
 	channel, timestamp, errRes = resolveMessageRef(permalink, channel, timestamp, false)

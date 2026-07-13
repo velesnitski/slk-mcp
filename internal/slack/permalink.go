@@ -25,7 +25,25 @@ import (
 var (
 	permalinkChannelRe = regexp.MustCompile(`/archives/([A-Z][A-Z0-9]{6,})/`)
 	permalinkTSRe      = regexp.MustCompile(`/p(\d{10,})`)
+	// fileURLRe captures the file ID from a Slack file URL:
+	//   https://example.slack.com/files/<USER_ID>/<FILE_ID>/<name>
+	// File IDs are F-prefixed alphanumerics.
+	fileURLRe = regexp.MustCompile(`/files/[^/]+/(F[A-Z0-9]+)`)
 )
+
+// ParseSlackFileURL extracts the file ID from a Slack file URL, e.g.
+// the "Copy link" you get on an uploaded attachment
+// (…/files/U…/F…/name.m4a). Returns ("", false) for anything that is
+// not a file URL, so callers can fall through to message-permalink
+// handling. A file URL points straight at an attachment, so it needs no
+// channel/message resolution — files.info(fileID) yields the download.
+func ParseSlackFileURL(raw string) (string, bool) {
+	m := fileURLRe.FindStringSubmatch(strings.TrimSpace(raw))
+	if len(m) < 2 {
+		return "", false
+	}
+	return m[1], true
+}
 
 // ErrNotASlackPermalink lets callers distinguish "user passed a
 // permalink that did not parse" from "user did not pass a permalink at

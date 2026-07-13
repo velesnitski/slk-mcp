@@ -260,7 +260,7 @@ func (h *Hub) registerToneTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("analyze_audio_tone",
 			mcp.WithDescription("Estimate the VOCAL TONE of a Slack voice message — loudness dynamics (EBU R128 loudness range) and pitch (native f0, mean + variability) — to gauge whether the speaker is calm/controlled or agitated/shouting, which a transcript can't tell you. Needs only ffmpeg (pitch is computed in-process, no extra install). Pass a permalink, or channel + timestamp."),
-			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
+			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the audio (optional if permalink is provided)")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),

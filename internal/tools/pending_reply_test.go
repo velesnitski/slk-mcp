@@ -89,6 +89,9 @@ func (f *fakeMessageClient) MessageAt(ctx context.Context, channelID, ts string)
 func (f *fakeMessageClient) DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error {
 	return errors.New("DownloadFile not supported in fake")
 }
+func (f *fakeMessageClient) FileInfo(ctx context.Context, fileID string) (goslack.File, error) {
+	return goslack.File{}, errors.New("FileInfo not supported in fake")
+}
 
 var _ MessageClient = (*fakeMessageClient)(nil)
 

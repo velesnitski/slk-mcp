@@ -523,12 +523,12 @@ func TestUnread_FetchesRepliesForThreadParents(t *testing.T) {
 			"messages": []map[string]any{
 				// Thread parent — should trigger conversations.replies.
 				{
-					"type":         "message",
-					"user":         "U2",
-					"text":         "thread starts here",
-					"ts":           "1700000100.000000",
-					"thread_ts":    "1700000100.000000",
-					"reply_count":  2,
+					"type":        "message",
+					"user":        "U2",
+					"text":        "thread starts here",
+					"ts":          "1700000100.000000",
+					"thread_ts":   "1700000100.000000",
+					"reply_count": 2,
 				},
 				// Plain top-level message — must NOT trigger replies fetch.
 				{"type": "message", "user": "U2", "text": "plain", "ts": "1700000150.000000"},

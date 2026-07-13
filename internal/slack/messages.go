@@ -142,6 +142,23 @@ func (s *MessageService) MessageAt(ctx context.Context, channelID, ts string) (*
 	return nil, fmt.Errorf("no message found at ts %s", ts)
 }
 
+// FileInfo resolves a Slack file by its ID (files.info), returning the
+// file object with its private download URL and mimetype — the direct
+// path for a /files/<user>/<F…> URL that needs no message lookup.
+func (s *MessageService) FileInfo(ctx context.Context, fileID string) (goslack.File, error) {
+	f, err := ratelimit.DoR(ctx, s.log, func() (*goslack.File, error) {
+		file, _, _, ferr := s.api.GetFileInfoContext(ctx, fileID, 0, 0)
+		return file, ferr
+	})
+	if err != nil {
+		return goslack.File{}, fmt.Errorf("files.info: %w", err)
+	}
+	if f == nil {
+		return goslack.File{}, fmt.Errorf("files.info: no file for %s", fileID)
+	}
+	return *f, nil
+}
+
 // DownloadFile streams a url_private / url_private_download asset into
 // w, authenticating with this client's token. The token never leaves
 // the server process — callers receive bytes, not credentials. The

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-13
+
+### Added — audio/image tools accept Slack file URLs
+`download_audio` / `transcribe_audio` / `view_image` /
+`analyze_audio_tone` resolved attachments only through a message
+(permalink or channel+ts). But `search.messages` doesn't index an
+empty-text voice memo, so the message ts can be unobtainable — the only
+handle is the file's "Copy link" (`…/files/<user>/<F…>/name`).
+`fetchFiles` now detects a file URL (`slack.ParseSlackFileURL`) and
+resolves the attachment directly via `files.info`
+(`MessageService.FileInfo`), skipping message lookup. One change, all
+four tools — their `permalink` arg documents both shapes. Reuses the
+confined-temp download (ADR 040); wrong-type links are reported, not
+mishandled. ADR 045. 535 → 536 tests.
+
 ## [1.5.1] - 2026-07-10
 
 ### Changed — `analyze_audio_tone` pitch is now native Go (no aubio)

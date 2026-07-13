@@ -45,6 +45,9 @@ func (f *fakeAudioClient) DownloadFile(ctx context.Context, downloadURL string, 
 	_, err := w.Write(f.payload)
 	return err
 }
+func (f *fakeAudioClient) FileInfo(ctx context.Context, fileID string) (goslack.File, error) {
+	return goslack.File{}, errors.New("FileInfo not supported in fake")
+}
 
 var _ MessageClient = (*fakeAudioClient)(nil)
 

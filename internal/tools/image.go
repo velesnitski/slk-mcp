@@ -31,7 +31,7 @@ func (h *Hub) registerImageTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("view_image",
 			mcp.WithDescription("Fetch image attachments (screenshots, photos, business cards) from a Slack message and return them inline so the model can see them. Downloaded with the server's own token (needs files:read). Oversized images fall back to a local file path instead of inlining. Pass a permalink, or channel + timestamp."),
-			mcp.WithString("permalink", mcp.Description("Slack message permalink — resolves channel and timestamp in one go")),
+			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID (optional if permalink is provided)")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the image(s) (optional if permalink is provided)")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
