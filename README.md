@@ -147,6 +147,13 @@ server's own token (the token never leaves the server process; requires
 the **`files:read`** scope, or Slack answers with its sign-in page and
 the tool reports a scope error).
 
+Scopes per resolution mode: a permalink or file URL needs only
+**`files:read`**; **latest-mode** (`channel` with no timestamp) also
+needs **`im:history`** to read the DM, plus **`users:read`** and
+**`im:write`** when the channel is an `@handle`. On a missing scope the
+tool now names the workspace and the exact scope to add — so in a
+multi-workspace setup you can tell which app to reinstall.
+
 **One call** — `transcribe_audio` runs the whole pipeline under the
 hood when [whisper.cpp](https://github.com/ggerganov/whisper.cpp) is
 installed:

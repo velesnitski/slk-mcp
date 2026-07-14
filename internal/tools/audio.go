@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,64 @@ import (
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
+
+// errFilesReadScope marks a download that came back as Slack's HTML
+// sign-in page (HTTP 200) instead of the file — the tell-tale of a token
+// without files:read. It's a sentinel so finishFetch can rewrite it into
+// a workspace-aware hint (which workspace's token to fix), rather than
+// leaking a generic message that doesn't say where to look.
+var errFilesReadScope = errors.New("slack returned an HTML sign-in page instead of the file — token missing files:read")
+
+// audioScopeMarkers are the substrings Slack uses for authorization
+// failures the audio/image pipeline can hit. Matching these (and only
+// these) keeps a genuine not-found / transient error from being
+// mislabelled as a scope problem.
+var audioScopeMarkers = []string{
+	"missing_scope",
+	"not_allowed_token_type",
+	"no_permission",
+	"not_authed",
+	"invalid_auth",
+	"token_revoked",
+	"account_inactive",
+}
+
+// looksLikeScopeError reports whether err is a Slack authorization
+// failure (missing OAuth scope or unusable token) rather than something
+// transient or a plain not-found — so only these earn the scope hint.
+func looksLikeScopeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := strings.ToLower(err.Error())
+	for _, marker := range audioScopeMarkers {
+		if strings.Contains(e, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// audioScopeError turns a Slack authorization failure from the
+// audio/image surface into a workspace-aware, actionable message naming
+// the scopes the pipeline needs. Non-scope errors pass through verbatim
+// so real failures aren't reframed. wsLabel is the " [name]" suffix
+// (empty in single-workspace mode). Mirrors statusErrorHint (status.go)
+// for the file surface — the failure itself is the cheapest scope probe,
+// so we decorate on failure rather than pay an extra round-trip up front.
+func audioScopeError(wsLabel string, err error) string {
+	e := err.Error()
+	if !looksLikeScopeError(err) {
+		return e
+	}
+	return fmt.Sprintf("%s — the%s workspace token is missing an OAuth scope for this operation. The audio/image tools need files:read (download the file), im:history (read a DM to find the latest note), and users:read + im:write (resolve an @handle to a DM). Add the missing scope under OAuth & Permissions, reinstall the app, then refresh the token.", e, wsLabel)
+}
+
+// scopeResult wraps an error as a tool result, decorating Slack
+// authorization failures with the workspace-aware scope hint.
+func (h *Hub) scopeResult(wsName string, err error) *mcp.CallToolResult {
+	return mcp.NewToolResultError(audioScopeError(h.wsLabel(wsName), err))
+}
 
 // registerAudioTools wires download_audio — fetching voice-note (or any
 // audio) attachments from a message to local temp files so the MCP
@@ -169,7 +228,7 @@ func downloadFiles(ctx context.Context, msgs MessageClient, files []goslack.File
 		}
 		if looksLikeHTML(path) {
 			os.Remove(path)
-			return nil, skipped, fmt.Errorf("download %s: Slack returned an HTML sign-in page instead of the file — the token is missing the files:read scope (add it under OAuth & Permissions and reinstall the app)", f.Name)
+			return nil, skipped, fmt.Errorf("download %s: %w", f.Name, errFilesReadScope)
 		}
 		var size int64
 		if info, serr := os.Stat(path); serr == nil {
@@ -204,7 +263,7 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	if fileID, ok := slack.ParseSlackFileURL(permalink); ok {
 		f, ferr := scoped.Messages().FileInfo(ctx, fileID)
 		if ferr != nil {
-			return nil, nil, "", mcp.NewToolResultError(ferr.Error())
+			return nil, nil, "", h.scopeResult(wsName, ferr)
 		}
 		return finishFetch(ctx, scoped, []goslack.File{f}, destDir, prefix, accept, wsName)
 	}
@@ -216,15 +275,15 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	if strings.TrimSpace(permalink) == "" && strings.TrimSpace(timestamp) == "" && strings.TrimSpace(channel) != "" {
 		channelID, cerr := h.resolveConversation(ctx, scoped, channel)
 		if cerr != nil {
-			return nil, nil, "", mcp.NewToolResultError(cerr.Error())
+			return nil, nil, "", h.scopeResult(wsName, cerr)
 		}
 		fromID, ferr := h.resolveAuthor(ctx, scoped, from)
 		if ferr != nil {
-			return nil, nil, "", mcp.NewToolResultError(ferr.Error())
+			return nil, nil, "", h.scopeResult(wsName, ferr)
 		}
 		msg, merr := scoped.Messages().LatestFileMessage(ctx, channelID, accept, fromID)
 		if merr != nil {
-			return nil, nil, "", mcp.NewToolResultError(merr.Error())
+			return nil, nil, "", h.scopeResult(wsName, merr)
 		}
 		return finishFetch(ctx, scoped, msg.Files, destDir, prefix, accept, wsName)
 	}
@@ -236,11 +295,11 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 
 	channelID, err := scoped.Channels().ResolveID(ctx, channel)
 	if err != nil {
-		return nil, nil, "", mcp.NewToolResultError(err.Error())
+		return nil, nil, "", h.scopeResult(wsName, err)
 	}
 	msg, err := scoped.Messages().MessageAt(ctx, channelID, timestamp)
 	if err != nil {
-		return nil, nil, "", mcp.NewToolResultError(err.Error())
+		return nil, nil, "", h.scopeResult(wsName, err)
 	}
 	if len(msg.Files) == 0 {
 		return nil, nil, "", mcp.NewToolResultError("message has no file attachments")
@@ -254,6 +313,9 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 func finishFetch(ctx context.Context, scoped *Hub, files []goslack.File, destDir, prefix string, accept func(goslack.File) bool, wsName string) ([]savedFile, []string, string, *mcp.CallToolResult) {
 	saved, skipped, err := downloadFiles(ctx, scoped.Messages(), files, destDir, prefix, accept)
 	if err != nil {
+		if errors.Is(err, errFilesReadScope) {
+			return nil, nil, "", mcp.NewToolResultError(fmt.Sprintf("the%s workspace token is missing the files:read scope — Slack returned its sign-in page instead of the file. Add files:read under OAuth & Permissions, reinstall the app, then refresh the token.", scoped.wsLabel(wsName)))
+		}
 		return nil, nil, "", mcp.NewToolResultError(err.Error())
 	}
 	if len(saved) == 0 {

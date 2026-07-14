@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-07-14
+
+### Fixed — workspace-aware scope diagnostics on the audio/image tools
+A token missing **files:read** makes Slack serve its HTML sign-in page
+(HTTP 200); a token missing **im:history / im:write / users:read** makes
+latest-mode fail with `missing_scope`. Both surfaced as generic errors
+that never said *which* workspace's token to fix — painful in a
+multi-workspace setup (a voice note in a secondary-workspace DM failing while primary
+works). The file surface now decorates authorization failures with a
+workspace-aware, actionable hint (mirrors `statusErrorHint`): the
+HTML-guard returns a sentinel that `finishFetch` rewrites into a
+`files:read` message naming the workspace, and Slack `missing_scope` /
+bad-token errors get the exact scope list the pipeline needs. A narrow
+classifier (`looksLikeScopeError`) ensures genuine not-found / transient
+errors pass through verbatim — never reframed as a scope problem. No new
+API calls (the failure is the cheapest scope probe) and no happy-path
+change. See ADR 047. 542 → 547 tests.
+
 ## [1.7.0] - 2026-07-13
 
 ### Added — read the newest attachment straight from a conversation
