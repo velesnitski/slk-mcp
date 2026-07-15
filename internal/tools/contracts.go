@@ -97,6 +97,16 @@ type StatusClient interface {
 	SetPresence(ctx context.Context, away bool) error
 }
 
+// DNDClient snoozes / resumes the authenticated user's Do Not Disturb
+// (the notification pause) via dnd.setSnooze / dnd.endSnooze. A personal
+// action requiring a user-scope token (dnd:write), so handlers gate on
+// Enabled() per workspace before issuing requests.
+type DNDClient interface {
+	Enabled() bool
+	Snooze(ctx context.Context, minutes int) error
+	EndSnooze(ctx context.Context) error
+}
+
 // Compile-time assertions: if the concrete services in
 // `internal/slack` drift from the contracts above, the build breaks
 // with a clear `does not implement` diagnostic that names the missing
@@ -109,4 +119,5 @@ var (
 	_ UnreadClient  = (*slack.UnreadService)(nil)
 	_ ListClient    = (*slack.ListService)(nil)
 	_ StatusClient  = (*slack.StatusService)(nil)
+	_ DNDClient     = (*slack.DNDService)(nil)
 )

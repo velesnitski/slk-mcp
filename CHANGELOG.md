@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-07-15
+
+### Added — set_dnd: pause/resume notifications (Do Not Disturb)
+`set_status`/`set_presence` can *show* "do not disturb" but don't
+actually silence notifications — that's Slack's DND snooze, a separate
+surface. New **`set_dnd`** tool: `minutes>0` pauses notifications for
+that long (`dnd.setSnooze`), `minutes=0` or `resume=true` ends the snooze
+(`dnd.endSnooze`). Like status/presence it's you-global — an empty
+`workspace` pauses notifications on **every** configured workspace in one
+call. Built on the same user-token-only `DNDService` pattern (gated on a
+user token; bot-only workspaces are skipped with a clear line). Needs the
+**dnd:write** user scope; a token without it gets the scope-fix hint
+instead of a bare `missing_scope`. See ADR 049. Tool count 22 → 23.
+550 → 554 tests.
+
 ## [1.7.2] - 2026-07-15
 
 ### Added — reach a voice note posted as a thread reply

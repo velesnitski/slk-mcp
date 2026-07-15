@@ -29,6 +29,7 @@ type Client struct {
 	Unread   *UnreadService
 	Lists    *ListService
 	Status   *StatusService
+	DND      *DNDService
 }
 
 // New constructs a Client from a validated config.
@@ -68,6 +69,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.Unread = newUnreadService(user, c.Channels, c.Users, c.Search, log)
 	c.Lists = newListService(cfg.UserToken, log)
 	c.Status = newStatusService(user, log)
+	c.DND = newDNDService(user, log)
 
 	return c
 }
