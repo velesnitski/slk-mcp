@@ -235,14 +235,15 @@ func (h *Hub) Log() *slog.Logger      { return h.log }
 //
 // Existing handlers that use h.client.X.Method() continue to work;
 // migrating them is incremental, not blocking.
-func (h *Hub) Users() UserClient       { return h.client.Users }
-func (h *Hub) Channels() ChannelClient { return h.client.Channels }
-func (h *Hub) Messages() MessageClient { return h.client.Messages }
-func (h *Hub) Search() SearchClient    { return h.client.Search }
-func (h *Hub) Unread() UnreadClient    { return h.client.Unread }
-func (h *Hub) Lists() ListClient       { return h.client.Lists }
-func (h *Hub) Status() StatusClient    { return h.client.Status }
-func (h *Hub) DND() DNDClient          { return h.client.DND }
+func (h *Hub) Users() UserClient          { return h.client.Users }
+func (h *Hub) Channels() ChannelClient    { return h.client.Channels }
+func (h *Hub) Messages() MessageClient    { return h.client.Messages }
+func (h *Hub) Search() SearchClient       { return h.client.Search }
+func (h *Hub) Unread() UnreadClient       { return h.client.Unread }
+func (h *Hub) Lists() ListClient          { return h.client.Lists }
+func (h *Hub) Status() StatusClient       { return h.client.Status }
+func (h *Hub) DND() DNDClient             { return h.client.DND }
+func (h *Hub) Scheduled() ScheduledClient { return h.client.Scheduled }
 
 // RegisterAll wires every tool category onto s. Order is not
 // significant; tools register themselves conditionally based on
@@ -256,6 +257,7 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerSearchTools(s)
 	h.registerStatusTools(s)
 	h.registerDNDTools(s)
+	h.registerScheduledTools(s)
 	h.registerThreadTools(s)
 	h.registerToneTools(s)
 	h.registerTranscribeTools(s)

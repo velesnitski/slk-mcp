@@ -107,17 +107,26 @@ type DNDClient interface {
 	EndSnooze(ctx context.Context) error
 }
 
+// ScheduledClient lists the authenticated user's pending scheduled
+// messages (chat.scheduledMessages.list) — a read, but per-identity, so
+// it needs a user token; handlers gate on Enabled() per workspace.
+type ScheduledClient interface {
+	Enabled() bool
+	List(ctx context.Context) ([]goslack.ScheduledMessage, error)
+}
+
 // Compile-time assertions: if the concrete services in
 // `internal/slack` drift from the contracts above, the build breaks
 // with a clear `does not implement` diagnostic that names the missing
 // method. This is the cheapest possible interface-seam enforcement.
 var (
-	_ UserClient    = (*slack.UserService)(nil)
-	_ ChannelClient = (*slack.ChannelService)(nil)
-	_ MessageClient = (*slack.MessageService)(nil)
-	_ SearchClient  = (*slack.SearchService)(nil)
-	_ UnreadClient  = (*slack.UnreadService)(nil)
-	_ ListClient    = (*slack.ListService)(nil)
-	_ StatusClient  = (*slack.StatusService)(nil)
-	_ DNDClient     = (*slack.DNDService)(nil)
+	_ UserClient      = (*slack.UserService)(nil)
+	_ ChannelClient   = (*slack.ChannelService)(nil)
+	_ MessageClient   = (*slack.MessageService)(nil)
+	_ SearchClient    = (*slack.SearchService)(nil)
+	_ UnreadClient    = (*slack.UnreadService)(nil)
+	_ ListClient      = (*slack.ListService)(nil)
+	_ StatusClient    = (*slack.StatusService)(nil)
+	_ DNDClient       = (*slack.DNDService)(nil)
+	_ ScheduledClient = (*slack.ScheduledService)(nil)
 )

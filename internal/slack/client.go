@@ -22,14 +22,15 @@ type Client struct {
 	bot  *goslack.Client
 	user *goslack.Client
 
-	Channels *ChannelService
-	Messages *MessageService
-	Users    *UserService
-	Search   *SearchService
-	Unread   *UnreadService
-	Lists    *ListService
-	Status   *StatusService
-	DND      *DNDService
+	Channels  *ChannelService
+	Messages  *MessageService
+	Users     *UserService
+	Search    *SearchService
+	Unread    *UnreadService
+	Lists     *ListService
+	Status    *StatusService
+	DND       *DNDService
+	Scheduled *ScheduledService
 }
 
 // New constructs a Client from a validated config.
@@ -70,6 +71,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.Lists = newListService(cfg.UserToken, log)
 	c.Status = newStatusService(user, log)
 	c.DND = newDNDService(user, log)
+	c.Scheduled = newScheduledService(user, log)
 
 	return c
 }

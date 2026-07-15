@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-15
+
+### Added — list_scheduled_messages: see what you have queued to send
+The digest shows what came in; nothing showed what you have queued to go
+**out**. New read-only **`list_scheduled_messages`** over
+`chat.scheduledMessages.list`: your pending scheduled messages with send
+time, target channel, and a preview — you-global (empty `workspace` lists
+across every configured workspace), soonest-first. Built on a per-identity
+`ScheduledService` (user token; bot-only workspaces skipped). Not gated on
+`SLACK_READ_ONLY` (reads nothing). Rune-safe previews (Cyrillic never
+split). See ADR 050. Tool count 23 → 24. 554 → 560 tests.
+
+### Note — thread-unfollow spike rejected
+A prototype to silence reply notifications for a single thread was tried
+and dropped: Slack's `subscriptions.thread.remove` returns
+`not_allowed_token_type` for an OAuth (`xoxp`) token — it needs the
+browser `xoxc` session token — so thread-level unfollow isn't viable
+through the MCP. No `mute_thread` tool ships.
+
 ## [1.8.0] - 2026-07-15
 
 ### Added — set_dnd: pause/resume notifications (Do Not Disturb)

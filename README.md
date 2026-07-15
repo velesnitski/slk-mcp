@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-23-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-24-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -140,6 +140,7 @@ Or via config file (`~/.claude.json`):
 | `get_unread_summary` | Unread messages across all joined channels, sorted by volume |
 | `get_mentions` | Messages that mention you |
 | `mark_read` | Mark a channel read through a given timestamp |
+| `list_scheduled_messages` | Your pending scheduled (queued-to-send) messages with send time + channel; you-global by default |
 
 ## How-to: transcribe voice messages
 
