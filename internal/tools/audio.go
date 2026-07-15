@@ -301,10 +301,39 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	if err != nil {
 		return nil, nil, "", h.scopeResult(wsName, err)
 	}
-	if len(msg.Files) == 0 {
-		return nil, nil, "", mcp.NewToolResultError("message has no file attachments")
+	// The resolved message carries a matching attachment directly.
+	if hasMatchingFile(msg.Files, accept) {
+		return finishFetch(ctx, scoped, msg.Files, destDir, prefix, accept, wsName)
 	}
-	return finishFetch(ctx, scoped, msg.Files, destDir, prefix, accept, wsName)
+	// Otherwise the attachment may live on a reply in the same thread —
+	// the common case for a voice note when the caller only has the
+	// thread-root (or a sibling) permalink, whose own message has no
+	// audio. Scan the thread for the newest matching attachment. A root
+	// with replies carries ThreadTimestamp == its own ts; a bare message
+	// falls back to its own ts (a one-message "thread" that simply finds
+	// nothing).
+	threadTS := msg.ThreadTimestamp
+	if threadTS == "" {
+		threadTS = msg.Timestamp
+	}
+	tmsg, terr := scoped.Messages().LatestFileInThread(ctx, channelID, threadTS, accept)
+	if terr != nil {
+		return nil, nil, "", mcp.NewToolResultError("this message has no matching attachment, and neither does any reply in its thread")
+	}
+	return finishFetch(ctx, scoped, tmsg.Files, destDir, prefix, accept, wsName)
+}
+
+// hasMatchingFile reports whether any of files satisfies accept — the
+// "does this exact message carry the attachment we want?" check that
+// decides whether fetchFiles uses the message directly or falls back to
+// scanning its thread.
+func hasMatchingFile(files []goslack.File, accept func(goslack.File) bool) bool {
+	for _, f := range files {
+		if accept(f) {
+			return true
+		}
+	}
+	return false
 }
 
 // finishFetch downloads the matched attachments and shapes the shared

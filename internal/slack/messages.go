@@ -179,6 +179,40 @@ func selectLatestFileMessage(msgs []goslack.Message, accept func(goslack.File) b
 	return nil
 }
 
+// LatestFileInThread returns the most recent message in the thread rooted
+// at threadTS whose attachments satisfy accept — the "read the voice note
+// posted as a reply" engine, for when the caller only holds a permalink
+// to the thread root (or a sibling) rather than the reply itself.
+// conversations.replies returns the parent followed by replies
+// oldest-first, so the LAST qualifying message is the newest. Returns an
+// error when nothing in the thread qualifies.
+func (s *MessageService) LatestFileInThread(ctx context.Context, channelID, threadTS string, accept func(goslack.File) bool) (*goslack.Message, error) {
+	replies, err := s.ThreadReplies(ctx, channelID, threadTS)
+	if err != nil {
+		return nil, err
+	}
+	if m := selectLastFileMessage(replies, accept); m != nil {
+		return m, nil
+	}
+	return nil, fmt.Errorf("no message in this thread has a matching attachment")
+}
+
+// selectLastFileMessage returns the LAST message in msgs that carries an
+// accepted attachment — msgs is chronological oldest-first (as
+// conversations.replies delivers), so the last match is the newest.
+// Split out from LatestFileInThread for unit testing without a live
+// fetch. Returns nil when nothing qualifies.
+func selectLastFileMessage(msgs []goslack.Message, accept func(goslack.File) bool) *goslack.Message {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		for _, f := range msgs[i].Files {
+			if accept(f) {
+				return &msgs[i]
+			}
+		}
+	}
+	return nil
+}
+
 // FileInfo resolves a Slack file by its ID (files.info), returning the
 // file object with its private download URL and mimetype — the direct
 // path for a /files/<user>/<F…> URL that needs no message lookup.

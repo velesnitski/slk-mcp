@@ -70,6 +70,46 @@ func TestSelectLatestFileMessage_NoMatchReturnsNil(t *testing.T) {
 	}
 }
 
+func TestSelectLastFileMessage_NewestReplyWins(t *testing.T) {
+	// conversations.replies is oldest-first (parent, then replies), so
+	// the LAST matching message is the newest — the voice note reply.
+	root := msgWithFile("U1", "text/plain") // parent, no audio
+	root.Files = nil
+	root.Timestamp = "100.0"
+	older := msgWithFile("U1", "audio/mp4")
+	older.Timestamp = "200.0"
+	newer := msgWithFile("U2", "audio/mp4")
+	newer.Timestamp = "300.0"
+	got := selectLastFileMessage([]goslack.Message{root, older, newer}, acceptAudio)
+	if got == nil || got.Timestamp != "300.0" {
+		t.Fatalf("want newest reply (300.0); got %+v", got)
+	}
+}
+
+func TestSelectLastFileMessage_SkipsNonMatching(t *testing.T) {
+	// A newer image reply is skipped for an older audio reply.
+	audio := msgWithFile("U1", "audio/mp4")
+	audio.Timestamp = "200.0"
+	image := msgWithFile("U1", "image/png")
+	image.Timestamp = "300.0"
+	got := selectLastFileMessage([]goslack.Message{audio, image}, acceptAudio)
+	if got == nil || got.Timestamp != "200.0" {
+		t.Fatalf("want the audio reply (200.0); got %+v", got)
+	}
+}
+
+func TestSelectLastFileMessage_NoMatchReturnsNil(t *testing.T) {
+	text := goslack.Message{}
+	text.Timestamp = "100.0"
+	image := msgWithFile("U1", "image/png")
+	if got := selectLastFileMessage([]goslack.Message{text, image}, acceptAudio); got != nil {
+		t.Fatalf("want nil when no audio in thread; got %+v", got)
+	}
+	if got := selectLastFileMessage(nil, acceptAudio); got != nil {
+		t.Fatalf("want nil for empty thread; got %+v", got)
+	}
+}
+
 func TestMatchHandle(t *testing.T) {
 	users := []goslack.User{
 		{ID: "U1", Name: "jbravo", RealName: "Johnny Bravo"},

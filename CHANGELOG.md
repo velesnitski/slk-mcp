@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-07-15
+
+### Added — reach a voice note posted as a thread reply
+A voice note posted as a **thread reply** was unreachable from the thread
+*root* permalink (the link you actually copy): the root message has no
+attachment, and latest-mode can't see it either because
+`conversations.history` excludes thread replies. Now when the message a
+permalink/timestamp resolves to has no matching attachment,
+`fetchFiles` falls back to scanning its **thread** (`conversations.replies`,
+via the new `LatestFileInThread`) for the newest matching one — so
+`transcribe_audio`/`download_audio`/`view_image`/`analyze_audio_tone`
+read the reply straight from the thread-root permalink, no reply `ts`
+needed. `from` stays ignored in permalink/timestamp mode. Purely additive
+(a message that carries the attachment directly is unchanged; the scan
+only runs where a hard error used to be). See ADR 048. 547 → 550 tests.
+
 ## [1.7.1] - 2026-07-14
 
 ### Fixed — workspace-aware scope diagnostics on the audio/image tools

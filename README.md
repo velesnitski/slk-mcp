@@ -147,6 +147,11 @@ server's own token (the token never leaves the server process; requires
 the **`files:read`** scope, or Slack answers with its sign-in page and
 the tool reports a scope error).
 
+A permalink to a thread's root also reaches a voice note posted as a
+**reply**: if the linked message carries no audio, the thread is scanned
+for the newest matching attachment — so you can copy the link on the
+parent message and still transcribe the reply.
+
 Scopes per resolution mode: a permalink or file URL needs only
 **`files:read`**; **latest-mode** (`channel` with no timestamp) also
 needs **`im:history`** to read the DM, plus **`users:read`** and
