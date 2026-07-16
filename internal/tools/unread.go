@@ -30,6 +30,7 @@ type unreadParams struct {
 	maxChars           int
 	dmWindowHours      int
 	threadMentionHours int
+	ownThreadHours     int
 	afterTS            string
 	includeRefs        bool
 	urg                digest.UrgencyOpts
@@ -110,6 +111,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters), per workspace. Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. Omit (default) to auto-cap to a total budget split across workspaces so a large backlog can't overflow the result. Pass 0 for unlimited, or a positive N for a hard per-workspace cap.")),
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
+				mcp.WithNumber("own_thread_hours", mcp.Description("If > 0, additionally surface NEW replies in threads the operator STARTED or already replied in, even when nobody @-mentioned them (Slack auto-follows those threads but never marks the channel unread). Catches a colleague answering your own request. Default: 24 (recommended).")),
 				mcp.WithString("after", mcp.Description("Delta cursor: a Slack timestamp (e.g. '1783086043.190149' from a prior pull's References or a message ts). Only messages/replies strictly newer are returned; channels with nothing new are dropped. Use to re-pull the same day cheaply without re-emitting the whole backlog. Empty (default) = full sweep.")),
 				mcp.WithBoolean("include_refs", mcp.Description("Append the trailing References block (every issue ID, MR, and branch seen). Off by default — it costs a few hundred tokens and is only worth it when you'll chain into those IDs. The newest message ts also lives in each channel's inline output, so a delta cursor doesn't need this.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
@@ -126,6 +128,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					maxChars:           int(req.GetFloat("max_chars", maxCharsAuto)),
 					dmWindowHours:      int(req.GetFloat("dm_window_hours", 0)),
 					threadMentionHours: int(req.GetFloat("thread_mention_hours", 24)),
+					ownThreadHours:     int(req.GetFloat("own_thread_hours", 24)),
 					afterTS:            strings.TrimSpace(req.GetString("after", "")),
 					includeRefs:        req.GetBool("include_refs", false),
 					urg: digest.UrgencyOpts{
@@ -326,6 +329,21 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, e
 			h.log.Warn("thread-mention backstop failed; falling back to unread-only", "err", tmErr)
 		} else {
 			results = mergeThreadMentions(results, tmResults)
+		}
+	}
+
+	// Own-thread backstop: replies in a thread the operator started or
+	// replied in that DON'T @-mention them are invisible to both the
+	// unread sweep (parent already read) and the to:me mention pass.
+	// `from:me` discovers those threads and surfaces replies newer than
+	// the operator's last message. Reuses mergeThreadMentions (augment,
+	// never replace).
+	if p.ownThreadHours > 0 {
+		otResults, otErr := h.Unread().UnreadOwnThreads(ctx, p.ownThreadHours)
+		if otErr != nil {
+			h.log.Warn("own-thread backstop failed; falling back to unread-only", "err", otErr)
+		} else {
+			results = mergeThreadMentions(results, otResults)
 		}
 	}
 

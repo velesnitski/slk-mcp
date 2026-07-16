@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-07-16
+
+### Added — surface new replies in threads you started or replied in
+`get_unread_summary` missed a class of unread: a colleague answering a
+thread **you started** (or already replied in) **without @-mentioning
+you**. Slack marks a channel unread only for new top-level messages;
+`UnreadAll` only fetches replies for unread parents (yours is read); and
+the `to:me` mention pass only catches @-mentions — so the reply fell
+through every pass. New **own-thread backstop** (`own_thread_hours`,
+default 24): `search from:me` finds the threads you're active in, then
+surfaces replies from others **newer than your last message** in each
+(pure `unseenAfterMine`). Merged via the existing thread-mention merge
+(augment, never replace). Needs `Self()`; degrades to no-op without a
+search backend. See ADR 051. 560 → 564 tests.
+
 ## [1.9.0] - 2026-07-15
 
 ### Added — list_scheduled_messages: see what you have queued to send

@@ -524,6 +524,135 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 	return out, nil
 }
 
+// UnreadOwnThreads catches the OTHER blind spot UnreadThreadMentions
+// doesn't: replies in a thread the operator STARTED or already replied
+// in, where the new replies do NOT @-mention them. Slack auto-follows
+// such threads (they show in the "Threads" view) but never marks the
+// channel unread, and `fetchReplies` skips them because the parent is
+// already read — so a colleague answering your own request is silently
+// missed. `to:me` can't see it (no mention); this uses `from:me` to
+// discover the threads you're active in, then fetches each thread and
+// surfaces replies newer than your last message in it. `hours <= 0` (or
+// no search backend) is a no-op.
+func (s *UnreadService) UnreadOwnThreads(ctx context.Context, hours int) ([]*ChannelUnread, error) {
+	if !s.Enabled() {
+		return nil, ErrNoUserToken
+	}
+	if hours <= 0 || s.search == nil {
+		return nil, nil
+	}
+	selfID, err := s.Self(ctx)
+	if err != nil || selfID == "" {
+		// Without our own id we can't tell our messages from others', so
+		// we can't compute "newer than mine". Degrade to no-op rather
+		// than guess.
+		return nil, err
+	}
+
+	after := s.nowUnix() - int64(hours)*3600
+	afterDate := time.Unix(after, 0).Format("2006-01-02")
+	matches, err := s.search.Messages(ctx, "from:me after:"+afterDate, 100)
+	if err != nil {
+		return nil, fmt.Errorf("search from:me: %w", err)
+	}
+
+	// Discover the unique (channel, thread-root) threads we're active in.
+	// A hit that is a reply carries thread_ts (parsed from its permalink);
+	// a hit that is a parent we authored has none, so the root is its ts.
+	type threadKey struct{ channelID, root string }
+	roots := make(map[threadKey]string) // key -> channel name
+	for _, m := range matches {
+		if m.Channel.ID == "" {
+			continue
+		}
+		if ts, _ := strconv.ParseFloat(m.Timestamp, 64); int64(ts) < after {
+			continue
+		}
+		hit := searchHitToMessage(m)
+		root := hit.ThreadTimestamp
+		if root == "" {
+			root = hit.Timestamp
+		}
+		roots[threadKey{m.Channel.ID, root}] = m.Channel.Name
+	}
+
+	byChannel := make(map[string]*ChannelUnread)
+	for k, chName := range roots {
+		var thread []goslack.Message
+		rerr := ratelimit.Do(ctx, s.log, 0, func() error {
+			r, _, _, e := s.api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
+				ChannelID: k.channelID,
+				Timestamp: k.root,
+				Limit:     100,
+			})
+			if e != nil {
+				return e
+			}
+			thread = r
+			return nil
+		})
+		if rerr != nil {
+			// Best-effort: a single unreadable thread shouldn't sink the
+			// backstop.
+			s.log.Warn("own-thread replies fetch failed", "channel", k.channelID, "thread", k.root, "err", rerr)
+			continue
+		}
+		unseen := unseenAfterMine(thread, selfID)
+		if len(unseen) == 0 {
+			continue
+		}
+		cu, ok := byChannel[k.channelID]
+		if !ok {
+			cu = &ChannelUnread{}
+			cu.Channel.ID = k.channelID
+			cu.Channel.Name = chName
+			byChannel[k.channelID] = cu
+		}
+		if cu.Replies == nil {
+			cu.Replies = make(map[string][]goslack.Message)
+		}
+		cu.Replies[k.root] = append(cu.Replies[k.root], unseen...)
+	}
+
+	out := make([]*ChannelUnread, 0, len(byChannel))
+	for _, cu := range byChannel {
+		out = append(out, cu)
+	}
+	return out, nil
+}
+
+// unseenAfterMine returns the messages in a thread that were authored by
+// someone OTHER than selfID and posted after the operator's own most
+// recent message in that thread — i.e. replies that arrived since the
+// operator last participated. Returns nil when the operator has no
+// message in the thread (they aren't actually a participant, so nothing
+// is "theirs to have missed"). Pure, for unit testing without a live
+// conversations.replies call.
+func unseenAfterMine(thread []goslack.Message, selfID string) []goslack.Message {
+	var myLatest float64
+	for _, m := range thread {
+		if m.User != selfID {
+			continue
+		}
+		if ts, _ := strconv.ParseFloat(m.Timestamp, 64); ts > myLatest {
+			myLatest = ts
+		}
+	}
+	if myLatest == 0 {
+		return nil
+	}
+	var out []goslack.Message
+	for _, m := range thread {
+		if m.User == selfID {
+			continue
+		}
+		if ts, _ := strconv.ParseFloat(m.Timestamp, 64); ts > myLatest {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // searchHitToMessage adapts a SearchMessage (the shape returned by
 // search.messages) to the Message shape the rest of the digest
 // pipeline expects. We only fill the fields downstream renderers and
