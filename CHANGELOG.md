@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-07-17
+
+### Added — with_context for search_messages
+A search hit is one isolated message — a `from:@user` search shows only
+that user's lines, never the reply it answered, which makes a hit easy to
+misread out of context. `search_messages` gains **`with_context`** (bool)
++ **`context_messages`** (int, default 3), reusing the `get_mentions`
+machinery to inline a few messages before (`↳`) and after (`↪`) each hit.
+Off by default (output unchanged); one/two `history` calls per hit only
+when enabled. Not a bug fix — `search_messages` worked correctly — but it
+closes the isolated-hit misread failure mode. See ADR 052.
+
 ## [1.10.0] - 2026-07-16
 
 ### Added — surface new replies in threads you started or replied in

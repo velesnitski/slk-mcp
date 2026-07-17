@@ -20,11 +20,13 @@ func (h *Hub) registerSearchTools(s *server.MCPServer) {
 	h.register(s,
 		toolDef{
 			Name:        "search_messages",
-			Description: "Workspace search (Slack syntax: from:@user, in:#channel, has:link, before:/after:DATE). Each hit includes thread_ts + permalink so callers can chain into get_thread.",
+			Description: "Workspace search (Slack syntax: from:@user, in:#channel, has:link, before:/after:DATE). Each hit includes thread_ts + permalink so callers can chain into get_thread. A hit is an ISOLATED message — pass with_context=true to inline the surrounding messages so it can be read in context (a `from:@user` search never shows the other side of the conversation).",
 			Opts: []mcp.ToolOption{
 				mcp.WithString("query", mcp.Required(), mcp.Description("Slack search query")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 20)")),
 				mcp.WithBoolean("full_text", mcp.Description("Disable the 200-char body truncation (default: false). Use when issue IDs or URLs sit at the end of the body.")),
+				mcp.WithBoolean("with_context", mcp.Description("For each hit, inline a few messages before and after it from the same channel/DM (default: false). Use to interpret a hit in context — e.g. a `from:@user` search shows only that user's line, not the reply it answered.")),
+				mcp.WithNumber("context_messages", mcp.Description("How many messages to inline on each side when with_context=true (default: 3)")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			},
 			Handle: h.handleSearchMessages,
@@ -52,6 +54,8 @@ func (h *Hub) handleSearchMessages(ctx context.Context, req mcp.CallToolRequest)
 	}
 	limit := int(req.GetFloat("limit", 20))
 	fullText := req.GetBool("full_text", false)
+	withContext := req.GetBool("with_context", false)
+	ctxN := int(req.GetFloat("context_messages", 3))
 
 	matches, err := scoped.Search().Messages(ctx, q, limit)
 	if err != nil {
@@ -63,9 +67,20 @@ func (h *Hub) handleSearchMessages(ctx context.Context, req mcp.CallToolRequest)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d hits for: %s\n", len(matches), q)
+	shown := map[string]struct{}{}
 	for _, m := range matches {
 		b.WriteString(format.SearchResultExt(m, fullText))
 		b.WriteByte('\n')
+		// Reuse the get_mentions context machinery: a search hit is one
+		// isolated message, and interpreting it (especially a from:@user
+		// hit) usually needs the surrounding turns — the failure mode this
+		// closes is reading one side of a two-sided exchange.
+		if withContext && m.Channel.ID != "" {
+			before, after := scoped.fetchMentionContext(ctx, m.Channel.ID, m.Timestamp, ctxN)
+			users := scoped.Users().NamesFor(ctx, append(collectUserIDs(before), collectUserIDs(after)...))
+			writeContextLines(&b, "    ↳ ", before, users, m.Channel.ID, shown)
+			writeContextLines(&b, "    ↪ ", after, users, m.Channel.ID, shown)
+		}
 	}
 	return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
 }
