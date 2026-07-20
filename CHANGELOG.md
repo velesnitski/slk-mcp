@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-07-20
+
+### Fixed — get_mentions no longer misses just-arrived DMs (search lag)
+`get_mentions` found messages via Slack's `to:me` search, whose index
+**lags on DMs** — a message the other party sent minutes ago was often
+missing, so a fresh DM reply was silently dropped (history-based tools
+saw it immediately). New **DM history backstop** (`dm_history`, default
+true): after the search, `buildMentions` folds in recent DM history
+(`RecentDMActivity`, real-time) as synthetic hits — from others only,
+deduped by channel+ts (real hit wins), re-sorted newest-first. Synthetic
+permalinks carry `?thread_ts` so `with_context`/reply-parsing behave
+identically. `pending_only`/`strict_mention`/`with_context` unchanged.
+`dm_history=false` restores search-only speed. Not an slk-mcp bug (it's
+the search backend) but closes the reliability gap. See ADR 053.
+564 → 567 tests.
+
 ## [1.11.0] - 2026-07-17
 
 ### Added — with_context for search_messages

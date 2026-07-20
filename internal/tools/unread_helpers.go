@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,84 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
+
+// dmActivityToHits flattens RecentDMActivity results into search-hit
+// shape so fresh DM messages — which Slack's search index lags on, often
+// by minutes — flow through the exact same mentions pipeline as real
+// `to:me` hits. Only messages from OTHERS are kept: a DM counts as
+// "directed at you" only when the other party sent it, never your own
+// line. Synthetic permalinks (with ?thread_ts for replies) let the
+// reply-parsing and context rendering behave identically to a real hit.
+func dmActivityToHits(cus []*slack.ChannelUnread, selfID string) []goslack.SearchMessage {
+	if selfID == "" {
+		// Without our id we can't exclude our own messages, so we'd
+		// surface our own DMs as "mentions". Refuse rather than guess.
+		return nil
+	}
+	var out []goslack.SearchMessage
+	add := func(ch goslack.Channel, m goslack.Message, threadRoot string) {
+		if m.User == "" || m.User == selfID {
+			return
+		}
+		out = append(out, dmHit(ch, m, threadRoot))
+	}
+	for _, cu := range cus {
+		if cu == nil || cu.Channel.ID == "" {
+			continue
+		}
+		for _, m := range cu.Messages {
+			add(cu.Channel, m, "")
+		}
+		for root, reps := range cu.Replies {
+			for _, r := range reps {
+				add(cu.Channel, r, root)
+			}
+		}
+	}
+	return out
+}
+
+// dmHit builds one search-hit from a DM history message. threadRoot is
+// non-empty for a reply, so the permalink carries ?thread_ts and
+// downstream treats it as a thread reply (matching real search hits).
+func dmHit(ch goslack.Channel, m goslack.Message, threadRoot string) goslack.SearchMessage {
+	var hit goslack.SearchMessage
+	hit.User = m.User
+	hit.Username = m.Username
+	hit.Text = m.Text
+	hit.Timestamp = m.Timestamp
+	hit.Channel.ID = ch.ID
+	hit.Channel.Name = ch.Name
+	pl := "https://slack.com/archives/" + ch.ID + "/p" + strings.Replace(m.Timestamp, ".", "", 1)
+	if threadRoot != "" {
+		pl += "?thread_ts=" + threadRoot
+	}
+	hit.Permalink = pl
+	return hit
+}
+
+// mergeSearchHits folds `extra` into `base`, dropping any (channel, ts)
+// already present (a real search hit wins over its history twin — it
+// carries the canonical permalink), then sorts newest-first so the
+// merged list renders in the same order a pure search would. Slack
+// timestamps are fixed-width `sec.usec`, so string compare orders them
+// numerically.
+func mergeSearchHits(base, extra []goslack.SearchMessage) []goslack.SearchMessage {
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	for _, m := range base {
+		seen[m.Channel.ID+"|"+m.Timestamp] = struct{}{}
+	}
+	for _, m := range extra {
+		k := m.Channel.ID + "|" + m.Timestamp
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		base = append(base, m)
+	}
+	sort.SliceStable(base, func(i, j int) bool { return base[i].Timestamp > base[j].Timestamp })
+	return base
+}
 
 func filterEmptyMentions(matches []goslack.SearchMessage) []goslack.SearchMessage {
 	out := matches[:0]

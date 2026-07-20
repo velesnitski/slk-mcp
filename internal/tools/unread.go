@@ -46,6 +46,7 @@ type mentionParams struct {
 	pendingOnly   bool
 	strictMention bool
 	dropAcks      bool
+	dmHistory     bool
 }
 
 const (
@@ -152,6 +153,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("pending_only", mcp.Description("Only keep mentions where you haven't posted a text reply afterwards (emoji reactions and file uploads don't count). Costs one conversations.history call per hit.")),
 				mcp.WithBoolean("strict_mention", mcp.Description("Only keep matches where the operator's user id literally appears as <@SELFID> in the message body. Filters Slack-search false positives in shared channels (default: false)")),
 				mcp.WithBoolean("drop_closing_acks", mcp.Description("Drop mentions whose body is a short closing acknowledgement (thanks/спасибо/ok/+1). Useful with pending_only (default: false)")),
+				mcp.WithBoolean("dm_history", mcp.Description("Backstop DMs against Slack search's indexing lag: also read recent DM history directly so a message the other party just sent isn't silently missed (Slack's `to:me` search can lag DMs by minutes). Default: true. Set false to skip the extra history reads for a faster, search-only sweep.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -163,6 +165,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					pendingOnly:   req.GetBool("pending_only", false),
 					strictMention: req.GetBool("strict_mention", false),
 					dropAcks:      req.GetBool("drop_closing_acks", false),
+					dmHistory:     req.GetBool("dm_history", true),
 				}
 				return h.runMentions(ctx, p, req.GetString("workspace", "")), nil
 			},
@@ -474,6 +477,20 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 	}
 
 	selfID, _ := h.Unread().Self(ctx)
+
+	// DM history backstop: Slack's search index lags on DMs, so a message
+	// the other party sent minutes ago is often missing from `to:me`.
+	// RecentDMActivity reads DM history directly (real-time, no index
+	// lag); fold its fresh messages in as synthetic hits (deduped by
+	// channel+ts, re-sorted newest-first) so get_mentions stops silently
+	// missing just-arrived DMs. Needs self id to exclude our own lines.
+	if p.dmHistory && selfID != "" {
+		if dmCus, dmErr := h.Unread().RecentDMActivity(ctx, p.hours, p.limit); dmErr != nil {
+			h.log.Warn("mentions dm-history backstop failed; fresh DMs may lag", "err", dmErr)
+		} else if hits := dmActivityToHits(dmCus, selfID); len(hits) > 0 {
+			matches = mergeSearchHits(matches, hits)
+		}
+	}
 
 	// Automation senders (calendar/Slackbot/Drive) can't be replied to —
 	// drop them from every mentions sweep, not just pending_only. See ADR 021.
