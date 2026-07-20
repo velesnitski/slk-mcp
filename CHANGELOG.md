@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-07-20
+
+### Added — @handle / user-id conversation refs in digest & thread tools
+Reading a DM by person required search→extract-D-id→digest (observed ~6×
+in one day). `get_channel_digest` and `get_thread` now accept a DM as
+**`@handle`** or a **bare `U…`/`W…` user id** — including the `#U…`
+shape the unread summary's own DM headers print — via a shared, pure
+`classifyConversationRef` + the same `@handle→OpenDM` path the audio
+tools use (ADR 046). `resolveConversation`/`resolveAuthor` moved to
+`conversation.go`; new `slack.IsUserID`. Additive: channel names and
+canonical ids behave exactly as before. See ADR 054.
+
+### Added — combined per-workspace delta cursor
+Multi-workspace pulls emitted one cursor per workspace but `after` took
+a single ts — the delta loop had to min() them by hand, re-showing
+messages in the faster workspace. Output now ends with one trailing
+`cursor: primary=<ts>;secondary=<ts>` token; `after` accepts that combined
+shape (exact per-workspace filtering) **and** the old plain ts. Quiet /
+errored workspaces carry their cursor forward (never regresses). See
+ADR 055.
+
+### Added — get_mentions summary mode
+`summary: true` returns operational-load aggregates instead of the hit
+list: total, DM/channel split, per-sender and per-channel counts
+(top-10 + "+N more"), composing with `pending_only` and riding the
+dm_history backstop for saner counts than raw Slack search. Built for
+"how often was I pinged, by whom" reporting. See ADR 056.
+
+567 → 574 tests across the three features.
+
 ## [1.12.0] - 2026-07-20
 
 ### Fixed — get_mentions no longer misses just-arrived DMs (search lag)

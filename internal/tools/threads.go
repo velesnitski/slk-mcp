@@ -77,7 +77,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 		s.AddTool(
 			mcp.NewTool("get_thread",
 				mcp.WithDescription("Fetch all replies in a thread. Pass either (channel + thread_ts) or a Slack permalink."),
-				mcp.WithString("channel", mcp.Description("Channel name (optional if permalink is provided)")),
+				mcp.WithString("channel", mcp.Description("Channel name, a DM as @handle or bare U… user id, or a canonical conversation id (optional if permalink is provided)")),
 				mcp.WithString("thread_ts", mcp.Description("Thread root timestamp (optional if permalink is provided)")),
 				mcp.WithString("permalink", mcp.Description("Slack permalink to any message in the thread — fills channel and thread_ts in one go")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
@@ -99,7 +99,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 					return errRes, nil
 				}
 
-				channelID, err := scoped.Channels().ResolveID(ctx, channel)
+				channelID, err := scoped.resolveConversation(ctx, channel)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}

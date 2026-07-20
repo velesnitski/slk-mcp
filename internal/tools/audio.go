@@ -273,11 +273,11 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	// note in this DM" path, with no ts to hunt for. `from` restricts by
 	// author (a handle, or "me").
 	if strings.TrimSpace(permalink) == "" && strings.TrimSpace(timestamp) == "" && strings.TrimSpace(channel) != "" {
-		channelID, cerr := h.resolveConversation(ctx, scoped, channel)
+		channelID, cerr := scoped.resolveConversation(ctx, channel)
 		if cerr != nil {
 			return nil, nil, "", h.scopeResult(wsName, cerr)
 		}
-		fromID, ferr := h.resolveAuthor(ctx, scoped, from)
+		fromID, ferr := scoped.resolveAuthor(ctx, from)
 		if ferr != nil {
 			return nil, nil, "", h.scopeResult(wsName, ferr)
 		}
@@ -351,41 +351,6 @@ func finishFetch(ctx context.Context, scoped *Hub, files []goslack.File, destDir
 		return nil, nil, "", mcp.NewToolResultError("no matching attachment; files present: " + strings.Join(skipped, ", "))
 	}
 	return saved, skipped, wsName, nil
-}
-
-// resolveConversation turns a channel reference into a conversation ID.
-// A leading '@' means a DM: resolve the handle to a user and open the
-// DM. Otherwise defer to ResolveID (which already handles #names and
-// canonical C/G/D IDs).
-func (h *Hub) resolveConversation(ctx context.Context, scoped *Hub, ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if strings.HasPrefix(ref, "@") {
-		uid, err := scoped.Users().IDForHandle(ctx, ref)
-		if err != nil {
-			return "", err
-		}
-		return scoped.Channels().OpenDM(ctx, uid)
-	}
-	return scoped.Channels().ResolveID(ctx, ref)
-}
-
-// resolveAuthor turns the `from` filter into a user ID. Empty = no
-// filter. "me" = the authenticated user (needs a user token). Anything
-// else is treated as a handle.
-func (h *Hub) resolveAuthor(ctx context.Context, scoped *Hub, from string) (string, error) {
-	from = strings.TrimSpace(from)
-	switch {
-	case from == "":
-		return "", nil
-	case strings.EqualFold(from, "me"):
-		self, err := scoped.Unread().Self(ctx)
-		if err != nil || self == "" {
-			return "", fmt.Errorf("cannot resolve from=me: %v (needs a user token)", err)
-		}
-		return self, nil
-	default:
-		return scoped.Users().IDForHandle(ctx, from)
-	}
 }
 
 // runDownloadAudio downloads a message's audio attachments and reports

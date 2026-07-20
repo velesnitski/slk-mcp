@@ -115,7 +115,7 @@ Or via config file (`~/.claude.json`):
 |---|---|
 | `list_channels` | List channels the bot can see, ordered by member count |
 | `get_channel_info` | Topic, purpose, member count, created date |
-| `get_channel_digest` | Compact digest of one channel |
+| `get_channel_digest` | Compact digest of one channel — or a DM, addressed as `@handle` or a bare `U…` user id |
 | `get_multi_channel_digest` | Digest across multiple channels |
 | `get_morning_recap` | Decisions + activity across channels |
 | `search_messages` | Workspace search (Slack syntax) |
@@ -138,7 +138,7 @@ Or via config file (`~/.claude.json`):
 | Tool | Description |
 |---|---|
 | `get_unread_summary` | Unread messages across all joined channels, sorted by volume |
-| `get_mentions` | Messages that mention you |
+| `get_mentions` | Messages that mention you; `summary=true` returns load stats (by sender / channel, DM split) instead of the list |
 | `mark_read` | Mark a channel read through a given timestamp |
 | `list_scheduled_messages` | Your pending scheduled (queued-to-send) messages with send time + channel; you-global by default |
 

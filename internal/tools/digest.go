@@ -16,8 +16,8 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("get_channel_digest") {
 		s.AddTool(
 			mcp.NewTool("get_channel_digest",
-				mcp.WithDescription("Compact digest of recent messages from one channel. Either give a relative `hours` window (default), or absolute `after`/`before` (YYYY-MM-DD) for post-mortem-style fetches."),
-				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops or devops)")),
+				mcp.WithDescription("Compact digest of recent messages from one channel or DM. Either give a relative `hours` window (default), or absolute `after`/`before` (YYYY-MM-DD) for post-mortem-style fetches."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops or devops), a DM as @handle, a bare U… user id (as printed in unread-summary DM headers), or a canonical C/G/D conversation id")),
 				mcp.WithNumber("hours", mcp.Description("Lookback window in hours (default: SLACK_DIGEST_HOURS or 24). Ignored when after/before are set.")),
 				mcp.WithNumber("max_messages", mcp.Description("Max messages to inline (default: 50)")),
 				mcp.WithString("after", mcp.Description("Absolute lower bound, YYYY-MM-DD (UTC). Overrides hours when set.")),
@@ -231,7 +231,11 @@ func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow 
 }
 
 func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int, fullText bool) (string, error) {
-	channelID, err := h.Channels().ResolveID(ctx, channel)
+	// resolveConversation (not bare ResolveID) so a DM works directly:
+	// `@handle` and a bare `U…` user id — the shape this tool's own DM
+	// headers print — both land on that person's DM without the caller
+	// hunting for the D… id via search.
+	channelID, err := h.resolveConversation(ctx, channel)
 	if err != nil {
 		return "", err
 	}

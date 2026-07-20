@@ -5,6 +5,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"sort"
@@ -17,6 +18,149 @@ import (
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
+
+// parseAfterCursor splits get_unread_summary's `after` argument into
+// per-workspace cursors. Two accepted shapes:
+//
+//	"1784012484.471999"                → plain: one ts applied to every
+//	                                     workspace (the historical form)
+//	"primary=1784012484.4;secondary=1784011290.7" → combined: exact per-workspace
+//	                                     cursors, as emitted by the
+//	                                     "cursor:" line of a multi-workspace
+//	                                     pull
+//
+// Combined pairs are split on ';' (',' tolerated), keys matched
+// case-insensitively; malformed pairs are skipped rather than failing the
+// sweep. Returns (nil, plain) for the plain shape.
+func parseAfterCursor(after string) (perWS map[string]string, plain string) {
+	after = strings.TrimSpace(after)
+	if after == "" {
+		return nil, ""
+	}
+	if !strings.Contains(after, "=") {
+		return nil, after
+	}
+	perWS = make(map[string]string)
+	for _, part := range strings.FieldsFunc(after, func(r rune) bool { return r == ';' || r == ',' }) {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" || strings.TrimSpace(kv[1]) == "" {
+			continue
+		}
+		perWS[strings.ToLower(strings.TrimSpace(kv[0]))] = strings.TrimSpace(kv[1])
+	}
+	return perWS, ""
+}
+
+// cursorForWorkspace resolves the effective `after` cursor for one
+// workspace from a parsed parseAfterCursor result.
+func cursorForWorkspace(perWS map[string]string, plain, wsName string) string {
+	if perWS == nil {
+		return plain
+	}
+	return perWS[strings.ToLower(wsName)]
+}
+
+// combinedCursor renders per-workspace cursors as the single
+// "ws=ts;ws2=ts2" token parseAfterCursor round-trips, in the given
+// workspace order (registry order → deterministic, primary first).
+// Workspaces with no cursor are skipped; an empty result means no
+// workspace produced one.
+func combinedCursor(order []string, cursors map[string]string) string {
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		if ts := cursors[name]; ts != "" {
+			parts = append(parts, name+"="+ts)
+		}
+	}
+	return strings.Join(parts, ";")
+}
+
+// summarizeMentions renders aggregate stats over a mentions match set —
+// the operational-load view ("how often was I pinged, by whom, where")
+// that previously required hand-counting the hit list. Pure and
+// deterministic: counts sorted desc, ties broken by name asc, lists
+// capped with a "+N more" tail so a wide sender set can't blow the
+// output.
+func summarizeMentions(matches []goslack.SearchMessage, hours int, pendingOnly bool) string {
+	const topN = 10
+	senders := map[string]int{}
+	channels := map[string]int{}
+	dm, channel := 0, 0
+	for _, m := range matches {
+		name := m.Username
+		if name == "" {
+			name = m.User
+		}
+		if name == "" {
+			name = "(unknown)"
+		}
+		senders[name]++
+		if strings.HasPrefix(m.Channel.ID, "D") {
+			dm++
+			continue
+		}
+		channel++
+		ch := m.Channel.Name
+		if ch == "" {
+			ch = m.Channel.ID
+		}
+		channels["#"+ch]++
+	}
+
+	var b strings.Builder
+	header := fmt.Sprintf("%d mentions (last %dh)", len(matches), hours)
+	if pendingOnly {
+		header += " — pending only"
+	}
+	fmt.Fprintf(&b, "%s — summary\n", header)
+	fmt.Fprintf(&b, "split: %d DM / %d channel · %d unique senders\n", dm, channel, len(senders))
+	if line := topCounts("senders", senders, topN); line != "" {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	if line := topCounts("channels", channels, topN); line != "" {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// topCounts renders "label: a×3, b×2, … (+N more)" from a count map,
+// sorted by count desc then key asc. Empty map → "".
+func topCounts(label string, counts map[string]int, topN int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	type kv struct {
+		k string
+		n int
+	}
+	items := make([]kv, 0, len(counts))
+	for k, n := range counts {
+		items = append(items, kv{k, n})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].n != items[j].n {
+			return items[i].n > items[j].n
+		}
+		return items[i].k < items[j].k
+	})
+	shown := items
+	extra := 0
+	if len(items) > topN {
+		shown = items[:topN]
+		extra = len(items) - topN
+	}
+	parts := make([]string, 0, len(shown))
+	for _, it := range shown {
+		parts = append(parts, fmt.Sprintf("%s×%d", it.k, it.n))
+	}
+	out := label + ": " + strings.Join(parts, ", ")
+	if extra > 0 {
+		out += fmt.Sprintf(" (+%d more)", extra)
+	}
+	return out
+}
 
 // dmActivityToHits flattens RecentDMActivity results into search-hit
 // shape so fresh DM messages — which Slack's search index lags on, often

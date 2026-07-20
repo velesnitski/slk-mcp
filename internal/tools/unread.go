@@ -47,6 +47,7 @@ type mentionParams struct {
 	strictMention bool
 	dropAcks      bool
 	dmHistory     bool
+	summaryOnly   bool
 }
 
 const (
@@ -113,7 +114,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
 				mcp.WithNumber("own_thread_hours", mcp.Description("If > 0, additionally surface NEW replies in threads the operator STARTED or already replied in, even when nobody @-mentioned them (Slack auto-follows those threads but never marks the channel unread). Catches a colleague answering your own request. Default: 24 (recommended).")),
-				mcp.WithString("after", mcp.Description("Delta cursor: a Slack timestamp (e.g. '1783086043.190149' from a prior pull's References or a message ts). Only messages/replies strictly newer are returned; channels with nothing new are dropped. Use to re-pull the same day cheaply without re-emitting the whole backlog. Empty (default) = full sweep.")),
+				mcp.WithString("after", mcp.Description("Delta cursor. Preferred: the combined token from the previous pull's trailing 'cursor:' line (e.g. 'primary=1784012484.4;secondary=1784011290.7') — applies each workspace's own cursor exactly. A plain Slack timestamp also works and applies to every workspace. Only messages/replies strictly newer are returned; channels with nothing new are dropped. Empty (default) = full sweep.")),
 				mcp.WithBoolean("include_refs", mcp.Description("Append the trailing References block (every issue ID, MR, and branch seen). Off by default — it costs a few hundred tokens and is only worth it when you'll chain into those IDs. The newest message ts also lives in each channel's inline output, so a delta cursor doesn't need this.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
@@ -154,6 +155,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("strict_mention", mcp.Description("Only keep matches where the operator's user id literally appears as <@SELFID> in the message body. Filters Slack-search false positives in shared channels (default: false)")),
 				mcp.WithBoolean("drop_closing_acks", mcp.Description("Drop mentions whose body is a short closing acknowledgement (thanks/спасибо/ok/+1). Useful with pending_only (default: false)")),
 				mcp.WithBoolean("dm_history", mcp.Description("Backstop DMs against Slack search's indexing lag: also read recent DM history directly so a message the other party just sent isn't silently missed (Slack's `to:me` search can lag DMs by minutes). Default: true. Set false to skip the extra history reads for a faster, search-only sweep.")),
+				mcp.WithBoolean("summary", mcp.Description("Return aggregate stats instead of the hit list: total, DM vs channel split, per-sender and per-channel counts. Built for operational-load reporting ('how often was I pinged, by whom, where'). Composes with pending_only (then it summarises only unanswered mentions). Default: false.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -166,6 +168,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					strictMention: req.GetBool("strict_mention", false),
 					dropAcks:      req.GetBool("drop_closing_acks", false),
 					dmHistory:     req.GetBool("dm_history", true),
+					summaryOnly:   req.GetBool("summary", false),
 				}
 				return h.runMentions(ctx, p, req.GetString("workspace", "")), nil
 			},
@@ -227,6 +230,14 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 	}
 	multi := len(targets) > 1
 
+	// Per-workspace delta cursors: the combined "ws=ts;ws2=ts2" token (as
+	// emitted below) applies each workspace's own cursor; a plain ts still
+	// applies to every workspace (the historical form). This removes the
+	// caller-side "take the min of two cursors" dance, which re-showed
+	// already-seen messages in the faster workspace.
+	perWSAfter, plainAfter := parseAfterCursor(p.afterTS)
+	cursors := make(map[string]string, len(targets))
+
 	var sections []string
 	for _, ws := range targets {
 		scoped := h.withClient(ws.Client)
@@ -236,7 +247,13 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 			}
 			continue
 		}
-		body, err := scoped.buildUnreadSummary(ctx, p)
+		pws := p
+		pws.afterTS = cursorForWorkspace(perWSAfter, plainAfter, ws.Name)
+		body, wsCursor, err := scoped.buildUnreadSummary(ctx, pws)
+		if wsCursor == "" {
+			wsCursor = pws.afterTS // never regress a workspace's cursor
+		}
+		cursors[ws.Name] = wsCursor
 		switch {
 		case err != nil && !multi:
 			return mcp.NewToolResultError(err.Error())
@@ -255,7 +272,22 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 
 	header := fmt.Sprintf("# Unread summary%s — %d workspaces", titleSuffix, len(targets))
 	out := header + "\n\n" + strings.Join(sections, "\n\n")
+	// One exact token for the next delta pull — no more taking the min of
+	// the per-workspace cursor lines by hand.
+	if combined := combinedCursor(workspaceOrder(targets), cursors); combined != "" {
+		out = strings.TrimRight(out, "\n") + "\n\ncursor: " + combined + " (pass as after= next pull for an exact per-workspace delta)"
+	}
 	return mcp.NewToolResultText(strings.TrimRight(out, "\n"))
+}
+
+// workspaceOrder projects the registry-ordered target list to names,
+// keeping the combined cursor deterministic (primary first).
+func workspaceOrder(targets []slack.Workspace) []string {
+	names := make([]string, 0, len(targets))
+	for _, ws := range targets {
+		names = append(names, ws.Name)
+	}
+	return names
 }
 
 // runMentions is the get_mentions analogue of runUnreadSummary.
@@ -303,10 +335,10 @@ func (h *Hub) runMentions(ctx context.Context, p mentionParams, workspace string
 // switch between single- and multi-workspace framing); an empty string
 // means "nothing unread", which the caller turns into the caught-up
 // message.
-func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, error) {
+func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cursor string, err error) {
 	results, err := h.Unread().UnreadAll(ctx, p.maxPer)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// DM time-window override: when the operator wants to see DMs they've
@@ -360,7 +392,7 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, e
 
 	if p.mentionsOnly {
 		if selfID == "" {
-			return "", errors.New("mentions_only requires auth.test to succeed; got an empty self id")
+			return "", "", errors.New("mentions_only requires auth.test to succeed; got an empty self id")
 		}
 		results = filterMentions(results, selfID)
 	}
@@ -371,7 +403,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, e
 	results = filterAfter(results, p.afterTS)
 
 	if len(results) == 0 {
-		return "", nil
+		// No new content: carry the caller's incoming cursor forward so a
+		// combined cursor never regresses for a caught-up workspace.
+		return "", p.afterTS, nil
 	}
 
 	now := time.Now()
@@ -392,8 +426,11 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, e
 		len(results), totalMsgs, totalReplies)
 	// Emit the delta cursor so the next call can pass after=<ts> and get
 	// only newer messages. One cheap line replaces the whole References
-	// block as the default machine-readable handle on this pull.
-	if cursor := newestTS(results); cursor != "" {
+	// block as the default machine-readable handle on this pull. The same
+	// value is returned to the caller, which in multi-workspace mode folds
+	// it into the combined per-workspace cursor token.
+	cursor = newestTS(results)
+	if cursor != "" {
 		fmt.Fprintf(&b, "cursor: %s (pass as after= next pull for a delta)\n", cursor)
 	}
 	b.WriteByte('\n')
@@ -461,7 +498,7 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (string, e
 			b.WriteString("\n")
 		}
 	}
-	return strings.TrimRight(b.String(), "\n"), nil
+	return strings.TrimRight(b.String(), "\n"), cursor, nil
 }
 
 // buildMentions renders the mentions sweep for the single workspace this
@@ -515,6 +552,13 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 
 	if len(matches) == 0 {
 		return "", nil
+	}
+
+	// Summary mode: the operational-load view — aggregates over the same
+	// filtered match set the list view would render, so pending_only /
+	// strict_mention / dm_history all compose identically.
+	if p.summaryOnly {
+		return summarizeMentions(matches, p.hours, p.pendingOnly), nil
 	}
 
 	var b strings.Builder

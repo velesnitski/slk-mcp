@@ -216,6 +216,15 @@ func IsChannelID(s string) bool {
 	return isCanonicalID(s, "CG")
 }
 
+// IsUserID reports whether a string looks like a canonical Slack *user*
+// ID — `U…` classic, `W…` enterprise-grid. Used by conversation-ref
+// resolution to turn a bare user id (the digest's own DM headers print
+// those, e.g. `#U0AAAA1111B`) into that person's DM via
+// conversations.open.
+func IsUserID(s string) bool {
+	return isCanonicalID(s, "UW")
+}
+
 // IsConversationID is the broader form: any canonical Slack
 // conversation ID — `C…` public, `G…` private/mpdm, `D…` DM.
 //
