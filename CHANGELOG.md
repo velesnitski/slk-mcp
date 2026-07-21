@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-07-21
+
+### Added — with_replies: thread drill-in for get_channel_digest
+`conversations.history` returns only top-level messages, so a channel
+whose real content lives in threads (a huddle's discussion, a request
+answered in replies) rendered as bare `(N replies)` counters — the
+digest *said* there were replies but couldn't show them, and Slack
+search lags on fresh thread replies so `get_user_messages` missed them
+too. New **`with_replies`** (default false) fetches every thread in the
+window and inlines the replies as `↳` lines (reuses the unread sweep's
+render path); `thread_preview_replies` caps per-thread depth (default
+10). Best-effort per thread; one `conversations.replies` call per thread
+only when enabled. Multi-channel digest / morning recap stay reply-free
+by design (fan-out cost) — drill into one channel to expand. See ADR
+057. 574 → 577 tests.
+
 ## [1.13.0] - 2026-07-20
 
 ### Added — @handle / user-id conversation refs in digest & thread tools

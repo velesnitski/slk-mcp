@@ -8,6 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
@@ -24,6 +25,8 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("before", mcp.Description("Absolute upper bound, YYYY-MM-DD (UTC, exclusive day end). Pair with after for date ranges.")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 				mcp.WithBoolean("full_text", mcp.Description("Render message bodies in full instead of truncating long ones to a compact preview (default: false). Use when ingesting a channel verbatim — e.g. into a knowledge base.")),
+				mcp.WithBoolean("with_replies", mcp.Description("Also fetch and inline thread replies for every thread in the window (default: false). Without it, a channel whose real content lives in threads — a huddle's discussion, a request answered in replies — shows only '(N replies)' counters. Costs one conversations.replies call per thread.")),
+				mcp.WithNumber("thread_preview_replies", mcp.Description("Max replies inlined per thread when with_replies=true (default: 10; pass a big number for full threads)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, err := req.RequireString("channel")
@@ -39,12 +42,14 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				after := req.GetString("after", "")
 				before := req.GetString("before", "")
 				fullText := req.GetBool("full_text", false)
+				withReplies := req.GetBool("with_replies", false)
+				replyCap := int(req.GetFloat("thread_preview_replies", 10))
 
 				oldest, latest, err := parseRange(after, before, hours)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				txt, err := scoped.channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText)
+				txt, err := scoped.channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText, withReplies, replyCap)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -227,10 +232,10 @@ func (h *Hub) morningRecapBody(ctx context.Context, channels string, hours, maxS
 
 func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow int, fullText bool) (string, error) {
 	oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
-	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow, fullText)
+	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow, fullText, false, 0)
 }
 
-func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int, fullText bool) (string, error) {
+func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int, fullText bool, withReplies bool, replyCap int) (string, error) {
 	// resolveConversation (not bare ResolveID) so a DM works directly:
 	// `@handle` and a bare `U…` user id — the shape this tool's own DM
 	// headers print — both land on that person's DM without the caller
@@ -251,12 +256,75 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 	if err != nil {
 		return "", err
 	}
-	users := h.resolveRefs(ctx, msgs)
+
+	// Thread drill-in: history returns only top-level messages, so a
+	// channel whose real content lives in threads (a huddle with its
+	// discussion, a request answered in replies) renders as bare
+	// "(N replies)" counters. with_replies fetches those threads and
+	// inlines them — closing the "digest said 2 replies but couldn't
+	// show them" gap.
+	var replies map[string][]goslack.Message
+	if withReplies {
+		replies = collectThreadReplies(ctx, h.Messages(), channelID, msgs)
+	}
+
+	nameSrc := msgs
+	if len(replies) > 0 {
+		nameSrc = append(append([]goslack.Message{}, msgs...), flattenReplies(replies)...)
+	}
+	users := h.resolveRefs(ctx, nameSrc)
+
 	var opts []format.DigestOption
 	if fullText {
 		opts = append(opts, format.WithFullText())
 	}
+	if len(replies) > 0 {
+		opts = append(opts, format.WithThreadReplies(replies), format.WithThreadPreviewReplies(replyCap))
+	}
 	return format.ChannelDigest("#"+channel, msgs, users, maxShow, opts...), nil
+}
+
+// collectThreadReplies fetches the replies for every thread parent in
+// the window (thread_ts == ts, reply_count > 0), keyed by parent ts with
+// the parent itself stripped. Best-effort: a single unreadable thread is
+// skipped rather than failing the digest. Takes the narrow MessageClient
+// so tests drive it with a fake.
+func collectThreadReplies(ctx context.Context, msgs MessageClient, channelID string, window []goslack.Message) map[string][]goslack.Message {
+	var out map[string][]goslack.Message
+	for _, m := range window {
+		if m.ThreadTimestamp == "" || m.ThreadTimestamp != m.Timestamp || m.ReplyCount == 0 {
+			continue
+		}
+		thread, err := msgs.ThreadReplies(ctx, channelID, m.Timestamp)
+		if err != nil {
+			continue
+		}
+		var reps []goslack.Message
+		for _, r := range thread {
+			if r.Timestamp == m.Timestamp {
+				continue // conversations.replies includes the parent
+			}
+			reps = append(reps, r)
+		}
+		if len(reps) == 0 {
+			continue
+		}
+		if out == nil {
+			out = make(map[string][]goslack.Message)
+		}
+		out[m.Timestamp] = reps
+	}
+	return out
+}
+
+// flattenReplies concatenates all reply slices — used only to feed the
+// user-name resolver, order irrelevant.
+func flattenReplies(replies map[string][]goslack.Message) []goslack.Message {
+	var out []goslack.Message
+	for _, rs := range replies {
+		out = append(out, rs...)
+	}
+	return out
 }
 
 // parseRange resolves the user's window into (oldest, latest). When
