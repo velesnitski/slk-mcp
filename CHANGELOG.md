@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-07-22
+
+### Added — read_canvas: read a channel's canvas document
+A Slack canvas is a file-backed document hung off a channel, not a
+message, so every history-based tool was blind to it — teams' runbooks,
+on-call rotations and process drafts live there. New **`read_canvas`**
+resolves the channel (reusing ADR 054's `@handle`/`U…`/`#name`
+resolution), reads `conversations.info` → `properties.canvas.file_id`,
+then fetches the body like any Slack file (`files.info` → download
+`url_private` via the audio pipeline's `DownloadFile`). Pure
+`canvasToText` renders HTML canvases to text and passes markdown/plain
+through, with a 200 KB cap. Read-only; no new client contracts. Needs
+`files:read` (already required by audio/image). See ADR 058. 577 → 581
+tests.
+
 ## [1.14.0] - 2026-07-21
 
 ### Added — with_replies: thread drill-in for get_channel_digest

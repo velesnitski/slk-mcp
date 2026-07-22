@@ -251,6 +251,7 @@ func (h *Hub) Scheduled() ScheduledClient { return h.client.Scheduled }
 func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerAudioTools(s)
 	h.registerImageTools(s)
+	h.registerCanvasTools(s)
 	h.registerChannelTools(s)
 	h.registerDigestTools(s)
 	h.registerListTools(s)

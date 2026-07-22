@@ -116,6 +116,7 @@ Or via config file (`~/.claude.json`):
 | `list_channels` | List channels the bot can see, ordered by member count |
 | `get_channel_info` | Topic, purpose, member count, created date |
 | `get_channel_digest` | Compact digest of one channel — or a DM, addressed as `@handle` or a bare `U…` user id; `with_replies=true` inlines thread discussions |
+| `read_canvas` | Read the canvas document attached to a channel or DM (runbooks, rotations) |
 | `get_multi_channel_digest` | Digest across multiple channels |
 | `get_morning_recap` | Decisions + activity across channels |
 | `search_messages` | Workspace search (Slack syntax) |
