@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-07-22
+
+### Added — answered-DM suppression in get_unread_summary
+Slack advances `last_read` on client focus, not on send — a DM answered
+from a notification stays "unread" server-side and re-surfaced the
+counterpart's questions as pending after the operator had already
+replied. The sweep now probes each DM's actual newest message
+(`history limit=1`, immune to last_read lag) and **suppresses DMs where
+the operator holds the last word** to a one-line note
+(`N answered DM(s) hidden: @a — pass show_answered=true to include`).
+Fail-open on probe errors; skipped when `dm_window_hours` explicitly
+requests already-read DM recaps. See ADR 059. 581 → 584 tests.
+
 ## [1.15.0] - 2026-07-22
 
 ### Added — read_canvas: read a channel's canvas document

@@ -33,6 +33,7 @@ type unreadParams struct {
 	ownThreadHours     int
 	afterTS            string
 	includeRefs        bool
+	showAnswered       bool
 	urg                digest.UrgencyOpts
 }
 
@@ -116,6 +117,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("own_thread_hours", mcp.Description("If > 0, additionally surface NEW replies in threads the operator STARTED or already replied in, even when nobody @-mentioned them (Slack auto-follows those threads but never marks the channel unread). Catches a colleague answering your own request. Default: 24 (recommended).")),
 				mcp.WithString("after", mcp.Description("Delta cursor. Preferred: the combined token from the previous pull's trailing 'cursor:' line (e.g. 'primary=1784012484.4;secondary=1784011290.7') — applies each workspace's own cursor exactly. A plain Slack timestamp also works and applies to every workspace. Only messages/replies strictly newer are returned; channels with nothing new are dropped. Empty (default) = full sweep.")),
 				mcp.WithBoolean("include_refs", mcp.Description("Append the trailing References block (every issue ID, MR, and branch seen). Off by default — it costs a few hundred tokens and is only worth it when you'll chain into those IDs. The newest message ts also lives in each channel's inline output, so a delta cursor doesn't need this.")),
+				mcp.WithBoolean("show_answered", mcp.Description("Also show DMs where the operator already holds the last word. By default those are suppressed to a one-line note — Slack's last_read updates on client focus, not on send, so a DM answered from a notification can stay 'unread' server-side and re-surface as a false pending item. Default: false.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -133,6 +135,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					ownThreadHours:     int(req.GetFloat("own_thread_hours", 24)),
 					afterTS:            strings.TrimSpace(req.GetString("after", "")),
 					includeRefs:        req.GetBool("include_refs", false),
+					showAnswered:       req.GetBool("show_answered", false),
 					urg: digest.UrgencyOpts{
 						Weight:        req.GetFloat("urgency_weight", 0),
 						ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -402,7 +405,40 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	// thread-mention merges so it prunes those too.
 	results = filterAfter(results, p.afterTS)
 
+	// Answered-DM suppression: a DM where the operator holds the last
+	// word is a conversation they've already handled — Slack's last_read
+	// just hasn't caught up (it updates on client focus, not on send, so
+	// replying from a notification leaves the DM "unread" for minutes).
+	// Probe each DM's actual newest message and drop the answered ones.
+	// Skipped when dm_window_hours is on (that mode explicitly asks for
+	// already-read DM recaps) or when the caller wants them shown.
+	var answeredNote string
+	if !p.showAnswered && p.dmWindowHours <= 0 && selfID != "" {
+		latestFn := func(ctx context.Context, channelID string) (*goslack.Message, error) {
+			msgs, err := h.Messages().History(ctx, slack.HistoryParams{ChannelID: channelID, Limit: 1})
+			if err != nil || len(msgs) == 0 {
+				return nil, err
+			}
+			return &msgs[0], nil
+		}
+		var answered []*slack.ChannelUnread
+		results, answered = dropAnsweredDMs(ctx, latestFn, selfID, results)
+		if len(answered) > 0 {
+			labels := make([]string, 0, len(answered))
+			for _, cu := range answered {
+				labels = append(labels, channelDisplayLabel(ctx, cu.Channel, h.Users()))
+			}
+			answeredNote = fmt.Sprintf("%d answered DM(s) hidden (you have the last word): %s — pass show_answered=true to include\n",
+				len(answered), strings.Join(labels, ", "))
+		}
+	}
+
 	if len(results) == 0 {
+		if answeredNote != "" {
+			// Everything unread was an already-answered DM — say so
+			// instead of a bare "all caught up", and keep the cursor.
+			return strings.TrimRight(answeredNote, "\n"), p.afterTS, nil
+		}
 		// No new content: carry the caller's incoming cursor forward so a
 		// combined cursor never regresses for a caught-up workspace.
 		return "", p.afterTS, nil
@@ -424,6 +460,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d channels, %d top-level + %d thread replies\n",
 		len(results), totalMsgs, totalReplies)
+	if answeredNote != "" {
+		b.WriteString(answeredNote)
+	}
 	// Emit the delta cursor so the next call can pass after=<ts> and get
 	// only newer messages. One cheap line replaces the whole References
 	// block as the default machine-readable handle on this pull. The same

@@ -75,6 +75,46 @@ func combinedCursor(order []string, cursors map[string]string) string {
 	return strings.Join(parts, ";")
 }
 
+// isAnsweredDM decides whether a DM conversation is "answered": the
+// operator holds the last word. latest is the channel's newest message
+// (fetched independently of last_read, which Slack updates lazily — a
+// reply sent from a notification can leave the DM "unread" server-side
+// for minutes). Pure; nil latest or empty selfID → not answered.
+func isAnsweredDM(cu *slack.ChannelUnread, latest *goslack.Message, selfID string) bool {
+	if cu == nil || latest == nil || selfID == "" {
+		return false
+	}
+	if !slack.IsDirectMessage(cu.Channel) {
+		return false
+	}
+	return latest.User == selfID
+}
+
+// dropAnsweredDMs splits the sweep results into kept channels and
+// answered DMs (operator's message is the newest in the conversation).
+// latestFn fetches a channel's single newest message; it runs once per
+// DM in the result set — a handful of tiny calls. Fail-open: if the
+// probe errors, the channel is kept (better to over-show than to hide a
+// live question). Non-DM channels pass through untouched.
+func dropAnsweredDMs(ctx context.Context, latestFn func(ctx context.Context, channelID string) (*goslack.Message, error), selfID string, results []*slack.ChannelUnread) (kept, answered []*slack.ChannelUnread) {
+	for _, cu := range results {
+		if cu == nil {
+			continue
+		}
+		if !slack.IsDirectMessage(cu.Channel) || selfID == "" {
+			kept = append(kept, cu)
+			continue
+		}
+		latest, err := latestFn(ctx, cu.Channel.ID)
+		if err != nil || !isAnsweredDM(cu, latest, selfID) {
+			kept = append(kept, cu)
+			continue
+		}
+		answered = append(answered, cu)
+	}
+	return kept, answered
+}
+
 // summarizeMentions renders aggregate stats over a mentions match set —
 // the operational-load view ("how often was I pinged, by whom, where")
 // that previously required hand-counting the hit list. Pure and
