@@ -116,6 +116,16 @@ type ScheduledClient interface {
 	List(ctx context.Context) ([]goslack.ScheduledMessage, error)
 }
 
+// CanvasClient resolves channel canvases: the attached canvas-tab file
+// (conversations.info properties.canvas) and canvas-type files shared
+// into the channel (files.list types=canvas). Both lookups try the
+// available identities — canvas visibility differs between bot and user
+// tokens.
+type CanvasClient interface {
+	ChannelCanvas(ctx context.Context, channelID string) (fileID string, isEmpty bool, err error)
+	CanvasFiles(ctx context.Context, channelID string) ([]goslack.File, error)
+}
+
 // Compile-time assertions: if the concrete services in
 // `internal/slack` drift from the contracts above, the build breaks
 // with a clear `does not implement` diagnostic that names the missing
@@ -130,4 +140,5 @@ var (
 	_ StatusClient    = (*slack.StatusService)(nil)
 	_ DNDClient       = (*slack.DNDService)(nil)
 	_ ScheduledClient = (*slack.ScheduledService)(nil)
+	_ CanvasClient    = (*slack.CanvasService)(nil)
 )

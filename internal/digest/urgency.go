@@ -54,8 +54,8 @@ const (
 	urgencyQuestionWeight = 2 // per "?" mark, capped per message
 	urgencyQuestionCap    = 3 // max question marks counted per message
 
-	urgencyKeywordWeight = 10 // per unique keyword hit per message
-	urgencyReactionWeight = 3 // per matching reaction
+	urgencyKeywordWeight  = 10 // per unique keyword hit per message
+	urgencyReactionWeight = 3  // per matching reaction
 
 	urgencyRecentBonus  = 5 // age < 1h
 	urgencyFreshBonus   = 2 // age < 6h

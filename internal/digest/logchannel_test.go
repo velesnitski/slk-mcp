@@ -94,17 +94,17 @@ func TestIsLogChannelName(t *testing.T) {
 	// Keep these generic so the test fixtures don't accidentally
 	// document a real workspace's channel inventory.
 	positive := []string{
-		"app-logs",            // log
-		"team-alerts",         // alert
-		"infra-alarm-feed",    // alarm
-		"infra-monitor-low",   // monitor
-		"perf-monitoring",     // monitoring
-		"metric-feed",         // metric
-		"metrics-stream",      // metrics
-		"weekly-report",       // report
-		"daily-reports",       // reports
-		"build-cron-feed",     // cron
-		"team-incident-room",  // incident
+		"app-logs",           // log
+		"team-alerts",        // alert
+		"infra-alarm-feed",   // alarm
+		"infra-monitor-low",  // monitor
+		"perf-monitoring",    // monitoring
+		"metric-feed",        // metric
+		"metrics-stream",     // metrics
+		"weekly-report",      // report
+		"daily-reports",      // reports
+		"build-cron-feed",    // cron
+		"team-incident-room", // incident
 	}
 	for _, n := range positive {
 		t.Run(n, func(t *testing.T) {
@@ -286,8 +286,8 @@ func TestLogChannelDigest_RendersHistogramAndSamples(t *testing.T) {
 		"INFO=8",
 		"recent FATAL:",
 		"recent ERROR:",
-		"... +3 more",     // ERROR has 5 total, only 2 samples → +3
-		"... +7 more",     // INFO 8 total, 1 sample → +7
+		"... +3 more", // ERROR has 5 total, only 2 samples → +3
+		"... +7 more", // INFO 8 total, 1 sample → +7
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output:\n%s", want, out)

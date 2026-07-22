@@ -31,6 +31,7 @@ type Client struct {
 	Status    *StatusService
 	DND       *DNDService
 	Scheduled *ScheduledService
+	Canvas    *CanvasService
 }
 
 // New constructs a Client from a validated config.
@@ -72,6 +73,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.Status = newStatusService(user, log)
 	c.DND = newDNDService(user, log)
 	c.Scheduled = newScheduledService(user, log)
+	c.Canvas = newCanvasService(primary, user, log)
 
 	return c
 }

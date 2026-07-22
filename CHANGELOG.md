@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-07-22
+
+### Fixed/Added — canvas lookup cascade in read_canvas
+"No canvas attached" on a channel that visibly held one: canvas
+visibility on conversations.info differs between bot and user tokens,
+and a "canvas in the channel" is often a standalone document shared as a
+file — invisible to properties.canvas entirely. New CanvasService tries
+both identities for the channel canvas tab, then falls back to
+`files.list types=canvas` (user identity first), rendering the newest
+shared canvas through the same download path. See ADR 060. 584 → 585
+tests.
+
 ## [1.16.0] - 2026-07-22
 
 ### Added — answered-DM suppression in get_unread_summary

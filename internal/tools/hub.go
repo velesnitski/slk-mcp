@@ -244,6 +244,7 @@ func (h *Hub) Lists() ListClient          { return h.client.Lists }
 func (h *Hub) Status() StatusClient       { return h.client.Status }
 func (h *Hub) DND() DNDClient             { return h.client.DND }
 func (h *Hub) Scheduled() ScheduledClient { return h.client.Scheduled }
+func (h *Hub) Canvas() CanvasClient       { return h.client.Canvas }
 
 // RegisterAll wires every tool category onto s. Order is not
 // significant; tools register themselves conditionally based on

@@ -312,9 +312,9 @@ func TestRenderText_ResolvesMentionsAndStripsLinks(t *testing.T) {
 
 func TestRenderText_ResolvesChannelRefs(t *testing.T) {
 	refs := map[string]string{
-		"U001":            "Alice",
-		"C0ABCDEFGHI":     "team-alpha",
-		"C0AAAABBBBC":     "team-bravo",
+		"U001":        "Alice",
+		"C0ABCDEFGHI": "team-alpha",
+		"C0AAAABBBBC": "team-bravo",
 	}
 	cases := []struct {
 		in   string
@@ -348,10 +348,10 @@ func TestCollectMentionedChannelIDs_DedupesAndIgnoresInvalid(t *testing.T) {
 	}
 	msgs := []goslack.Message{
 		mk("see <#C0AAAAAAAAA> and <#C0BBBBBBBBB|name>"),
-		mk("again <#C0AAAAAAAAA>"),       // dup
-		mk("private <#G0PRIVATE12>"),     // G-prefix is also a channel
-		mk("user <@U001>"),               // not a channel
-		mk("not-a-channel <#XYZ123>"),    // wrong prefix
+		mk("again <#C0AAAAAAAAA>"),    // dup
+		mk("private <#G0PRIVATE12>"),  // G-prefix is also a channel
+		mk("user <@U001>"),            // not a channel
+		mk("not-a-channel <#XYZ123>"), // wrong prefix
 	}
 	got := CollectMentionedChannelIDs(msgs)
 	want := map[string]bool{

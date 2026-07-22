@@ -102,4 +102,3 @@ func joinPrefix(prefix string, items []string) string {
 	}
 	return strings.Join(out, ", ")
 }
-

@@ -40,7 +40,7 @@ func TestMessageUrgency_QuestionMarksCappedAtThree(t *testing.T) {
 		{"hi?", 1 * urgencyQuestionWeight},
 		{"what??", 2 * urgencyQuestionWeight},
 		{"why???", 3 * urgencyQuestionWeight},
-		{"why????", 3 * urgencyQuestionWeight},     // capped
+		{"why????", 3 * urgencyQuestionWeight},       // capped
 		{"why??????????", 3 * urgencyQuestionWeight}, // still capped
 	}
 	for _, c := range cases {

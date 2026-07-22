@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	issueIDRe   = regexp.MustCompile(`\b([A-Z]{2,5}-\d{1,5})\b`)
-	mrIDRe      = regexp.MustCompile(`!(\d{2,5})\b`)
-	branchRe    = regexp.MustCompile(`(?:branch|to branch) ([\w./-]+?)(?:\s+(?:of|from|to)\b|$)`)
-	deployRe    = regexp.MustCompile(`(?i)deploy(?:ing)? to (\w+)`)
-	deployOkRe  = regexp.MustCompile(`(?i)deploy.* (succeeded|completed)`)
-	deployErrRe = regexp.MustCompile(`(?i)deploy.* (failed|aborted)`)
-	personRe    = regexp.MustCompile(`\(([a-z][\w.-]+)\)`)
+	issueIDRe     = regexp.MustCompile(`\b([A-Z]{2,5}-\d{1,5})\b`)
+	mrIDRe        = regexp.MustCompile(`!(\d{2,5})\b`)
+	branchRe      = regexp.MustCompile(`(?:branch|to branch) ([\w./-]+?)(?:\s+(?:of|from|to)\b|$)`)
+	deployRe      = regexp.MustCompile(`(?i)deploy(?:ing)? to (\w+)`)
+	deployOkRe    = regexp.MustCompile(`(?i)deploy.* (succeeded|completed)`)
+	deployErrRe   = regexp.MustCompile(`(?i)deploy.* (failed|aborted)`)
+	personRe      = regexp.MustCompile(`\(([a-z][\w.-]+)\)`)
 	pipelineOkRe  = regexp.MustCompile(`(?i)Pipeline #?\d+ has passed`)
 	pipelineErrRe = regexp.MustCompile(`(?i)Pipeline #?\d+ has failed`)
 	// "of REPO / SUB / NAME" — last segment is the repo identity.

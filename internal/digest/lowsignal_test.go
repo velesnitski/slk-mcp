@@ -92,9 +92,9 @@ func TestIsSuccessReport(t *testing.T) {
 	}{
 		{"status: passed pass rate: 100% failed: 0", true},
 		{"Status: PASSED ... Failed: 0 ...", true},
-		{"failed: 0", false},                                   // missing passed marker
-		{"status: passed", false},                              // missing failed:0 marker
-		{"status: failed", false},                              // not a success report
+		{"failed: 0", false},      // missing passed marker
+		{"status: passed", false}, // missing failed:0 marker
+		{"status: failed", false}, // not a success report
 		{"some unrelated text", false},
 	}
 	for _, c := range cases {
