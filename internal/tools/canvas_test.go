@@ -66,3 +66,73 @@ func TestPickNewestCanvas(t *testing.T) {
 		t.Fatalf("want newest F3; got %+v", got)
 	}
 }
+
+func TestCanvasDateVariants(t *testing.T) {
+	vs, err := canvasDateVariants("2026-07-23")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"23.07.2026", "23.07.26", "2026-07-23", "23.07", "23/07/2026", "23.7.2026", "23.7"} {
+		found := false
+		for _, v := range vs {
+			if v == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing variant %q in %v", want, vs)
+		}
+	}
+	if vs, _ := canvasDateVariants(""); vs != nil {
+		t.Error("empty date → nil variants")
+	}
+	if _, err := canvasDateVariants("23.07.2026"); err == nil {
+		t.Error("non-ISO input must error")
+	}
+}
+
+func TestSelectCanvas_DateAndMatch(t *testing.T) {
+	mkTitled := func(id, title string, created int64) goslack.File {
+		f := goslack.File{}
+		f.ID = id
+		f.Title = title
+		f.Created = goslack.JSONTime(created)
+		return f
+	}
+	files := []goslack.File{
+		mkTitled("F1", "22.07.2026 Tech Meet", 100),
+		mkTitled("F2", "23.07.2026 Tech Meet", 200),
+		mkTitled("F3", "Runbook", 300),
+		mkTitled("F4", "23.07.2026 Retro", 150),
+	}
+	vs, _ := canvasDateVariants("2026-07-23")
+
+	// date only → newest among the two 23.07 canvases.
+	if got := selectCanvas(files, "", vs); got == nil || got.ID != "F2" {
+		t.Fatalf("date-only: want F2, got %+v", got)
+	}
+	// date + match → the Retro one.
+	if got := selectCanvas(files, "retro", vs); got == nil || got.ID != "F4" {
+		t.Fatalf("date+match: want F4, got %+v", got)
+	}
+	// match only, case-insensitive.
+	if got := selectCanvas(files, "runbook", nil); got == nil || got.ID != "F3" {
+		t.Fatalf("match-only: want F3, got %+v", got)
+	}
+	// miss → nil.
+	if got := selectCanvas(files, "standup", vs); got != nil {
+		t.Fatalf("miss must be nil, got %+v", got)
+	}
+}
+
+func TestRenderCanvasList_NewestFirstUntitled(t *testing.T) {
+	a := goslack.File{}
+	a.Title = "Old"
+	a.Created = goslack.JSONTime(100)
+	b := goslack.File{}
+	b.Created = goslack.JSONTime(200) // untitled, newer
+	got := renderCanvasList([]goslack.File{a, b})
+	if !strings.HasPrefix(got, "- (untitled)") || !strings.Contains(got, "- Old") {
+		t.Fatalf("want untitled first then Old; got:\n%s", got)
+	}
+}

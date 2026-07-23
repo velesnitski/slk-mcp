@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-07-23
+
+### Added — canvas selectors: date / match / list_only
+Meeting notes live in per-meeting canvases titled with a date
+("22.07.2026 Tech Meet"). `read_canvas` now takes `date` (YYYY-MM-DD,
+matched against common title spellings incl. unpadded), `match` (title
+substring) and `list_only`, applied over the channel's full canvas set
+(shared files ∪ tab canvas). A miss returns "no canvas matching …;
+available: <list>" as a normal answer — one call resolves "did the
+meeting notes for day X land?" either way. See ADR 061. 585 → 588 tests.
+
 ## [1.17.0] - 2026-07-22
 
 ### Fixed/Added — canvas lookup cascade in read_canvas
