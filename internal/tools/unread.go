@@ -414,15 +414,11 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	// already-read DM recaps) or when the caller wants them shown.
 	var answeredNote string
 	if !p.showAnswered && p.dmWindowHours <= 0 && selfID != "" {
-		latestFn := func(ctx context.Context, channelID string) (*goslack.Message, error) {
-			msgs, err := h.Messages().History(ctx, slack.HistoryParams{ChannelID: channelID, Limit: 1})
-			if err != nil || len(msgs) == 0 {
-				return nil, err
-			}
-			return &msgs[0], nil
+		recentFn := func(ctx context.Context, channelID string) ([]goslack.Message, error) {
+			return h.Messages().History(ctx, slack.HistoryParams{ChannelID: channelID, Limit: answeredDMWindow})
 		}
 		var answered []*slack.ChannelUnread
-		results, answered = dropAnsweredDMs(ctx, latestFn, selfID, results)
+		results, answered = dropAnsweredDMs(ctx, recentFn, selfID, results)
 		if len(answered) > 0 {
 			labels := make([]string, 0, len(answered))
 			for _, cu := range answered {

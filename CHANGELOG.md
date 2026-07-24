@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-07-24
+
+### Fixed — answered-DM detection sees through ack tails
+Root cause of "sweep doesn't see my replies": for actively-answered DMs
+the search-based backstops re-inject counterpart messages (search never
+returns your own), and ADR 059's suppression missed the most common
+ending — you answer, they close with "Спасибо! Прилетел". The probe now
+reads a 5-message window and treats a DM as answered when your reply is
+followed only by closing acks; shared `isClosingAckText` gains a narrow
+two-word ack+tail tier (also used by drop_closing_acks), while
+ack-plus-content ("спасибо за информацию, посмотрю") stays live. See
+ADR 062. 588 → 589 tests.
+
 ## [1.18.0] - 2026-07-23
 
 ### Added — canvas selectors: date / match / list_only

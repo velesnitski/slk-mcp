@@ -75,28 +75,48 @@ func combinedCursor(order []string, cursors map[string]string) string {
 	return strings.Join(parts, ";")
 }
 
-// isAnsweredDM decides whether a DM conversation is "answered": the
-// operator holds the last word. latest is the channel's newest message
-// (fetched independently of last_read, which Slack updates lazily — a
-// reply sent from a notification can leave the DM "unread" server-side
-// for minutes). Pure; nil latest or empty selfID → not answered.
-func isAnsweredDM(cu *slack.ChannelUnread, latest *goslack.Message, selfID string) bool {
-	if cu == nil || latest == nil || selfID == "" {
+// isAnsweredDM decides whether a DM conversation is "answered", given a
+// window of the channel's newest messages (newest first, fetched
+// independently of last_read — Slack updates that lazily, and the
+// search-based backstops re-inject counterpart messages even for
+// fully-read DMs). Answered means: the operator has spoken in the
+// window, and everything the counterpart said AFTER the operator's last
+// message is a closing acknowledgement ("Спасибо! Прилетел") — i.e. the
+// conversation is over, whether or not the operator literally holds the
+// last word. Pure; empty window or selfID → not answered.
+func isAnsweredDM(cu *slack.ChannelUnread, window []goslack.Message, selfID string) bool {
+	if cu == nil || len(window) == 0 || selfID == "" {
 		return false
 	}
 	if !slack.IsDirectMessage(cu.Channel) {
 		return false
 	}
-	return latest.User == selfID
+	// window is newest-first: walk from the top; every counterpart
+	// message seen before reaching an operator message must be a
+	// closing ack.
+	for _, m := range window {
+		if m.User == selfID {
+			return true // operator's reply reached — tail above was all acks
+		}
+		if !isClosingAckText(m.Text) {
+			return false // live counterpart content newer than any reply
+		}
+	}
+	return false // operator absent from the window entirely
 }
 
+// answeredDMWindow is how many newest messages the answered-DM probe
+// inspects. Enough to look past a short ack tail, small enough to stay
+// one cheap history call.
+const answeredDMWindow = 5
+
 // dropAnsweredDMs splits the sweep results into kept channels and
-// answered DMs (operator's message is the newest in the conversation).
-// latestFn fetches a channel's single newest message; it runs once per
-// DM in the result set — a handful of tiny calls. Fail-open: if the
-// probe errors, the channel is kept (better to over-show than to hide a
-// live question). Non-DM channels pass through untouched.
-func dropAnsweredDMs(ctx context.Context, latestFn func(ctx context.Context, channelID string) (*goslack.Message, error), selfID string, results []*slack.ChannelUnread) (kept, answered []*slack.ChannelUnread) {
+// answered DMs. recentFn fetches a channel's newest messages
+// (newest-first, answeredDMWindow deep); it runs once per DM in the
+// result set — a handful of tiny calls. Fail-open: if the probe errors,
+// the channel is kept (better to over-show than to hide a live
+// question). Non-DM channels pass through untouched.
+func dropAnsweredDMs(ctx context.Context, recentFn func(ctx context.Context, channelID string) ([]goslack.Message, error), selfID string, results []*slack.ChannelUnread) (kept, answered []*slack.ChannelUnread) {
 	for _, cu := range results {
 		if cu == nil {
 			continue
@@ -105,8 +125,8 @@ func dropAnsweredDMs(ctx context.Context, latestFn func(ctx context.Context, cha
 			kept = append(kept, cu)
 			continue
 		}
-		latest, err := latestFn(ctx, cu.Channel.ID)
-		if err != nil || !isAnsweredDM(cu, latest, selfID) {
+		window, err := recentFn(ctx, cu.Channel.ID)
+		if err != nil || !isAnsweredDM(cu, window, selfID) {
 			kept = append(kept, cu)
 			continue
 		}
@@ -295,10 +315,32 @@ func filterEmptyMentions(matches []goslack.SearchMessage) []goslack.SearchMessag
 // longer messages are not affected.
 var closingAckRe = regexp.MustCompile(`(?i)^(?:thanks|thank you|thx|ok|okay|got it|spasibo|spasiba|спасибо|спасиб|пасиб|ок|окей|\+1|👍|:thumbsup:|:\+1:|np|nice|great|ack|done)[!.)\s]*$`)
 
+// isClosingAckText reports whether a message body is a conversation-
+// closing acknowledgement. Two tiers: the exact-match regex ("спасибо",
+// "ok", "+1"…), plus a narrow heuristic for ack-with-one-tail-word
+// messages like "Спасибо! Прилетел" or "Ок, принял" — exactly two
+// words, no question mark, FIRST word is an ack token. Anything longer
+// ("спасибо за информацию, посмотрю") carries real content — an ack
+// followed by a promise of action is a live message, not a closer.
+func isClosingAckText(s string) bool {
+	s = strings.TrimSpace(s)
+	if closingAckRe.MatchString(s) {
+		return true
+	}
+	if strings.ContainsAny(s, "?？") {
+		return false
+	}
+	words := strings.Fields(s)
+	if len(words) != 2 {
+		return false
+	}
+	return closingAckRe.MatchString(strings.Trim(words[0], "!,.)("))
+}
+
 func filterClosingAcks(matches []goslack.SearchMessage) []goslack.SearchMessage {
 	out := matches[:0]
 	for _, m := range matches {
-		if !closingAckRe.MatchString(strings.TrimSpace(m.Text)) {
+		if !isClosingAckText(m.Text) {
 			out = append(out, m)
 		}
 	}
