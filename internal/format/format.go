@@ -249,6 +249,16 @@ type digestOpts struct {
 	omitEmpty        bool // return "" instead of a "(no activity)" line
 	aggregateHuddles bool // collapse content-less huddle pings into a count
 	fullText         bool // render bodies without the MessageLineLimit truncation
+	msgLimit         int  // per-call body truncation cap; 0 = MessageLineLimit default
+}
+
+// WithMessageLimit overrides the per-message body truncation length for
+// this render (0 = the MessageLineLimit default). Lets a caller render
+// high-signal, low-volume channels (DMs) more fully without going
+// unbounded (which risks a single wall-of-text blowing the budget and
+// being dropped entirely). Ignored when WithFullText is also set.
+func WithMessageLimit(n int) DigestOption {
+	return func(o *digestOpts) { o.msgLimit = n }
 }
 
 // DigestOption configures ChannelDigest output.
@@ -418,14 +428,14 @@ func ParseTS(ts string) time.Time {
 // allUsers is optional; when present, <@USERID> mentions and Slack
 // link markup inside the body are resolved to readable form.
 func MessageLine(msg goslack.Message, userName string, allUsers ...map[string]string) string {
-	return messageLineImpl(msg, userName, firstUsers(allUsers), false)
+	return messageLineImpl(msg, userName, firstUsers(allUsers), false, 0)
 }
 
 // MessageLineFull is MessageLine without the MessageLineLimit body
 // truncation — for callers that need the complete text (get_thread /
 // get_channel_digest with full_text). See ADR 030.
 func MessageLineFull(msg goslack.Message, userName string, allUsers ...map[string]string) string {
-	return messageLineImpl(msg, userName, firstUsers(allUsers), true)
+	return messageLineImpl(msg, userName, firstUsers(allUsers), true, 0)
 }
 
 func firstUsers(allUsers []map[string]string) map[string]string {
@@ -435,7 +445,7 @@ func firstUsers(allUsers []map[string]string) map[string]string {
 	return nil
 }
 
-func messageLineImpl(msg goslack.Message, userName string, users map[string]string, fullText bool) string {
+func messageLineImpl(msg goslack.Message, userName string, users map[string]string, fullText bool, limit int) string {
 	var b strings.Builder
 	b.Grow(64 + len(msg.Text))
 
@@ -449,9 +459,13 @@ func messageLineImpl(msg goslack.Message, userName string, users map[string]stri
 	b.WriteString("] ")
 
 	body := collapseWhitespace(RenderText(msg.Text, users))
-	if !fullText && len(body) > MessageLineLimit {
-		over := len(body) - MessageLineLimit
-		body = body[:MessageLineLimit]
+	effLimit := MessageLineLimit
+	if limit > 0 {
+		effLimit = limit
+	}
+	if !fullText && len(body) > effLimit {
+		over := len(body) - effLimit
+		body = body[:effLimit]
 		b.WriteString(body)
 		fmt.Fprintf(&b, " (+%d chars)", over)
 	} else {
@@ -579,11 +593,11 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		if MentionsUser(m, cfg.selfID) {
 			b.WriteString(MentionMarker)
 		}
-		b.WriteString(messageLineImpl(m, users[m.User], users, cfg.fullText))
+		b.WriteString(messageLineImpl(m, users[m.User], users, cfg.fullText, cfg.msgLimit))
 		b.WriteByte('\n')
 
 		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
-			writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText)
+			writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)
 		}
 	}
 	if hidden > 0 {
@@ -599,7 +613,7 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 // writeReplies renders replies indented under the thread parent, up
 // to a cap (cap <= 0 means use ThreadPreviewReplies default). Mentions
 // are highlighted using selfID just like the parent message.
-func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, selfID string, cap int, fullText bool) {
+func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, selfID string, cap int, fullText bool, limit int) {
 	if cap <= 0 {
 		cap = ThreadPreviewReplies
 	}
@@ -614,7 +628,7 @@ func writeReplies(b *strings.Builder, replies []goslack.Message, users map[strin
 		if MentionsUser(r, selfID) {
 			b.WriteString(MentionMarker)
 		}
-		b.WriteString(messageLineImpl(r, users[r.User], users, fullText))
+		b.WriteString(messageLineImpl(r, users[r.User], users, fullText, limit))
 		b.WriteByte('\n')
 	}
 	if hidden > 0 {

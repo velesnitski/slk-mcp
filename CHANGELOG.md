@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-07-27
+
+### Fixed — DM bodies no longer truncated to "(+N chars)" in the sweep
+get_unread_summary truncated every body to the 280-char preview — fine
+for channels, wrong for DMs, where amounts/deadlines/asks live (a
+billing DM showed "(+866 chars)", forcing a full_text re-fetch). DM
+channels now render at a generous 1500-char cap (`dm_full_text`, default
+true); channels stay compact. New `format.WithMessageLimit(n)` powers
+it. Bounded on purpose — unbounded would risk a wall-of-text DM being
+dropped by the budget cap entirely. See ADR 063. 589 → 591 tests.
+
 ## [1.19.0] - 2026-07-24
 
 ### Fixed — answered-DM detection sees through ack tails

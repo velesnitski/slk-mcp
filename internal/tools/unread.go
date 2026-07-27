@@ -34,6 +34,7 @@ type unreadParams struct {
 	afterTS            string
 	includeRefs        bool
 	showAnswered       bool
+	dmFullText         bool
 	urg                digest.UrgencyOpts
 }
 
@@ -56,6 +57,12 @@ const (
 	// triggers the auto budget in runUnreadSummary. Distinct from an
 	// explicit 0 (unlimited).
 	maxCharsAuto = -1
+
+	// dmMessageLimit is the per-message body cap for DM channels in the
+	// unread sweep (vs the 280-char MessageLineLimit used for channels).
+	// Generous enough for amounts/deadlines/short paragraphs, bounded so
+	// a pasted wall-of-text can't dominate the char budget.
+	dmMessageLimit = 1500
 
 	// DefaultTotalMaxChars bounds the combined rendered body across all
 	// workspaces when max_chars is left to auto. Chosen to stay well under
@@ -118,6 +125,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithString("after", mcp.Description("Delta cursor. Preferred: the combined token from the previous pull's trailing 'cursor:' line (e.g. 'primary=1784012484.4;secondary=1784011290.7') — applies each workspace's own cursor exactly. A plain Slack timestamp also works and applies to every workspace. Only messages/replies strictly newer are returned; channels with nothing new are dropped. Empty (default) = full sweep.")),
 				mcp.WithBoolean("include_refs", mcp.Description("Append the trailing References block (every issue ID, MR, and branch seen). Off by default — it costs a few hundred tokens and is only worth it when you'll chain into those IDs. The newest message ts also lives in each channel's inline output, so a delta cursor doesn't need this.")),
 				mcp.WithBoolean("show_answered", mcp.Description("Also show DMs where the operator already holds the last word. By default those are suppressed to a one-line note — Slack's last_read updates on client focus, not on send, so a DM answered from a notification can stay 'unread' server-side and re-surface as a false pending item. Default: false.")),
+				mcp.WithBoolean("dm_full_text", mcp.Description("Render DM message bodies at a generous cap (1500 chars) instead of the compact 280-char channel preview, so amounts/deadlines/asks in a direct message aren't truncated to '(+N chars)'. DMs only — channels stay compact. Default: true; set false for a leaner, uniformly-truncated sweep.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -136,6 +144,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					afterTS:            strings.TrimSpace(req.GetString("after", "")),
 					includeRefs:        req.GetBool("include_refs", false),
 					showAnswered:       req.GetBool("show_answered", false),
+					dmFullText:         req.GetBool("dm_full_text", true),
 					urg: digest.UrgencyOpts{
 						Weight:        req.GetFloat("urgency_weight", 0),
 						ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -505,9 +514,20 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 				format.WithThreadPreviewReplies(p.replyCap),
 				format.WithOmitEmpty(),
 			}
-			// Collapse huddle noise in channels (standup/ad-hoc call pings);
-			// keep huddles inline in DMs, where the call is the signal.
-			if !slack.IsDirectMessage(r.Channel) {
+			if slack.IsDirectMessage(r.Channel) {
+				// DMs are the actionable layer — few, human-length, and the
+				// place amounts/deadlines/asks live. Render them fuller than
+				// the 280-char channel preview so the sweep stops truncating
+				// "(+866 chars)" on the one line that mattered. Bounded (not
+				// full_text) so a wall-of-text paste can't blow the budget
+				// and get the whole DM dropped.
+				if p.dmFullText {
+					chOpts = append(chOpts, format.WithMessageLimit(dmMessageLimit))
+				}
+			} else {
+				// Collapse huddle noise in channels (standup/ad-hoc call
+				// pings); huddles stay inline in DMs, where the call is the
+				// signal.
 				chOpts = append(chOpts, format.WithHuddleAggregation())
 			}
 			rendered = format.ChannelDigest(label, r.Messages, users, p.maxPer, chOpts...)

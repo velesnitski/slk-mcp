@@ -484,3 +484,49 @@ func TestSearchResultExt_truncation(t *testing.T) {
 		t.Fatalf("expected thread_ts continuation line: %q", short)
 	}
 }
+
+func TestChannelDigest_WithMessageLimit(t *testing.T) {
+	// A body longer than the default 280 cap but shorter than a raised
+	// per-call limit must render in full under WithMessageLimit, and stay
+	// truncated without it.
+	body := strings.Repeat("y", MessageLineLimit+400) // 680 chars
+	msg := goslack.Message{}
+	msg.Timestamp = "1700000000.000000"
+	msg.User = "U1"
+	msg.Text = body
+	users := map[string]string{"U1": "acct-user"}
+
+	// Default: truncated with the +N marker.
+	def := ChannelDigest("@acct", []goslack.Message{msg}, users, 10)
+	if !strings.Contains(def, "(+400 chars)") {
+		t.Fatalf("default should truncate at MessageLineLimit; got: %s", def)
+	}
+
+	// Raised limit above the body length: full text, no marker.
+	full := ChannelDigest("@acct", []goslack.Message{msg}, users, 10, WithMessageLimit(1500))
+	if strings.Contains(full, "chars)") {
+		t.Fatalf("WithMessageLimit(1500) should render 680-char body in full; got: %s", full)
+	}
+	if !strings.Contains(full, body) {
+		t.Fatalf("full body missing under WithMessageLimit; got: %s", full)
+	}
+
+	// Limit below body length still truncates (bounded, not unlimited).
+	capped := ChannelDigest("@acct", []goslack.Message{msg}, users, 10, WithMessageLimit(500))
+	if !strings.Contains(capped, "(+180 chars)") { // 680-500
+		t.Fatalf("WithMessageLimit(500) should truncate a 680-char body to +180; got: %s", capped)
+	}
+}
+
+func TestWithFullText_BeatsMessageLimit(t *testing.T) {
+	body := strings.Repeat("z", 2000)
+	msg := goslack.Message{}
+	msg.Timestamp = "1700000000.000000"
+	msg.User = "U1"
+	msg.Text = body
+	out := ChannelDigest("@x", []goslack.Message{msg}, map[string]string{"U1": "x"}, 10,
+		WithMessageLimit(500), WithFullText())
+	if strings.Contains(out, "chars)") {
+		t.Fatalf("full_text must override the message limit; got truncation: %s", out)
+	}
+}
