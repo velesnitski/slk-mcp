@@ -37,3 +37,16 @@ func TestClassifyConversationRef(t *testing.T) {
 		}
 	}
 }
+
+func TestIsDMRef(t *testing.T) {
+	for _, dm := range []string{"@jbravo", "#@jbravo", "U0ABC1234DE", "#U0ABC1234DE", "W0ABC1234DE", "D0ABCDEF123"} {
+		if !isDMRef(dm) {
+			t.Errorf("%q should be a DM ref", dm)
+		}
+	}
+	for _, ch := range []string{"general", "#general", "C0ABC1234DE", "G0ABC1234DE", "devops-main", "", "beta-project"} {
+		if isDMRef(ch) {
+			t.Errorf("%q must NOT be a DM ref", ch)
+		}
+	}
+}

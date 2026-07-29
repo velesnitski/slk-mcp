@@ -25,7 +25,7 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("before", mcp.Description("Absolute upper bound, YYYY-MM-DD (UTC, exclusive day end). Pair with after for date ranges.")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 				mcp.WithBoolean("full_text", mcp.Description("Render message bodies in full instead of truncating long ones to a compact preview (default: false). Use when ingesting a channel verbatim — e.g. into a knowledge base.")),
-				mcp.WithBoolean("with_replies", mcp.Description("Also fetch and inline thread replies for every thread in the window (default: false). Without it, a channel whose real content lives in threads — a huddle's discussion, a request answered in replies — shows only '(N replies)' counters. Costs one conversations.replies call per thread.")),
+				mcp.WithBoolean("with_replies", mcp.Description("Also fetch and inline thread replies for every thread in the window. Defaults per conversation kind: ON for DMs (a thread reply there IS the conversation) and OFF for channels (one conversations.replies call per thread). Set explicitly to override — true to expand a channel whose real content lives in threads, false for a leaner DM read.")),
 				mcp.WithNumber("thread_preview_replies", mcp.Description("Max replies inlined per thread when with_replies=true (default: 10; pass a big number for full threads)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -42,7 +42,15 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				after := req.GetString("after", "")
 				before := req.GetString("before", "")
 				fullText := req.GetBool("full_text", false)
+				// with_replies defaults per conversation kind: ON for DMs
+				// (few messages, and a thread reply there IS the
+				// conversation — see ADR 064), OFF for channels, where
+				// fan-out × threads would multiply API calls. An explicit
+				// value always wins.
 				withReplies := req.GetBool("with_replies", false)
+				if _, explicit := req.GetArguments()["with_replies"]; !explicit {
+					withReplies = isDMRef(channel)
+				}
 				replyCap := int(req.GetFloat("thread_preview_replies", 10))
 
 				oldest, latest, err := parseRange(after, before, hours)
@@ -282,6 +290,23 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 		opts = append(opts, format.WithThreadReplies(replies), format.WithThreadPreviewReplies(replyCap))
 	}
 	return format.ChannelDigest("#"+channel, msgs, users, maxShow, opts...), nil
+}
+
+// isDMRef reports whether a conversation reference points at a direct
+// message, decided from the reference SHAPE alone — no API call:
+// `@handle` and a bare `U…`/`W…` user id always open a DM, a `D…` id is
+// one, and a channel name or `C…/G…` id never is. Pure.
+func isDMRef(ref string) bool {
+	switch kind, token := classifyConversationRef(ref); {
+	case kind == refHandle, kind == refUserID:
+		return true
+	case slack.IsChannelID(token):
+		return false
+	case strings.HasPrefix(strings.TrimPrefix(token, "#"), "D"):
+		return slack.IsConversationID(strings.TrimPrefix(token, "#"))
+	}
+	// Plain channel name — a name never denotes a DM.
+	return false
 }
 
 // collectThreadReplies fetches the replies for every thread parent in

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-07-29
+
+### Changed — with_replies defaults per conversation kind
+Reading a DM with `get_channel_digest` missed the counterpart's
+substantive reply when it lived in a thread: `with_replies` defaulted to
+false everywhere. It now defaults **ON for DMs** (a thread reply there
+IS the conversation) and stays **OFF for channels** (fan-out cost); an
+explicit argument always wins. `isDMRef` decides from the reference
+shape alone — no API call. See ADR 065. 593 → 594 tests.
+
 ## [1.21.0] - 2026-07-29
 
 ### Fixed — answered-DM suppression treats threads as separate lanes
