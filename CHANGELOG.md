@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-07-29
+
+### Fixed — answered-DM suppression treats threads as separate lanes
+A counterpart's live question posted as a **thread reply** was invisible
+to the answered-DM probe (`conversations.history` returns top-level
+only), so a DM got hidden just because the operator's newest *top-level*
+message — on an unrelated topic — was later in wall-clock time.
+`isAnsweredDM` now checks every thread first via pure
+`threadEndsWithLiveCounterpart`: any lane whose newest substantive
+message is from the counterpart keeps the DM visible. Uses the
+already-fetched replies — zero extra API calls. See ADR 064.
+591 → 593 tests.
+
 ## [1.20.0] - 2026-07-27
 
 ### Fixed — DM bodies no longer truncated to "(+N chars)" in the sweep

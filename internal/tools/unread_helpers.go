@@ -91,6 +91,18 @@ func isAnsweredDM(cu *slack.ChannelUnread, window []goslack.Message, selfID stri
 	if !slack.IsDirectMessage(cu.Channel) {
 		return false
 	}
+	// Threads are SEPARATE conversation lanes. conversations.history —
+	// the window — returns only top-level messages, so a DM where the
+	// counterpart's live question sits in a thread reply would look
+	// "answered" merely because the operator posted a newer top-level
+	// message about something else. Check every thread first: a thread
+	// whose newest message is live counterpart content keeps the DM
+	// visible, regardless of wall-clock order.
+	for _, reps := range cu.Replies {
+		if threadEndsWithLiveCounterpart(reps, selfID) {
+			return false
+		}
+	}
 	// window is newest-first: walk from the top; every counterpart
 	// message seen before reaching an operator message must be a
 	// closing ack.
@@ -103,6 +115,28 @@ func isAnsweredDM(cu *slack.ChannelUnread, window []goslack.Message, selfID stri
 		}
 	}
 	return false // operator absent from the window entirely
+}
+
+// threadEndsWithLiveCounterpart reports whether a thread's newest
+// message is substantive content from someone other than the operator —
+// i.e. a question still waiting on them in that lane. Replies arrive
+// oldest-first (conversations.replies order), so the tail is newest.
+// Trailing closing acks are skipped: a thread ending in "Спасибо!" is
+// closed, not pending.
+func threadEndsWithLiveCounterpart(replies []goslack.Message, selfID string) bool {
+	if selfID == "" {
+		return false
+	}
+	for i := len(replies) - 1; i >= 0; i-- {
+		m := replies[i]
+		if m.User == selfID {
+			return false // operator spoke last in this lane
+		}
+		if !isClosingAckText(m.Text) {
+			return true // live counterpart content, unanswered
+		}
+	}
+	return false // thread is all acks / empty
 }
 
 // answeredDMWindow is how many newest messages the answered-DM probe

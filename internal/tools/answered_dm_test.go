@@ -124,3 +124,50 @@ func TestDropAnsweredDMs_EmptySelfKeepsAll(t *testing.T) {
 		t.Fatalf("empty self must keep everything; got kept=%d answered=%d", len(kept), len(answered))
 	}
 }
+
+func TestThreadEndsWithLiveCounterpart(t *testing.T) {
+	self := "U0SELF11111"
+	other := "U0OTHER2222"
+	// Counterpart's substantive reply is last → live.
+	if !threadEndsWithLiveCounterpart([]goslack.Message{
+		msgFrom(self, "1.0"), msgFromText(other, "2.0", "вот данные по таблицам, фильтруй по package"),
+	}, self) {
+		t.Error("counterpart's substantive reply last → live")
+	}
+	// Operator spoke last → closed.
+	if threadEndsWithLiveCounterpart([]goslack.Message{
+		msgFrom(other, "1.0"), msgFrom(self, "2.0"),
+	}, self) {
+		t.Error("operator last → not live")
+	}
+	// Trailing ack from counterpart → closed.
+	if threadEndsWithLiveCounterpart([]goslack.Message{
+		msgFrom(other, "1.0"), msgFrom(self, "2.0"), msgFromText(other, "3.0", "Спасибо!"),
+	}, self) {
+		t.Error("trailing ack → not live")
+	}
+	// Guards.
+	if threadEndsWithLiveCounterpart(nil, self) || threadEndsWithLiveCounterpart([]goslack.Message{msgFrom(other, "1.0")}, "") {
+		t.Error("empty thread / empty self must not be live")
+	}
+}
+
+func TestIsAnsweredDM_ThreadReplyKeepsDMVisible(t *testing.T) {
+	self := "U0SELF11111"
+	other := "U0OTHER2222"
+	// Real-world shape: operator's newest TOP-LEVEL message is newer in
+	// wall-clock, but the counterpart's live question sits in a thread.
+	cu := dmUnread("D1", msgFrom(self, "12.0"))
+	cu.Replies = map[string][]goslack.Message{
+		"5.0": {msgFrom(self, "6.0"), msgFromText(other, "11.0", "вот данные, что дальше делаем?")},
+	}
+	window := []goslack.Message{msgFrom(self, "12.0"), msgFrom(other, "4.0")}
+	if isAnsweredDM(cu, window, self) {
+		t.Fatal("a live thread question must keep the DM visible even when the operator posted a newer top-level message")
+	}
+	// Same shape, but the thread ends with the operator → answered.
+	cu.Replies["5.0"] = []goslack.Message{msgFrom(other, "6.0"), msgFrom(self, "11.0")}
+	if !isAnsweredDM(cu, window, self) {
+		t.Fatal("thread closed by operator + operator holds top-level → answered")
+	}
+}
