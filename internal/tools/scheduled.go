@@ -32,7 +32,7 @@ func (h *Hub) registerScheduledTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("list_scheduled_messages",
-			mcp.WithDescription("List your pending scheduled Slack messages — the ones queued to send later, with their send time and target channel. Read-only. Scheduled messages are a property of YOU, so an empty workspace lists them across EVERY configured workspace. Requires a user token (xoxp-)."),
+			mcp.WithDescription("List pending scheduled Slack messages queued VIA THE API, with send time and target channel. Read-only; requires a user token (xoxp-); an empty workspace lists across EVERY configured workspace. IMPORTANT SCOPE LIMIT: chat.scheduledMessages.list does NOT return messages the user scheduled in the Slack client UI — those live in Slack's drafts store and are unreachable with an xoxp token. So an empty result means \"nothing scheduled through the API\", NOT \"nothing scheduled\" — never report the user's queue as empty from this tool alone; point them to Slack → Drafts & sent."),
 			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): list across EVERY workspace.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -66,7 +66,7 @@ func (h *Hub) runListScheduled(ctx context.Context, workspace string) *mcp.CallT
 			continue
 		}
 		if len(msgs) == 0 {
-			sections = append(sections, fmt.Sprintf("no scheduled messages%s", label))
+			sections = append(sections, scheduledEmptyMsg(label))
 			continue
 		}
 		ids := make([]string, 0, len(msgs))
@@ -117,6 +117,18 @@ func previewText(s string) string {
 		return string(r[:80]) + "…"
 	}
 	return s
+}
+
+// scheduledEmptyMsg renders the empty case WITHOUT implying the queue is
+// actually empty. `chat.scheduledMessages.list` only returns messages
+// scheduled through the API by a token; messages the operator scheduled
+// in the Slack client are stored as drafts-with-send-time and are not
+// exposed by that method at all (same class of gap as
+// subscriptions.thread.*, which needs a browser xoxc token). A bare "no
+// scheduled messages" reads as "you have none" and produced a live
+// false negative, so the caveat travels with the result.
+func scheduledEmptyMsg(label string) string {
+	return fmt.Sprintf("no API-scheduled messages%s — note: chat.scheduledMessages.list only returns messages scheduled VIA THE API; anything you queued in the Slack UI is invisible to it, so check Slack → Drafts & sent to see those", label)
 }
 
 // scheduledErrHint annotates a scope/token failure with the likely fix.

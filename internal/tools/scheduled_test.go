@@ -80,3 +80,17 @@ func TestRunListScheduled_UnknownWorkspaceIsError(t *testing.T) {
 		t.Fatalf("unknown workspace should error, got %+v", res)
 	}
 }
+
+func TestScheduledEmptyMsg_CarriesTheAPIOnlyCaveat(t *testing.T) {
+	got := scheduledEmptyMsg(" [primary]")
+	// The label must survive, and the message must NOT read as a bare
+	// "you have none" — a UI-scheduled queue is invisible to this API.
+	for _, want := range []string{"[primary]", "VIA THE API", "Slack UI", "Drafts & sent"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("empty message missing %q; got: %s", want, got)
+		}
+	}
+	if strings.HasPrefix(got, "no scheduled messages") {
+		t.Errorf("must not claim an empty queue outright; got: %s", got)
+	}
+}

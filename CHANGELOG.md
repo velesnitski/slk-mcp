@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] - 2026-07-30
+
+### Fixed — list_scheduled_messages no longer implies an empty queue
+The tool reported "no scheduled messages" while the operator had 5
+messages scheduled from the Slack client — a false negative.
+`chat.scheduledMessages.list` only returns messages scheduled **via the
+API**; UI-scheduled ones live in Slack's drafts store and are
+unreachable with an xoxp token (same dead end as
+`subscriptions.thread.*`). The empty case now says "no API-scheduled
+messages" with the caveat and points to Slack → Drafts & sent, and the
+tool description forbids reporting the queue as empty from this tool
+alone. See ADR 066. 594 → 595 tests.
+
 ## [1.22.0] - 2026-07-29
 
 ### Changed — with_replies defaults per conversation kind
