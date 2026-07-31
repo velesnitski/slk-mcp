@@ -298,3 +298,70 @@ func TestTranscribeFile_UnreadableVolumeFailsOpen(t *testing.T) {
 		t.Fatalf("unparseable volume must not block: got (%q, %v)", text, err)
 	}
 }
+
+func TestCountNonEmptyLines(t *testing.T) {
+	// ffprobe csv=p=0 output: one line per selected stream.
+	if n := countNonEmptyLines("1\n2\n"); n != 2 {
+		t.Errorf("two streams: got %d", n)
+	}
+	if n := countNonEmptyLines("1\n"); n != 1 {
+		t.Errorf("single stream: got %d", n)
+	}
+	if n := countNonEmptyLines("\n  \n"); n != 0 {
+		t.Errorf("blank output must be 0, got %d", n)
+	}
+}
+
+func TestTranscribeFile_MixesEveryAudioStream(t *testing.T) {
+	// A screen recording with system audio + mic: taking only ffmpeg's
+	// default stream can yield silence while the voice sits on the other.
+	var convertArgs []string
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(name, "ffprobe"):
+			return []byte("0\n1\n"), nil, nil // two audio streams
+		case strings.Contains(name, "ffmpeg") && !strings.Contains(joined, "volumedetect"):
+			convertArgs = args
+			return nil, nil, nil
+		case strings.Contains(name, "whisper"):
+			return []byte("speech from the mic track"), nil, nil
+		}
+		return nil, nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", ffprobe: "/bin/ffprobe", whisper: "/bin/whisper-cli", model: "/m"}
+
+	if _, err := p.transcribeFile(context.Background(), "/tmp/clip.mp4", "auto"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	joined := strings.Join(convertArgs, " ")
+	if !strings.Contains(joined, "amix=inputs=2") {
+		t.Fatalf("two audio streams must be mixed, got: %v", convertArgs)
+	}
+}
+
+func TestTranscribeFile_SingleStreamKeepsPlainConversion(t *testing.T) {
+	var convertArgs []string
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.Contains(name, "ffprobe"):
+			return []byte("0\n"), nil, nil // one audio stream
+		case strings.Contains(name, "ffmpeg") && !strings.Contains(joined, "volumedetect"):
+			convertArgs = args
+			return nil, nil, nil
+		case strings.Contains(name, "whisper"):
+			return []byte("text"), nil, nil
+		}
+		return nil, nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", ffprobe: "/bin/ffprobe", whisper: "/bin/whisper-cli", model: "/m"}
+
+	if _, err := p.transcribeFile(context.Background(), "/tmp/a.m4a", "auto"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	joined := strings.Join(convertArgs, " ")
+	if strings.Contains(joined, "amix") || !strings.Contains(joined, "-vn") {
+		t.Fatalf("single stream should use the plain -vn conversion, got: %v", convertArgs)
+	}
+}

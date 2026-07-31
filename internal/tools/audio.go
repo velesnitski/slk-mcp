@@ -357,13 +357,18 @@ func finishFetch(ctx context.Context, scoped *Hub, files []goslack.File, destDir
 // their local paths. destDir overrides os.TempDir() in tests; the tool
 // handler passes "".
 func (h *Hub) runDownloadAudio(ctx context.Context, workspace, channel, timestamp, permalink, from, destDir string) *mcp.CallToolResult {
-	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-audio", isAudioFile)
+	// isTranscribableFile, not isAudioFile: a recorded huddle or Slack
+	// video clip IS the voice message the caller means, and refusing it
+	// with "no matching attachment" while transcribe_audio happily
+	// resolves the same permalink is a contradiction the caller cannot
+	// diagnose.
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-audio", isTranscribableFile)
 	if errRes != nil {
 		return errRes
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "downloaded %d audio file(s)%s:\n", len(saved), h.wsLabel(wsName))
+	fmt.Fprintf(&b, "downloaded %d media file(s)%s:\n", len(saved), h.wsLabel(wsName))
 	for _, s := range saved {
 		fmt.Fprintf(&b, "- %s (%s, %d bytes)\n", s.Path, s.Mimetype, s.Size)
 	}

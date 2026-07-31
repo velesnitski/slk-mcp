@@ -152,9 +152,20 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 	wav := audioPath + ".wav"
 	defer os.Remove(wav)
 
-	// -vn drops any video stream: recorded huddles and clips arrive as
-	// video/mp4, and whisper only wants the audio track.
-	if _, se, err := runCommand(ctx, p.ffmpeg, "-y", "-loglevel", "error", "-i", audioPath, "-vn", "-ar", "16000", "-ac", "1", wav); err != nil {
+	// Screen recordings and huddles routinely carry MORE THAN ONE audio
+	// stream (system audio + microphone). ffmpeg's default pick is a
+	// single "best" stream, so a recording whose mic sits on stream 1
+	// while stream 0 is silent transcribes as silence. Mix every audio
+	// stream instead; with a single stream the command is the plain
+	// conversion it always was.
+	args := []string{"-y", "-loglevel", "error", "-i", audioPath}
+	if n := p.audioStreamCount(ctx, audioPath); n > 1 {
+		args = append(args, "-filter_complex", fmt.Sprintf("amix=inputs=%d:duration=longest:normalize=0", n))
+	} else {
+		args = append(args, "-vn")
+	}
+	args = append(args, "-ar", "16000", "-ac", "1", wav)
+	if _, se, err := runCommand(ctx, p.ffmpeg, args...); err != nil {
 		return "", fmt.Errorf("ffmpeg: %v: %s", err, firstErrLine(se))
 	}
 
@@ -166,12 +177,12 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 		return "", fmt.Errorf("audio track is silent (mean volume %.1f dB): the recording captured no usable sound, most often a screen recording made without the microphone. Whisper output on a silent track is hallucinated, not speech, so nothing is returned", mean)
 	}
 
-	args := []string{"-m", p.model, "-np", "-nt"}
+	wArgs := []string{"-m", p.model, "-np", "-nt"}
 	if language != "" {
-		args = append(args, "-l", language)
+		wArgs = append(wArgs, "-l", language)
 	}
-	args = append(args, wav)
-	so, se, err := runCommand(ctx, p.whisper, args...)
+	wArgs = append(wArgs, wav)
+	so, se, err := runCommand(ctx, p.whisper, wArgs...)
 	if err != nil {
 		return "", fmt.Errorf("whisper: %v: %s", err, firstErrLine(se))
 	}
@@ -180,6 +191,34 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 		return "", fmt.Errorf("whisper produced no transcript (stderr: %s)", firstErrLine(se))
 	}
 	return text, nil
+}
+
+// audioStreamCount reports how many audio streams a file carries.
+// Returns 0 when ffprobe is missing or the probe fails, which the
+// caller reads as "not more than one" and falls back to the plain
+// single-stream conversion.
+func (p *sttPipeline) audioStreamCount(ctx context.Context, path string) int {
+	if p.ffprobe == "" {
+		return 0
+	}
+	so, _, err := runCommand(ctx, p.ffprobe, "-v", "error", "-select_streams", "a",
+		"-show_entries", "stream=index", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0
+	}
+	return countNonEmptyLines(string(so))
+}
+
+// countNonEmptyLines counts populated lines in ffprobe's CSV output —
+// one per selected stream. Pure.
+func countNonEmptyLines(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // silentTrackDB is the mean-volume floor below which a track carries no

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.0] - 2026-07-31
+
+### Fixed — transcription now mixes every audio stream
+Follow-up to 1.24.0: the clip that "had no sound" did contain speech.
+Screen recordings and huddles often carry two audio streams (system +
+microphone), and the conversion let ffmpeg pick one, so a mic on the
+non-default stream extracted as silence. The converter now counts audio
+streams (ffprobe) and mixes them all
+(`amix=inputs=N:duration=longest:normalize=0`); single-stream files keep
+the previous command exactly. Also: `download_audio` now accepts video
+attachments, so a huddle/clip permalink no longer resolves in
+`transcribe_audio` but fails in `download_audio`. See ADR 068.
+598 → 601 tests.
+
 ## [1.24.0] - 2026-07-31
 
 ### Fixed — silent recordings no longer return hallucinated transcripts
