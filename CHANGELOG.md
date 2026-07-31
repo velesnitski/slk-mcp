@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.0] - 2026-07-31
+
+### Fixed — "newest voice note" now looks inside threads
+Latest-mode (`transcribe_audio`, `analyze_audio_tone`, `download_audio`
+with a channel and no timestamp) answered "no recent message with a
+matching attachment" for a note sitting in that very DM, because
+`conversations.history` returns top-level messages only and the note was
+a thread reply. Only the permalink path worked. When the top level has no
+match, the recent threads are now walked (up to 12, newest-first) and the
+newest qualifying reply wins, compared by timestamp rather than by first
+hit; the `from` filter applies inside threads too. The common case still
+costs one history call. See ADR 070. 604 → 607 tests.
+
 ## [1.26.0] - 2026-07-31
 
 ### Fixed — the actual cause of truncated transcripts: the `-nt` flag

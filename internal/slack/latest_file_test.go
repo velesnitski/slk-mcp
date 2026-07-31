@@ -80,7 +80,7 @@ func TestSelectLastFileMessage_NewestReplyWins(t *testing.T) {
 	older.Timestamp = "200.0"
 	newer := msgWithFile("U2", "audio/mp4")
 	newer.Timestamp = "300.0"
-	got := selectLastFileMessage([]goslack.Message{root, older, newer}, acceptAudio)
+	got := selectLastFileMessage([]goslack.Message{root, older, newer}, acceptAudio, "")
 	if got == nil || got.Timestamp != "300.0" {
 		t.Fatalf("want newest reply (300.0); got %+v", got)
 	}
@@ -92,7 +92,7 @@ func TestSelectLastFileMessage_SkipsNonMatching(t *testing.T) {
 	audio.Timestamp = "200.0"
 	image := msgWithFile("U1", "image/png")
 	image.Timestamp = "300.0"
-	got := selectLastFileMessage([]goslack.Message{audio, image}, acceptAudio)
+	got := selectLastFileMessage([]goslack.Message{audio, image}, acceptAudio, "")
 	if got == nil || got.Timestamp != "200.0" {
 		t.Fatalf("want the audio reply (200.0); got %+v", got)
 	}
@@ -102,10 +102,10 @@ func TestSelectLastFileMessage_NoMatchReturnsNil(t *testing.T) {
 	text := goslack.Message{}
 	text.Timestamp = "100.0"
 	image := msgWithFile("U1", "image/png")
-	if got := selectLastFileMessage([]goslack.Message{text, image}, acceptAudio); got != nil {
+	if got := selectLastFileMessage([]goslack.Message{text, image}, acceptAudio, ""); got != nil {
 		t.Fatalf("want nil when no audio in thread; got %+v", got)
 	}
-	if got := selectLastFileMessage(nil, acceptAudio); got != nil {
+	if got := selectLastFileMessage(nil, acceptAudio, ""); got != nil {
 		t.Fatalf("want nil for empty thread; got %+v", got)
 	}
 }
@@ -149,5 +149,75 @@ func TestMatchHandle_UsernamePreferredOverDisplayCollision(t *testing.T) {
 	got, ok := matchHandle(users, "@raven")
 	if !ok || got != "U_HANDLE" {
 		t.Fatalf("username match must win; got (%q, %v)", got, ok)
+	}
+}
+
+func TestSelectLastFileMessage_HonoursAuthorFilter(t *testing.T) {
+	// A thread scan must apply the same `from` filter as the top-level
+	// one, so "my last voice note" cannot resolve to the other party's.
+	mine := msgWithFile("U_ME", "audio/mp4")
+	mine.Timestamp = "200.0"
+	theirs := msgWithFile("U_OTHER", "audio/mp4")
+	theirs.Timestamp = "300.0"
+	got := selectLastFileMessage([]goslack.Message{mine, theirs}, acceptAudio, "U_ME")
+	if got == nil || got.Timestamp != "200.0" {
+		t.Fatalf("want my note (200.0) despite a newer one from U_OTHER; got %+v", got)
+	}
+	if got := selectLastFileMessage([]goslack.Message{theirs}, acceptAudio, "U_ME"); got != nil {
+		t.Fatalf("want nil when the thread holds nothing from U_ME; got %+v", got)
+	}
+}
+
+func TestThreadRoots(t *testing.T) {
+	// A root with replies reports ThreadTimestamp == its own ts; a plain
+	// message reports neither and is skipped.
+	root := goslack.Message{}
+	root.Timestamp = "300.0"
+	root.ThreadTimestamp = "300.0"
+	plain := goslack.Message{}
+	plain.Timestamp = "250.0"
+	// Replies with a reply count but no ThreadTimestamp fall back to ts.
+	counted := goslack.Message{}
+	counted.Timestamp = "200.0"
+	counted.ReplyCount = 3
+	// A duplicate of an already-seen root contributes nothing.
+	dup := goslack.Message{}
+	dup.Timestamp = "150.0"
+	dup.ThreadTimestamp = "300.0"
+
+	got := threadRoots([]goslack.Message{root, plain, counted, dup}, 0)
+	want := []string{"300.0", "200.0"}
+	if len(got) != len(want) {
+		t.Fatalf("want %v; got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("want %v; got %v", want, got)
+		}
+	}
+	if got := threadRoots([]goslack.Message{root, counted}, 1); len(got) != 1 || got[0] != "300.0" {
+		t.Fatalf("limit should cap to the newest root; got %v", got)
+	}
+	if got := threadRoots(nil, 0); got != nil {
+		t.Fatalf("want nil for empty history; got %v", got)
+	}
+}
+
+func TestTsLess(t *testing.T) {
+	if !tsLess("100.5", "200.0") {
+		t.Fatal("100.5 should sort older than 200.0")
+	}
+	if tsLess("200.0", "100.5") {
+		t.Fatal("200.0 must not sort older than 100.5")
+	}
+	if tsLess("100.0", "100.0") {
+		t.Fatal("equal timestamps are not less-than")
+	}
+	// Unparseable values sort as oldest so they never win a comparison.
+	if !tsLess("bogus", "100.0") {
+		t.Fatal("a malformed ts should sort oldest")
+	}
+	if tsLess("100.0", "bogus") {
+		t.Fatal("nothing is older than a malformed candidate")
 	}
 }

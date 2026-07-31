@@ -156,7 +156,76 @@ func (s *MessageService) LatestFileMessage(ctx context.Context, channelID string
 	if m := selectLatestFileMessage(msgs, accept, fromUserID); m != nil {
 		return m, nil
 	}
+
+	// Nothing at the top level. Voice notes are routinely posted as THREAD
+	// REPLIES, and conversations.history returns top-level messages only,
+	// so the note is invisible to the scan above and latest-mode reports
+	// "no recent message" while the file plainly sits in the conversation.
+	// Walk the recent threads and keep the newest qualifying reply — a
+	// match in an older thread can still be newer than one in a younger
+	// thread, so compare timestamps rather than taking the first hit.
+	var best *goslack.Message
+	for _, root := range threadRoots(msgs, threadScanLimit) {
+		replies, rerr := s.ThreadReplies(ctx, channelID, root)
+		if rerr != nil {
+			continue
+		}
+		if m := selectLastFileMessage(replies, accept, fromUserID); m != nil {
+			if best == nil || tsLess(best.Timestamp, m.Timestamp) {
+				best = m
+			}
+		}
+	}
+	if best != nil {
+		return best, nil
+	}
 	return nil, fmt.Errorf("no recent message with a matching attachment in this conversation")
+}
+
+// threadScanLimit caps how many threads latest-mode opens when the top
+// level carries no match — one conversations.replies call each, on a
+// fallback path only.
+const threadScanLimit = 12
+
+// threadRoots lists the thread-root timestamps present in msgs,
+// newest-first and de-duplicated, capped at limit (0 = uncapped). A root
+// that has replies reports ThreadTimestamp == its own ts; a broadcast
+// reply reports its parent's. Messages that belong to no thread are
+// skipped. Pure.
+func threadRoots(msgs []goslack.Message, limit int) []string {
+	var roots []string
+	seen := make(map[string]bool)
+	for i := range msgs {
+		m := &msgs[i]
+		ts := m.ThreadTimestamp
+		if ts == "" && m.ReplyCount > 0 {
+			ts = m.Timestamp
+		}
+		if ts == "" || seen[ts] {
+			continue
+		}
+		seen[ts] = true
+		roots = append(roots, ts)
+		if limit > 0 && len(roots) >= limit {
+			break
+		}
+	}
+	return roots
+}
+
+// tsLess reports whether Slack timestamp a is older than b. Unparseable
+// values sort as oldest so a malformed ts can never win a comparison.
+// Pure.
+func tsLess(a, b string) bool {
+	af, aerr := strconv.ParseFloat(a, 64)
+	bf, berr := strconv.ParseFloat(b, 64)
+	if berr != nil {
+		return false
+	}
+	if aerr != nil {
+		return true
+	}
+	return af < bf
 }
 
 // selectLatestFileMessage returns the first message in msgs (which
@@ -191,7 +260,7 @@ func (s *MessageService) LatestFileInThread(ctx context.Context, channelID, thre
 	if err != nil {
 		return nil, err
 	}
-	if m := selectLastFileMessage(replies, accept); m != nil {
+	if m := selectLastFileMessage(replies, accept, ""); m != nil {
 		return m, nil
 	}
 	return nil, fmt.Errorf("no message in this thread has a matching attachment")
@@ -200,10 +269,15 @@ func (s *MessageService) LatestFileInThread(ctx context.Context, channelID, thre
 // selectLastFileMessage returns the LAST message in msgs that carries an
 // accepted attachment — msgs is chronological oldest-first (as
 // conversations.replies delivers), so the last match is the newest.
-// Split out from LatestFileInThread for unit testing without a live
-// fetch. Returns nil when nothing qualifies.
-func selectLastFileMessage(msgs []goslack.Message, accept func(goslack.File) bool) *goslack.Message {
+// fromUserID, when non-empty, restricts to that author, mirroring
+// selectLatestFileMessage so a thread scan honours the same `from`
+// filter as the top-level one. Split out from LatestFileInThread for
+// unit testing without a live fetch. Returns nil when nothing qualifies.
+func selectLastFileMessage(msgs []goslack.Message, accept func(goslack.File) bool, fromUserID string) *goslack.Message {
 	for i := len(msgs) - 1; i >= 0; i-- {
+		if fromUserID != "" && msgs[i].User != fromUserID {
+			continue
+		}
 		for _, f := range msgs[i].Files {
 			if accept(f) {
 				return &msgs[i]
