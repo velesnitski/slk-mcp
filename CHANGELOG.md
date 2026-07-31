@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.0] - 2026-07-31
+
+### Fixed — the actual cause of truncated transcripts: the `-nt` flag
+1.24.0 and 1.25.0 each fixed a real failure mode, but neither was the
+one biting: the clip carried a single audio stream at -22 dB mean, and
+the silence guard never fired. Running the pipeline by hand showed
+whisper finishing 87 seconds of audio in 1.0 second — dropping flags one
+at a time pinned it on `-nt` / `--no-timestamps`, which in whisper.cpp
+1.9.x collapses the decoder into a few repeated tokens and stops after
+the first segment. The result is not an error but a short, confident,
+well-formed string that reads like a transcript. `-nt` is gone; whisper's
+timestamped segments are now converted to flowing text in Go, and a
+regression test forbids the flag from returning. See ADR 069.
+601 → 604 tests.
+
 ## [1.25.0] - 2026-07-31
 
 ### Fixed — transcription now mixes every audio stream

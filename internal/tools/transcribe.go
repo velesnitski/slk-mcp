@@ -177,7 +177,13 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 		return "", fmt.Errorf("audio track is silent (mean volume %.1f dB): the recording captured no usable sound, most often a screen recording made without the microphone. Whisper output on a silent track is hallucinated, not speech, so nothing is returned", mean)
 	}
 
-	wArgs := []string{"-m", p.model, "-np", "-nt"}
+	// NEVER pass -nt/--no-timestamps. It looks like the obvious way to ask
+	// for clean text, but in whisper.cpp 1.9.x it derails the decoder: the
+	// run collapses into a couple of repeated tokens and stops after the
+	// first segment, so a 90-second clip returns three garbage words in a
+	// second and reads like a plausible transcript. Ask for timestamps and
+	// strip them here instead.
+	wArgs := []string{"-m", p.model, "-np"}
 	if language != "" {
 		wArgs = append(wArgs, "-l", language)
 	}
@@ -186,11 +192,29 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 	if err != nil {
 		return "", fmt.Errorf("whisper: %v: %s", err, firstErrLine(se))
 	}
-	text := strings.TrimSpace(string(so))
+	text := stripTimestamps(string(so))
 	if text == "" {
 		return "", fmt.Errorf("whisper produced no transcript (stderr: %s)", firstErrLine(se))
 	}
 	return text, nil
+}
+
+// timestampPrefix matches the "[00:00:00.000 --> 00:00:07.000]" lead-in
+// whisper prints ahead of every segment.
+var timestampPrefix = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\]\s*`)
+
+// stripTimestamps turns whisper's segment listing back into flowing text,
+// dropping the per-segment timestamp prefixes and blank lines. Lines that
+// carry no prefix pass through untouched. Pure.
+func stripTimestamps(s string) string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(timestampPrefix.ReplaceAllString(strings.TrimSpace(line), ""))
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 // audioStreamCount reports how many audio streams a file carries.

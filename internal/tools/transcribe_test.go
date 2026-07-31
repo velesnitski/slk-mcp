@@ -106,6 +106,63 @@ func TestTranscribeFile_RunsFFmpegThenWhisper(t *testing.T) {
 	}
 }
 
+func TestTranscribeFile_NeverPassesNoTimestamps(t *testing.T) {
+	// Regression guard. whisper.cpp 1.9.x with -nt collapses into a few
+	// repeated tokens and stops after the first segment, so a long clip
+	// comes back as three garbage words that still look like a transcript.
+	var whisperArgs []string
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if strings.Contains(name, "whisper") {
+			whisperArgs = args
+			return []byte("[00:00:00.000 --> 00:00:02.000]   привет\n"), nil, nil
+		}
+		return nil, nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/whisper-cli", model: "/m"}
+	if _, err := p.transcribeFile(context.Background(), "/tmp/a.m4a", "ru"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range whisperArgs {
+		if a == "-nt" || a == "--no-timestamps" {
+			t.Fatalf("-nt derails the whisper decoder and must never be passed, got %v", whisperArgs)
+		}
+	}
+}
+
+func TestTranscribeFile_StripsSegmentTimestamps(t *testing.T) {
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if strings.Contains(name, "whisper") {
+			return []byte("\n[00:00:00.000 --> 00:00:07.000]   привет команда\n" +
+				"[00:00:07.000 --> 00:00:12.500]   как дела\n"), nil, nil
+		}
+		return nil, nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/whisper-cli", model: "/m"}
+	text, err := p.transcribeFile(context.Background(), "/tmp/a.m4a", "ru")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "привет команда как дела" {
+		t.Fatalf("timestamps should be stripped into flowing text, got %q", text)
+	}
+}
+
+func TestStripTimestamps(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"[00:00:00.000 --> 00:00:07.000]   привет\n[00:00:07.000 --> 00:00:09.000]   мир\n", "привет мир"},
+		{"  plain line  \n", "plain line"},
+		{"\n\n", ""},
+		{"[00:01:02.500 --> 00:01:03.000]  a", "a"},
+		// A bracketed span that is not a timestamp pair stays put.
+		{"[music] дальше текст", "[music] дальше текст"},
+	}
+	for _, c := range cases {
+		if got := stripTimestamps(c.in); got != c.want {
+			t.Errorf("stripTimestamps(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestTranscribeFile_FFmpegFailure(t *testing.T) {
 	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
 		return nil, []byte("bad input\nmore noise"), errors.New("exit 1")
