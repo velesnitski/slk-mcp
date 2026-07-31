@@ -93,10 +93,14 @@ func TestTranscribeFile_RunsFFmpegThenWhisper(t *testing.T) {
 	if text != "привет команда" {
 		t.Fatalf("transcript should be stdout trimmed, got %q", text)
 	}
-	if len(calls) != 2 || calls[0][0] != "/bin/ffmpeg" || calls[1][0] != "/bin/whisper-cli" {
-		t.Fatalf("expected ffmpeg then whisper, got %v", calls)
+	// ffmpeg convert -> ffmpeg volumedetect (silence guard) -> whisper.
+	if len(calls) != 3 || calls[0][0] != "/bin/ffmpeg" || calls[1][0] != "/bin/ffmpeg" || calls[2][0] != "/bin/whisper-cli" {
+		t.Fatalf("expected ffmpeg, ffmpeg(volumedetect), whisper, got %v", calls)
 	}
-	joined := strings.Join(calls[1], " ")
+	if !strings.Contains(strings.Join(calls[1], " "), "volumedetect") {
+		t.Fatalf("second call should measure volume, got %v", calls[1])
+	}
+	joined := strings.Join(calls[2], " ")
 	if !strings.Contains(joined, "-l ru") || !strings.Contains(joined, "-m /m/model.bin") {
 		t.Fatalf("whisper args missing language/model: %v", calls[1])
 	}
@@ -130,7 +134,11 @@ func TestTranscribeFile_ExtractsAudioTrackFromVideo(t *testing.T) {
 	var ffmpegArgs []string
 	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
 		if strings.Contains(name, "ffmpeg") {
-			ffmpegArgs = args
+			// Only the first ffmpeg call is the conversion; the second is
+			// the volumedetect probe and carries different args.
+			if ffmpegArgs == nil {
+				ffmpegArgs = args
+			}
 			return nil, nil, nil
 		}
 		return []byte("text"), nil, nil
@@ -219,5 +227,74 @@ func TestRunTranscribeAudio_MissingTargetIsError(t *testing.T) {
 	res := hub.runTranscribeAudio(context.Background(), "", "", "", "", "", "auto", "")
 	if res == nil || !res.IsError {
 		t.Fatalf("missing target should error, got %+v", res)
+	}
+}
+
+func TestParseMeanVolumeDB(t *testing.T) {
+	// Real ffmpeg volumedetect output shape.
+	out := `[Parsed_volumedetect_0 @ 0x14a704080] n_samples: 1392000
+[Parsed_volumedetect_0 @ 0x14a704080] mean_volume: -91.0 dB
+[Parsed_volumedetect_0 @ 0x14a704080] max_volume: -90.3 dB`
+	v, ok := parseMeanVolumeDB(out)
+	if !ok || v != -91.0 {
+		t.Fatalf("digital silence: got (%v, %v), want (-91, true)", v, ok)
+	}
+	if v >= silentTrackDB {
+		t.Errorf("-91 dB must count as silent (floor %v)", silentTrackDB)
+	}
+
+	// Ordinary speech sits well above the floor.
+	v, ok = parseMeanVolumeDB("[Parsed_volumedetect_0 @ 0x1] mean_volume: -23.7 dB")
+	if !ok || v != -23.7 {
+		t.Fatalf("speech level: got (%v, %v)", v, ok)
+	}
+	if v < silentTrackDB {
+		t.Errorf("-23.7 dB must NOT count as silent")
+	}
+
+	// Unparseable output must fail open (ok=false), never block a transcript.
+	if _, ok := parseMeanVolumeDB("ffmpeg version 7.1\nno stats here"); ok {
+		t.Error("missing mean_volume must return ok=false")
+	}
+}
+
+func TestTranscribeFile_SilentTrackIsRefusedNotHallucinated(t *testing.T) {
+	// A screen recording made without the mic: whisper would emit a few
+	// repeated tokens that read like a real transcript. The guard must
+	// fire first and return nothing.
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if strings.Contains(strings.Join(args, " "), "volumedetect") {
+			return nil, []byte("[Parsed_volumedetect_0 @ 0x1] mean_volume: -91.0 dB"), nil
+		}
+		if strings.Contains(name, "whisper") {
+			t.Fatal("whisper must not run on a silent track")
+		}
+		return nil, nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/whisper-cli", model: "/m"}
+
+	_, err := p.transcribeFile(context.Background(), "/tmp/clip.mp4", "ru")
+	if err == nil {
+		t.Fatal("silent track must be an error, not a transcript")
+	}
+	if !strings.Contains(err.Error(), "silent") || !strings.Contains(err.Error(), "-91.0") {
+		t.Fatalf("error should name the silence and the level, got: %v", err)
+	}
+}
+
+func TestTranscribeFile_UnreadableVolumeFailsOpen(t *testing.T) {
+	// If the probe itself gives nothing parseable, transcription must
+	// still proceed — the guard only fires on a positive silence reading.
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if strings.Contains(name, "whisper") {
+			return []byte("real speech"), nil, nil
+		}
+		return nil, []byte("ffmpeg version 7.1"), nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/whisper-cli", model: "/m"}
+
+	text, err := p.transcribeFile(context.Background(), "/tmp/a.m4a", "auto")
+	if err != nil || text != "real speech" {
+		t.Fatalf("unparseable volume must not block: got (%q, %v)", text, err)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -156,6 +158,14 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 		return "", fmt.Errorf("ffmpeg: %v: %s", err, firstErrLine(se))
 	}
 
+	// Whisper HALLUCINATES on silence — a screen recording made without
+	// the mic yields a confident-looking transcript of a few repeated
+	// tokens, which a caller then relays as if it were speech. Measure
+	// the track first and fail loudly instead.
+	if mean, ok := meanVolumeDB(ctx, p.ffmpeg, wav); ok && mean < silentTrackDB {
+		return "", fmt.Errorf("audio track is silent (mean volume %.1f dB): the recording captured no usable sound, most often a screen recording made without the microphone. Whisper output on a silent track is hallucinated, not speech, so nothing is returned", mean)
+	}
+
 	args := []string{"-m", p.model, "-np", "-nt"}
 	if language != "" {
 		args = append(args, "-l", language)
@@ -170,6 +180,42 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 		return "", fmt.Errorf("whisper produced no transcript (stderr: %s)", firstErrLine(se))
 	}
 	return text, nil
+}
+
+// silentTrackDB is the mean-volume floor below which a track carries no
+// speech worth transcribing. Real speech, even quiet or far-mic, sits
+// well above -50 dBFS mean; a track with no recorded input measures
+// -70 dB or lower (digital silence reports -91 dB).
+const silentTrackDB = -50.0
+
+// meanVolumeDB measures a WAV's mean volume via ffmpeg's volumedetect
+// filter. Returns ok=false when the measurement itself fails, so an
+// unreadable level never blocks a transcript (fail-open: the silence
+// guard only fires on a POSITIVE silence reading).
+func meanVolumeDB(ctx context.Context, ffmpeg, wav string) (float64, bool) {
+	// volumedetect reports on stderr at default log level; -f null
+	// discards the decoded output.
+	_, se, err := runCommand(ctx, ffmpeg, "-hide_banner", "-i", wav, "-af", "volumedetect", "-f", "null", "-")
+	if err != nil {
+		return 0, false
+	}
+	return parseMeanVolumeDB(string(se))
+}
+
+var meanVolumeRe = regexp.MustCompile(`mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB`)
+
+// parseMeanVolumeDB extracts the mean volume from ffmpeg's volumedetect
+// stderr block. Pure.
+func parseMeanVolumeDB(stderr string) (float64, bool) {
+	m := meanVolumeRe.FindStringSubmatch(stderr)
+	if m == nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 // registerTranscribeTools wires transcribe_audio. Registered alongside

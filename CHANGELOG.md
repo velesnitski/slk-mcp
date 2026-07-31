@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.24.0] - 2026-07-31
+
+### Fixed — silent recordings no longer return hallucinated transcripts
+`transcribe_audio` answered a 1:27 clip with three repeated tokens and
+presented them as speech; the recording had no microphone track, and
+whisper hallucinates on silence. Every pipeline step "succeeded", so
+nothing flagged the output as fabricated. The converted WAV is now
+measured with ffmpeg `volumedetect` first: below -50 dBFS mean the call
+fails with the measured level and the likely cause, and whisper never
+runs. Fail-open by design — an unreadable measurement still transcribes.
+See ADR 067. 595 → 598 tests.
+
 ## [1.23.0] - 2026-07-30
 
 ### Fixed — list_scheduled_messages no longer implies an empty queue
