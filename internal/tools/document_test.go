@@ -1,0 +1,140 @@
+package tools
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	goslack "github.com/slack-go/slack"
+)
+
+func docFile(name, mimetype, filetype string) goslack.File {
+	f := goslack.File{}
+	f.ID = "F1"
+	f.Name = name
+	f.Mimetype = mimetype
+	f.Filetype = filetype
+	f.URLPrivateDownload = "https://example.invalid/f"
+	return f
+}
+
+func TestIsDocumentFile(t *testing.T) {
+	yes := []goslack.File{
+		docFile("proposal.html", "text/html", "html"),
+		docFile("spec.md", "text/markdown", "markdown"),
+		docFile("notes.txt", "text/plain", "text"),
+		docFile("rows.csv", "text/csv", "csv"),
+		docFile("payload.json", "application/json", "json"),
+		// Slack snippets often arrive with no mimetype at all.
+		docFile("snippet", "", "python"),
+	}
+	for _, f := range yes {
+		if !isDocumentFile(f) {
+			t.Errorf("%s (%q/%q) should be a document", f.Name, f.Mimetype, f.Filetype)
+		}
+	}
+	no := []goslack.File{
+		docFile("clip.m4a", "audio/mp4", "m4a"),
+		docFile("pic.png", "image/png", "png"),
+		docFile("movie.mp4", "video/mp4", "mp4"),
+		docFile("archive.zip", "application/zip", "zip"),
+		{},
+	}
+	for _, f := range no {
+		if isDocumentFile(f) {
+			t.Errorf("%s (%q/%q) must not be a document", f.Name, f.Mimetype, f.Filetype)
+		}
+	}
+}
+
+func TestHTMLToText(t *testing.T) {
+	in := `<!doctype html><html><head><title>T</title>
+<style>body{color:red}</style><script>var x = "<p>not prose</p>";</script></head>
+<body><!-- hidden --><h1>Proposal</h1><p>First&nbsp;line &amp; more</p>
+<ul><li>one</li><li>two</li></ul></body></html>`
+	got := htmlToText(in)
+	for _, want := range []string{"Proposal", "First line & more", "one", "two"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"color:red", "var x", "hidden", "<p>", "&amp;"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("did not expect %q in output, got:\n%s", unwanted, got)
+		}
+	}
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("blank runs should collapse, got:\n%q", got)
+	}
+}
+
+func TestDocumentToText_SniffsHTMLDespiteMimetype(t *testing.T) {
+	// Exported pages are frequently served as text/plain; the body decides.
+	body := "<!DOCTYPE html><html><body><p>Hello</p></body></html>"
+	got := documentToText(body, "text/plain")
+	if got != "Hello" {
+		t.Fatalf("HTML body should be flattened regardless of mimetype, got %q", got)
+	}
+	// Plain text must survive untouched, angle brackets and all.
+	plain := "a < b and c > d\n"
+	if got := documentToText(plain, "text/plain"); got != "a < b and c > d" {
+		t.Fatalf("plain text must pass through, got %q", got)
+	}
+}
+
+func TestTruncateText(t *testing.T) {
+	if got, cut := truncateText("abc", 10); got != "abc" || cut {
+		t.Fatalf("short text must pass through untouched, got %q cut=%v", got, cut)
+	}
+	// Multi-byte input must not be cut mid-rune.
+	got, cut := truncateText("привет", 3)
+	if !cut || got != "при" {
+		t.Fatalf("want first 3 runes cut=true, got %q cut=%v", got, cut)
+	}
+	if got, cut := truncateText("abc", 0); got != "abc" || cut {
+		t.Fatalf("a non-positive cap disables truncation, got %q cut=%v", got, cut)
+	}
+}
+
+func TestHeadIsSignInPage(t *testing.T) {
+	signIn := `<!DOCTYPE html><html><head><title>Slack</title></head>
+<body><form id="signin_form">Sign in to your workspace</form></body></html>`
+	if !headIsSignInPage(signIn) {
+		t.Fatal("Slack's sign-in page should be detected")
+	}
+	// A genuine HTML attachment must NOT read as a sign-in page, otherwise
+	// read_document rejects exactly the files it exists to read.
+	proposal := `<!doctype html><html><body><h1>Proposal</h1><p>Scope and cost.</p></body></html>`
+	if headIsSignInPage(proposal) {
+		t.Fatal("a real HTML document must not be mistaken for the sign-in page")
+	}
+	if headIsSignInPage("just some text, sign in to nothing") {
+		t.Fatal("non-HTML content is never the sign-in page")
+	}
+}
+
+func TestDownloadFiles_HTMLDocumentIsNotAScopeError(t *testing.T) {
+	// Regression: the sign-in guard rejects any HTML body, which is right
+	// for audio/video but would reject a legitimate .html attachment.
+	body := `<!doctype html><html><body><h1>Proposal</h1></body></html>`
+	fake := &fakeAudioClient{payload: []byte(body)}
+	f := docFile("proposal.html", "text/html", "html")
+
+	saved, _, err := downloadFiles(context.Background(), fake, []goslack.File{f}, t.TempDir(), "slk-doc", isDocumentFile)
+	if err != nil {
+		t.Fatalf("an HTML document must download cleanly, got %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected the document to be saved, got %d files", len(saved))
+	}
+}
+
+func TestDownloadFiles_SignInPageStillRejectedForDocuments(t *testing.T) {
+	body := `<!DOCTYPE html><html><body>Sign in to your workspace</body></html>`
+	fake := &fakeAudioClient{payload: []byte(body)}
+	f := docFile("proposal.html", "text/html", "html")
+
+	if _, _, err := downloadFiles(context.Background(), fake, []goslack.File{f}, t.TempDir(), "slk-doc", isDocumentFile); err == nil {
+		t.Fatal("a sign-in page must still be reported as a scope failure")
+	}
+}

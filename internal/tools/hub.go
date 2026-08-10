@@ -255,6 +255,7 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerCanvasTools(s)
 	h.registerChannelTools(s)
 	h.registerDigestTools(s)
+	h.registerDocumentTools(s)
 	h.registerListTools(s)
 	h.registerSearchTools(s)
 	h.registerStatusTools(s)

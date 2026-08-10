@@ -164,6 +164,50 @@ func looksLikeHTML(path string) bool {
 	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
 }
 
+// signInMarkers are substrings of Slack's sign-in page. Requiring one of
+// these (on top of an HTML doctype) separates "the token cannot read
+// files, here is a login screen" from "this attachment is genuinely an
+// HTML document".
+var signInMarkers = []string{
+	"slack.com/signin",
+	"sign in to",
+	"signin_form",
+	"you may have been signed out",
+	"enter your workspace",
+}
+
+// looksLikeSignInPage reports whether a downloaded file is Slack's
+// sign-in page rather than the requested content. Used for attachments
+// that are supposed to contain text, where looksLikeHTML alone would
+// reject a legitimate .html file.
+func looksLikeSignInPage(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 4096)
+	n, _ := f.Read(buf)
+	return headIsSignInPage(string(buf[:n]))
+}
+
+// headIsSignInPage decides the sign-in question from a file's opening
+// bytes: an HTML document that also carries a Slack login marker. Split
+// out from looksLikeSignInPage so the rule is unit-tested without IO.
+// Pure.
+func headIsSignInPage(head string) bool {
+	l := strings.ToLower(strings.TrimSpace(head))
+	if !strings.HasPrefix(l, "<!doctype html") && !strings.HasPrefix(l, "<html") {
+		return false
+	}
+	for _, marker := range signInMarkers {
+		if strings.Contains(l, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // confinedTempPath builds the local temp path for a downloaded
 // attachment and proves it stays inside destDir. Both untrusted inputs
 // — the Slack file ID and name — are run through sanitizeFilename so a
@@ -226,7 +270,17 @@ func downloadFiles(ctx context.Context, msgs MessageClient, files []goslack.File
 		if cerr := out.Close(); cerr != nil {
 			return nil, skipped, fmt.Errorf("close %s: %w", path, cerr)
 		}
-		if looksLikeHTML(path) {
+		// "The body is HTML" means a missing files:read scope for audio,
+		// video and images — but it is the whole point of an .html
+		// attachment, so a document must not be rejected for looking like
+		// what it is. For those, fall back to matching Slack's sign-in
+		// page specifically.
+		if expectsTextBody(f) {
+			if looksLikeSignInPage(path) {
+				os.Remove(path)
+				return nil, skipped, fmt.Errorf("download %s: %w", f.Name, errFilesReadScope)
+			}
+		} else if looksLikeHTML(path) {
 			os.Remove(path)
 			return nil, skipped, fmt.Errorf("download %s: %w", f.Name, errFilesReadScope)
 		}

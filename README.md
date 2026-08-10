@@ -131,6 +131,7 @@ Or via config file (`~/.claude.json`):
 | `set_dnd` | Pause/resume notifications — Do Not Disturb snooze (actually silences, unlike a status); you-global by default (disabled in `SLACK_READ_ONLY`, needs user token + `dnd:write`) |
 | `download_audio` | Download audio attachments (voice messages) to local temp files for transcription |
 | `view_image` | Fetch image attachments (screenshots, photos, cards) and return them inline so the model can see them |
+| `read_document` | Read text attachments (HTML, Markdown, TXT, CSV, JSON, source) inline; HTML is flattened to plain text |
 | `transcribe_audio` | Voice message, audio/video clip, or recorded huddle → text via a local whisper.cpp install; degrades to `download_audio` behaviour when the toolchain is missing |
 | `analyze_audio_tone` | Vocal tone of a voice message — loudness range (LRA) + native pitch (f0 mean/variability) — to gauge calm vs agitated/shouting; needs only ffmpeg |
 

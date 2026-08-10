@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] - 2026-08-10
+
+### Added — `read_document`: text attachments are finally readable
+Pictures had `view_image`, sound had `transcribe_audio`, and documents —
+the form decisions actually circulate in — had nothing, so a colleague's
+"tell me what you think" about two exported HTML files could not be
+answered from inside the session. `read_document` resolves an attachment
+the same way the audio tools do (permalink, file URL, channel +
+timestamp, or newest-in-conversation with an optional `from` filter) and
+returns it inline: HTML flattened to plain text, everything else as-is.
+Accepts `text/*`, textual `application/*`, and Slack's own `filetype` for
+snippets that ship without a mimetype. Temp files are deleted before
+returning. Truncation at `max_chars` (default 40000) is always reported,
+never silent.
+
+### Fixed — an HTML attachment is no longer reported as a missing scope
+`downloadFiles` treated any HTML body as proof that the token lacks
+`files:read`, since Slack serves its sign-in page with HTTP 200. Correct
+for audio, video and images; wrong for an `.html` file, which would be
+rejected for being what it is. For attachments expected to contain text
+the check is now "looks like Slack's sign-in page" (HTML doctype plus a
+login marker) instead of "looks like HTML"; binary attachments keep the
+stricter rule. See ADR 071. 607 → 614 tests.
+
 ## [1.27.0] - 2026-07-31
 
 ### Fixed — "newest voice note" now looks inside threads
