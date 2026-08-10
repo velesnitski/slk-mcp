@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] - 2026-08-10
+
+### Fixed — a thread you are actively watching no longer vanishes from the sweep
+A delta pull reported "all caught up" while the incident thread being
+followed had grown from 3 messages to 15. Cause: `Unread` pulls history
+from `last_read`, and `fetchReplies` only walks thread parents found in
+that result, so a thread whose parent is already read is structurally
+invisible however active it is. Reading a channel permanently removed its
+existing threads from the sweep, and the three earlier backstops (057,
+062, 064) each worked around that rather than removing it.
+
+History is now pulled from `min(last_read, now - 12h)` and the full page
+is used as the parent list, while the unread message list keeps its exact
+previous meaning. Pure `activeThreadParents` keeps only parents whose
+`latest_reply` is newer than `last_read`, using a field Slack already
+returns, so the wider window costs one larger page rather than extra
+calls. See ADR 073. 618 → 619 tests.
+
 ## [1.29.0] - 2026-08-10
 
 ### Fixed — `read_document` can reach the document that is not the newest

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -234,8 +235,10 @@ func TestUnread_FetchesMessagesNewerThanLastRead(t *testing.T) {
 	if gotOldest != "1700000000.000000" {
 		t.Fatalf("oldest param = %q; want 1700000000.000000", gotOldest)
 	}
-	if gotLimit != "25" {
-		t.Fatalf("limit param = %q; want 25", gotLimit)
+	// The page is deliberately larger than max: the extra room is what
+	// lets already-read thread parents ride along (see threadLookbackHours).
+	if want := strconv.Itoa(25 + threadParentHeadroom); gotLimit != want {
+		t.Fatalf("limit param = %q; want %s (max + thread-parent headroom)", gotLimit, want)
 	}
 	if len(cu.Messages) != 2 {
 		t.Fatalf("expected 2 messages newer than last_read, got %d", len(cu.Messages))
@@ -275,8 +278,8 @@ func TestUnread_DefaultsMaxMessagesWhenNonPositive(t *testing.T) {
 	if _, err := s.Unread(context.Background(), "C1", 0); err != nil {
 		t.Fatalf("Unread err: %v", err)
 	}
-	if gotLimit != "50" {
-		t.Fatalf("limit when max=0 = %q; want 50 (default)", gotLimit)
+	if want := strconv.Itoa(50 + threadParentHeadroom); gotLimit != want {
+		t.Fatalf("limit when max=0 = %q; want %s (default + headroom)", gotLimit, want)
 	}
 }
 
@@ -638,5 +641,59 @@ func TestMarkRead_PostsExpectedParams(t *testing.T) {
 	}
 	if gotTS != "1700000000.000000" {
 		t.Errorf("mark ts = %q; want 1700000000.000000", gotTS)
+	}
+}
+
+func TestActiveThreadParents(t *testing.T) {
+	const lastRead = 1000.0
+
+	parent := func(ts, latestReply string, replies int) goslack.Message {
+		m := goslack.Message{}
+		m.Timestamp = ts
+		m.ThreadTimestamp = ts
+		m.ReplyCount = replies
+		m.LatestReply = latestReply
+		return m
+	}
+
+	// The case this exists for: a parent posted BEFORE last_read whose
+	// thread is still moving. Invisible before, because history started
+	// at last_read and this parent was never returned at all.
+	alive := parent("900.0", "1200.0", 4)
+	// Same age, but nothing new since we last read — must stay out.
+	settled := parent("900.0", "950.0", 4)
+	// A brand-new parent behaves exactly as before.
+	fresh := parent("1100.0", "1150.0", 1)
+	// A parent with no latest_reply recorded falls back to the old rule.
+	noLatest := parent("1100.0", "", 1)
+	oldNoLatest := parent("800.0", "", 1)
+	// Not thread parents at all.
+	plain := goslack.Message{}
+	plain.Timestamp = "1300.0"
+	reply := goslack.Message{}
+	reply.Timestamp = "1300.0"
+	reply.ThreadTimestamp = "900.0"
+	childless := parent("1300.0", "", 0)
+
+	got := activeThreadParents(
+		[]goslack.Message{alive, settled, fresh, noLatest, oldNoLatest, plain, reply, childless},
+		lastRead,
+	)
+
+	var ts []string
+	for _, m := range got {
+		ts = append(ts, m.Timestamp+"/"+m.LatestReply)
+	}
+	want := []string{"900.0/1200.0", "1100.0/1150.0", "1100.0/"}
+	if len(ts) != len(want) {
+		t.Fatalf("want %v, got %v", want, ts)
+	}
+	for i := range want {
+		if ts[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, ts)
+		}
+	}
+	if len(activeThreadParents(nil, lastRead)) != 0 {
+		t.Fatal("empty input must select nothing")
 	}
 }
