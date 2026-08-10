@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"strconv"
 
 	goslack "github.com/slack-go/slack"
@@ -180,6 +181,76 @@ func (s *MessageService) LatestFileMessage(ctx context.Context, channelID string
 		return best, nil
 	}
 	return nil, fmt.Errorf("no recent message with a matching attachment in this conversation")
+}
+
+// RecentFileMessages returns up to limit messages carrying an accepted
+// attachment, newest first. LatestFileMessage answers "the newest one",
+// which is the wrong question when a caller needs the file from the
+// message *before* it — two documents posted seconds apart made the
+// earlier one unreachable without hunting for its timestamp by hand.
+// Both the top level and recent threads are scanned, so a document
+// posted as a reply is a first-class candidate. fromUserID, when
+// non-empty, restricts to that author.
+func (s *MessageService) RecentFileMessages(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string, limit int) ([]goslack.Message, error) {
+	msgs, err := s.History(ctx, HistoryParams{ChannelID: channelID, Limit: 60})
+	if err != nil {
+		return nil, err
+	}
+	out := matchingFileMessages(msgs, accept, fromUserID)
+	for _, root := range threadRoots(msgs, threadScanLimit) {
+		replies, rerr := s.ThreadReplies(ctx, channelID, root)
+		if rerr != nil {
+			continue
+		}
+		out = append(out, matchingFileMessages(replies, accept, fromUserID)...)
+	}
+	out = sortedUniqueByTS(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no recent message with a matching attachment in this conversation")
+	}
+	return out, nil
+}
+
+// matchingFileMessages keeps the messages that carry an accepted
+// attachment, preserving input order and honouring the author filter.
+// Pure.
+func matchingFileMessages(msgs []goslack.Message, accept func(goslack.File) bool, fromUserID string) []goslack.Message {
+	var out []goslack.Message
+	for i := range msgs {
+		m := msgs[i]
+		if fromUserID != "" && m.User != fromUserID {
+			continue
+		}
+		for _, f := range m.Files {
+			if accept(f) {
+				out = append(out, m)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sortedUniqueByTS drops duplicate timestamps (conversations.replies
+// repeats the thread parent, which history already returned) and orders
+// newest first. Pure.
+func sortedUniqueByTS(msgs []goslack.Message) []goslack.Message {
+	seen := make(map[string]bool, len(msgs))
+	var out []goslack.Message
+	for _, m := range msgs {
+		if seen[m.Timestamp] {
+			continue
+		}
+		seen[m.Timestamp] = true
+		out = append(out, m)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return tsLess(out[j].Timestamp, out[i].Timestamp)
+	})
+	return out
 }
 
 // threadScanLimit caps how many threads latest-mode opens when the top

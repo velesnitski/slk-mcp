@@ -35,6 +35,9 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the document (optional if permalink is provided)")),
 			mcp.WithString("from", mcp.Description("Restrict latest-mode to one author: a @handle, or \"me\" for your own last document. Ignored when a permalink/timestamp is given.")),
+			mcp.WithString("match", mcp.Description("Pick by filename instead of recency: case-insensitive substring of the attachment name (e.g. \"playbook\"). Use when two documents were posted together and you need the earlier one.")),
+			mcp.WithNumber("limit", mcp.Description("How many recent documents to return (default: 1). Raise it to read several attachments from one conversation in a single call.")),
+			mcp.WithBoolean("list_only", mcp.Description("List the recent documents (name, type, size, timestamp) without downloading them, so you can choose which to read.")),
 			mcp.WithNumber("max_chars", mcp.Description("Per-document inline cap (default: 40000). Truncation is reported explicitly, never silent.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 		),
@@ -45,6 +48,9 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 				req.GetString("timestamp", ""),
 				req.GetString("permalink", ""),
 				req.GetString("from", ""),
+				req.GetString("match", ""),
+				req.GetInt("limit", 1),
+				req.GetBool("list_only", false),
 				req.GetInt("max_chars", docMaxChars)), nil
 		},
 	)
@@ -54,10 +60,20 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 // dir, renders each as plain text, and removes the files before
 // returning — unlike download_audio, nothing here needs to outlive the
 // call, so no artifact is left on disk.
-func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp, permalink, from string, maxChars int) *mcp.CallToolResult {
+func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp, permalink, from, match string, limit int, listOnly bool, maxChars int) *mcp.CallToolResult {
 	if maxChars <= 0 {
 		maxChars = docMaxChars
 	}
+	// Selector mode. "The newest attachment" is the wrong answer when two
+	// documents were posted seconds apart and the caller wants the
+	// earlier one — reachable before only by hunting down its timestamp.
+	// A permalink or timestamp still names an exact message and wins.
+	if strings.TrimSpace(permalink) == "" && strings.TrimSpace(timestamp) == "" &&
+		strings.TrimSpace(channel) != "" &&
+		(strings.TrimSpace(match) != "" || listOnly || limit > 1) {
+		return h.readRecentDocuments(ctx, workspace, channel, from, match, limit, listOnly, maxChars)
+	}
+
 	destDir, err := os.MkdirTemp("", "slk-doc-")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("temp dir: %v", err))
@@ -69,8 +85,117 @@ func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp
 		return errRes
 	}
 
+	body := renderDocuments(saved, h.wsLabel(wsName), maxChars)
+	if len(skipped) > 0 {
+		body += fmt.Sprintf("\nnot a document, skipped: %s\n", strings.Join(skipped, ", "))
+	}
+	return mcp.NewToolResultText(body)
+}
+
+// docScanLimit caps how many document-bearing messages the selector
+// considers. Generous enough to cover a working day in a busy channel,
+// bounded so a quiet `match` typo cannot walk the whole history.
+const docScanLimit = 25
+
+// docCandidate pairs an attachment with the message that carries it, so
+// a listing can hand back the timestamp needed to fetch it exactly.
+type docCandidate struct {
+	File goslack.File
+	TS   string
+}
+
+// readRecentDocuments resolves several documents from one conversation
+// and either lists them or reads the first `limit`.
+func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from, match string, limit int, listOnly bool, maxChars int) *mcp.CallToolResult {
+	scoped, wsName, errRes := h.scopedWorkspace(workspace)
+	if errRes != nil {
+		return errRes
+	}
+	channelID, cerr := scoped.resolveConversation(ctx, channel)
+	if cerr != nil {
+		return h.scopeResult(wsName, cerr)
+	}
+	fromID, ferr := scoped.resolveAuthor(ctx, from)
+	if ferr != nil {
+		return h.scopeResult(wsName, ferr)
+	}
+	msgs, merr := scoped.Messages().RecentFileMessages(ctx, channelID, isDocumentFile, fromID, docScanLimit)
+	if merr != nil {
+		return h.scopeResult(wsName, merr)
+	}
+
+	candidates := collectDocuments(msgs, match)
+	if len(candidates) == 0 {
+		if strings.TrimSpace(match) != "" {
+			return mcp.NewToolResultError(fmt.Sprintf("no recent document matches %q in this conversation — call again with list_only=true to see what is there", match))
+		}
+		return mcp.NewToolResultError("no recent document in this conversation")
+	}
+	if listOnly {
+		return mcp.NewToolResultText(renderDocumentList(candidates, h.wsLabel(wsName)))
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	destDir, err := os.MkdirTemp("", "slk-doc-")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("temp dir: %v", err))
+	}
+	defer os.RemoveAll(destDir)
+
+	files := make([]goslack.File, 0, len(candidates))
+	for _, c := range candidates {
+		files = append(files, c.File)
+	}
+	saved, _, derr := downloadFiles(ctx, scoped.Messages(), files, destDir, "slk-doc", isDocumentFile)
+	if derr != nil {
+		return mcp.NewToolResultError(derr.Error())
+	}
+	return mcp.NewToolResultText(renderDocuments(saved, h.wsLabel(wsName), maxChars))
+}
+
+// collectDocuments flattens the matching attachments out of messages
+// (already newest-first), keeping only those whose filename contains
+// match when one is given. Pure.
+func collectDocuments(msgs []goslack.Message, match string) []docCandidate {
+	needle := strings.ToLower(strings.TrimSpace(match))
+	var out []docCandidate
+	for i := range msgs {
+		for _, f := range msgs[i].Files {
+			if !isDocumentFile(f) {
+				continue
+			}
+			if needle != "" && !strings.Contains(strings.ToLower(f.Name), needle) {
+				continue
+			}
+			out = append(out, docCandidate{File: f, TS: msgs[i].Timestamp})
+		}
+	}
+	return out
+}
+
+// renderDocumentList shows what is available without spending a download
+// on it, including each message ts so the caller can fetch one exactly.
+// Pure.
+func renderDocumentList(candidates []docCandidate, wsLabel string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d document(s)%s:\n", len(saved), h.wsLabel(wsName))
+	fmt.Fprintf(&b, "%d document(s)%s, newest first:\n", len(candidates), wsLabel)
+	for _, c := range candidates {
+		fmt.Fprintf(&b, "- %s (%s, %d bytes) ts=%s\n", c.File.Name, c.File.Mimetype, c.File.Size, c.TS)
+	}
+	b.WriteString("\nPass one of these as timestamp=, or narrow with match=, to read it.\n")
+	return b.String()
+}
+
+// renderDocuments turns downloaded files into the inline text body
+// shared by both resolution paths.
+func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d document(s)%s:\n", len(saved), wsLabel)
 	for _, f := range saved {
 		raw, rerr := os.ReadFile(f.Path)
 		if rerr != nil {
@@ -87,10 +212,7 @@ func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp
 		b.WriteString(text)
 		b.WriteString("\n")
 	}
-	if len(skipped) > 0 {
-		fmt.Fprintf(&b, "\nnot a document, skipped: %s\n", strings.Join(skipped, ", "))
-	}
-	return mcp.NewToolResultText(b.String())
+	return b.String()
 }
 
 // displayName trims the temp-dir prefix off a saved path so the rendered

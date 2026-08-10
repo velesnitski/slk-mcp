@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] - 2026-08-10
+
+### Fixed — `read_document` can reach the document that is not the newest
+First real use of 1.28.0 hit the next wall: two documents posted three
+minutes apart, and latest-mode could only return the later one — the
+earlier was unreachable without hunting down its message timestamp by
+hand. `read_document` now takes `match` (case-insensitive filename
+substring), `limit` (default 1), and `list_only`, matching the selector
+shape `read_canvas` already uses. Selector mode engages only when one of
+them is set and no permalink/timestamp was given; naming an exact message
+still wins. A `match` that hits nothing errors with the needle quoted and
+points at `list_only`, rather than silently falling back to the newest
+file. Underneath, `RecentFileMessages` collects candidates from the top
+level and recent threads, de-duplicates by timestamp and sorts
+newest-first; `LatestFileMessage` keeps its one-call short-circuit.
+See ADR 072. 614 → 618 tests.
+
 ## [1.28.0] - 2026-08-10
 
 ### Added — `read_document`: text attachments are finally readable

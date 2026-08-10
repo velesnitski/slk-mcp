@@ -56,6 +56,7 @@ type MessageClient interface {
 	DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error
 	FileInfo(ctx context.Context, fileID string) (goslack.File, error)
 	LatestFileMessage(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string) (*goslack.Message, error)
+	RecentFileMessages(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string, limit int) ([]goslack.Message, error)
 	LatestFileInThread(ctx context.Context, channelID, threadTS string, accept func(goslack.File) bool) (*goslack.Message, error)
 }
 

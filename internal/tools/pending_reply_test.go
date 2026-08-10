@@ -95,6 +95,9 @@ func (f *fakeMessageClient) FileInfo(ctx context.Context, fileID string) (goslac
 func (f *fakeMessageClient) LatestFileMessage(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string) (*goslack.Message, error) {
 	return nil, errors.New("LatestFileMessage not supported in fake")
 }
+func (f *fakeMessageClient) RecentFileMessages(ctx context.Context, channelID string, accept func(goslack.File) bool, fromUserID string, limit int) ([]goslack.Message, error) {
+	return nil, errors.New("RecentFileMessages not supported in fake")
+}
 func (f *fakeMessageClient) LatestFileInThread(ctx context.Context, channelID, threadTS string, accept func(goslack.File) bool) (*goslack.Message, error) {
 	return nil, errors.New("LatestFileInThread not supported in fake")
 }

@@ -221,3 +221,44 @@ func TestTsLess(t *testing.T) {
 		t.Fatal("nothing is older than a malformed candidate")
 	}
 }
+
+func TestMatchingFileMessages(t *testing.T) {
+	audio := msgWithFile("U1", "audio/mp4")
+	audio.Timestamp = "100.0"
+	other := msgWithFile("U2", "audio/mp4")
+	other.Timestamp = "200.0"
+	text := goslack.Message{}
+	text.Timestamp = "300.0"
+
+	got := matchingFileMessages([]goslack.Message{audio, other, text}, acceptAudio, "")
+	if len(got) != 2 {
+		t.Fatalf("want both file messages, got %d", len(got))
+	}
+	if got[0].Timestamp != "100.0" {
+		t.Fatalf("input order must be preserved, got %q", got[0].Timestamp)
+	}
+	if got := matchingFileMessages([]goslack.Message{audio, other}, acceptAudio, "U1"); len(got) != 1 || got[0].User != "U1" {
+		t.Fatalf("author filter should keep only U1, got %+v", got)
+	}
+}
+
+func TestSortedUniqueByTS(t *testing.T) {
+	// conversations.replies repeats the parent history already returned.
+	a := msgWithFile("U1", "audio/mp4")
+	a.Timestamp = "100.0"
+	b := msgWithFile("U1", "audio/mp4")
+	b.Timestamp = "300.0"
+	dup := msgWithFile("U1", "audio/mp4")
+	dup.Timestamp = "100.0"
+
+	got := sortedUniqueByTS([]goslack.Message{a, b, dup})
+	if len(got) != 2 {
+		t.Fatalf("duplicate ts must collapse, got %d", len(got))
+	}
+	if got[0].Timestamp != "300.0" || got[1].Timestamp != "100.0" {
+		t.Fatalf("want newest first, got %q then %q", got[0].Timestamp, got[1].Timestamp)
+	}
+	if got := sortedUniqueByTS(nil); got != nil {
+		t.Fatalf("empty input yields nil, got %v", got)
+	}
+}

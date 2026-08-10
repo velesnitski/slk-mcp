@@ -138,3 +138,56 @@ func TestDownloadFiles_SignInPageStillRejectedForDocuments(t *testing.T) {
 		t.Fatal("a sign-in page must still be reported as a scope failure")
 	}
 }
+
+func docMsg(ts string, files ...goslack.File) goslack.Message {
+	m := goslack.Message{}
+	m.Timestamp = ts
+	m.Files = files
+	return m
+}
+
+func TestCollectDocuments(t *testing.T) {
+	proposal := docFile("quarterly-proposal.html", "text/html", "html")
+	playbook := docFile("team playbook.html", "text/html", "html")
+	pic := docFile("shot.png", "image/png", "png")
+	// Newest first, as RecentFileMessages delivers.
+	msgs := []goslack.Message{
+		docMsg("300.0", proposal),
+		docMsg("200.0", playbook, pic),
+	}
+
+	all := collectDocuments(msgs, "")
+	if len(all) != 2 {
+		t.Fatalf("want both documents (image skipped), got %d", len(all))
+	}
+	if all[0].File.Name != "quarterly-proposal.html" || all[0].TS != "300.0" {
+		t.Fatalf("newest document should come first, got %+v", all[0])
+	}
+
+	// The whole point: reach the EARLIER of two documents by name.
+	got := collectDocuments(msgs, "playbook")
+	if len(got) != 1 || got[0].File.Name != "team playbook.html" {
+		t.Fatalf("match should select the earlier document, got %+v", got)
+	}
+	if got[0].TS != "200.0" {
+		t.Fatalf("candidate must carry its message ts, got %q", got[0].TS)
+	}
+	// Matching is case-insensitive and returns nothing when absent.
+	if len(collectDocuments(msgs, "PROPOSAL")) != 1 {
+		t.Fatal("match should be case-insensitive")
+	}
+	if len(collectDocuments(msgs, "nope")) != 0 {
+		t.Fatal("a non-matching needle must select nothing")
+	}
+}
+
+func TestRenderDocumentList(t *testing.T) {
+	f := docFile("team playbook.html", "text/html", "html")
+	f.Size = 4096
+	out := renderDocumentList([]docCandidate{{File: f, TS: "200.0"}}, " [primary]")
+	for _, want := range []string{"team playbook.html", "text/html", "4096", "ts=200.0", "[primary]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in listing, got:\n%s", want, out)
+		}
+	}
+}
