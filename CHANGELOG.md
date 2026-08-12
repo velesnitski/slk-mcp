@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.0] - 2026-08-12
+
+### Added — `read_document` accepts PDFs
+Two decks arrived in a channel as PDF and the tool answered "no matching
+attachment", because it only accepted text types. A PDF is a document in
+every sense that matters, and it is the format proposals and decks
+actually circulate in. PDFs are now downloaded and returned as a local
+path rather than flattened: parsing PDF in Go would mean a dependency and
+a lossy extraction that drops layout, tables and figures, when the caller
+already has a reader that renders them properly. Text documents are
+unchanged, still rendered inline and deleted straight after. The strict
+sign-in-page guard deliberately keeps applying to PDFs. See ADR 074.
+619 → 621 tests.
+
 ## [1.30.0] - 2026-08-10
 
 ### Fixed — a thread you are actively watching no longer vanishes from the sweep

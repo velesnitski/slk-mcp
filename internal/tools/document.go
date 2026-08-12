@@ -74,13 +74,10 @@ func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp
 		return h.readRecentDocuments(ctx, workspace, channel, from, match, limit, listOnly, maxChars)
 	}
 
-	destDir, err := os.MkdirTemp("", "slk-doc-")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("temp dir: %v", err))
-	}
-	defer os.RemoveAll(destDir)
-
-	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, destDir, "slk-doc", isDocumentFile)
+	// Text files are deleted straight after rendering, but a PDF has to
+	// survive the call so the caller can open it — so this writes into
+	// the shared temp dir rather than one we remove wholesale.
+	saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, os.TempDir(), "slk-doc", isReadableDocument)
 	if errRes != nil {
 		return errRes
 	}
@@ -119,7 +116,7 @@ func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from,
 	if ferr != nil {
 		return h.scopeResult(wsName, ferr)
 	}
-	msgs, merr := scoped.Messages().RecentFileMessages(ctx, channelID, isDocumentFile, fromID, docScanLimit)
+	msgs, merr := scoped.Messages().RecentFileMessages(ctx, channelID, isReadableDocument, fromID, docScanLimit)
 	if merr != nil {
 		return h.scopeResult(wsName, merr)
 	}
@@ -141,17 +138,11 @@ func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from,
 		candidates = candidates[:limit]
 	}
 
-	destDir, err := os.MkdirTemp("", "slk-doc-")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("temp dir: %v", err))
-	}
-	defer os.RemoveAll(destDir)
-
 	files := make([]goslack.File, 0, len(candidates))
 	for _, c := range candidates {
 		files = append(files, c.File)
 	}
-	saved, _, derr := downloadFiles(ctx, scoped.Messages(), files, destDir, "slk-doc", isDocumentFile)
+	saved, _, derr := downloadFiles(ctx, scoped.Messages(), files, os.TempDir(), "slk-doc", isReadableDocument)
 	if derr != nil {
 		return mcp.NewToolResultError(derr.Error())
 	}
@@ -166,7 +157,7 @@ func collectDocuments(msgs []goslack.Message, match string) []docCandidate {
 	var out []docCandidate
 	for i := range msgs {
 		for _, f := range msgs[i].Files {
-			if !isDocumentFile(f) {
+			if !isReadableDocument(f) {
 				continue
 			}
 			if needle != "" && !strings.Contains(strings.ToLower(f.Name), needle) {
@@ -192,12 +183,22 @@ func renderDocumentList(candidates []docCandidate, wsLabel string) string {
 }
 
 // renderDocuments turns downloaded files into the inline text body
-// shared by both resolution paths.
+// shared by both resolution paths. Text files are read, rendered and
+// then deleted — nothing needs to outlive the call. A PDF is left on
+// disk and reported by path instead: parsing PDF in Go would mean a
+// dependency and a lossy text extraction, when the caller already has a
+// reader that renders PDFs properly.
 func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d document(s)%s:\n", len(saved), wsLabel)
 	for _, f := range saved {
+		if isPDFMimetype(f.Mimetype) {
+			fmt.Fprintf(&b, "\n--- %s (%s, %d bytes) ---\nsaved to: %s\nBinary document, not flattened to text. Open this path with a PDF-capable reader.\n",
+				displayName(f.Path), f.Mimetype, f.Size, f.Path)
+			continue
+		}
 		raw, rerr := os.ReadFile(f.Path)
+		os.Remove(f.Path)
 		if rerr != nil {
 			fmt.Fprintf(&b, "\n--- %s: read failed: %v\n", f.Path, rerr)
 			continue
@@ -254,6 +255,26 @@ func isDocumentFile(f goslack.File) bool {
 		return true
 	}
 	return documentFiletypes[strings.ToLower(strings.TrimSpace(f.Filetype))]
+}
+
+// isPDFMimetype reports whether a mimetype names a PDF. Pure.
+func isPDFMimetype(mimetype string) bool {
+	return strings.Contains(strings.ToLower(mimetype), "pdf")
+}
+
+// isPDFFile reports whether an attachment is a PDF. PDFs are documents
+// in every sense that matters — decks, proposals and reports circulate
+// as PDF — but they are binary, so this tool fetches them rather than
+// flattening them to text. Pure.
+func isPDFFile(f goslack.File) bool {
+	return isPDFMimetype(f.Mimetype) ||
+		strings.EqualFold(strings.TrimSpace(f.Filetype), "pdf")
+}
+
+// isReadableDocument is what read_document accepts: text it can render
+// inline, plus PDFs it hands back as a local path. Pure.
+func isReadableDocument(f goslack.File) bool {
+	return isDocumentFile(f) || isPDFFile(f)
 }
 
 // expectsTextBody reports whether an attachment is *supposed* to contain

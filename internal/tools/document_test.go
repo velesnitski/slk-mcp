@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -189,5 +191,65 @@ func TestRenderDocumentList(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in listing, got:\n%s", want, out)
 		}
+	}
+}
+
+func TestIsPDFAndReadableDocument(t *testing.T) {
+	byMime := docFile("deck.pdf", "application/pdf", "")
+	byType := docFile("deck", "", "pdf")
+	if !isPDFFile(byMime) || !isPDFFile(byType) {
+		t.Fatal("a PDF must be detected by mimetype and by Slack filetype")
+	}
+	// A PDF is readable but must NOT be treated as text: the sign-in
+	// guard stays strict for it, and it is never flattened.
+	if isDocumentFile(byMime) {
+		t.Fatal("a PDF must not count as a text document")
+	}
+	if !isReadableDocument(byMime) {
+		t.Fatal("read_document must accept PDFs")
+	}
+	if expectsTextBody(byMime) {
+		t.Fatal("a PDF does not expect a text body; the strict HTML guard must apply")
+	}
+	// Text documents keep working, images stay out.
+	if !isReadableDocument(docFile("spec.md", "text/markdown", "markdown")) {
+		t.Fatal("markdown must remain readable")
+	}
+	if isReadableDocument(docFile("pic.png", "image/png", "png")) {
+		t.Fatal("images are view_image's job")
+	}
+}
+
+func TestRenderDocuments_PDFIsReportedByPathAndKept(t *testing.T) {
+	dir := t.TempDir()
+	pdf := filepath.Join(dir, "slk-doc-F1-deck.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.7 binary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	txt := filepath.Join(dir, "slk-doc-F2-notes.txt")
+	if err := os.WriteFile(txt, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := renderDocuments([]savedFile{
+		{Path: pdf, Mimetype: "application/pdf", Size: 15},
+		{Path: txt, Mimetype: "text/plain", Size: 5},
+	}, " [secondary]", 100)
+
+	if !strings.Contains(out, pdf) {
+		t.Fatalf("the PDF path must be reported so it can be opened, got:\n%s", out)
+	}
+	if strings.Contains(out, "%PDF-1.7") {
+		t.Fatalf("PDF bytes must never be inlined, got:\n%s", out)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("text documents must still render inline, got:\n%s", out)
+	}
+	// The PDF survives the call; the text file does not.
+	if _, err := os.Stat(pdf); err != nil {
+		t.Fatalf("the PDF must stay on disk for the caller: %v", err)
+	}
+	if _, err := os.Stat(txt); !os.IsNotExist(err) {
+		t.Fatalf("a rendered text file must be cleaned up, stat err = %v", err)
 	}
 }
