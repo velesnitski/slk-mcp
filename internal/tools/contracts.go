@@ -77,6 +77,8 @@ type UnreadClient interface {
 	UnreadThreadMentions(ctx context.Context, hours int) ([]*slack.ChannelUnread, error)
 	UnreadOwnThreads(ctx context.Context, hours int) ([]*slack.ChannelUnread, error)
 	Self(ctx context.Context) (string, error)
+	TeamURL(ctx context.Context) (string, error)
+	ParticipationChannels(ctx context.Context, hours int) ([]goslack.Channel, error)
 	MarkRead(ctx context.Context, channelID, ts string) error
 }
 

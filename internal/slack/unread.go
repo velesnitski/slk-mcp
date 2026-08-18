@@ -30,8 +30,9 @@ type UnreadService struct {
 	search   *SearchService
 	log      *slog.Logger
 
-	selfMu sync.RWMutex
-	selfID string
+	selfMu  sync.RWMutex
+	selfID  string
+	teamURL string
 }
 
 func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, search *SearchService, log *slog.Logger) *UnreadService {
@@ -68,8 +69,21 @@ func (s *UnreadService) Self(ctx context.Context) (string, error) {
 
 	s.selfMu.Lock()
 	s.selfID = resp.UserID
+	s.teamURL = resp.URL
 	s.selfMu.Unlock()
 	return resp.UserID, nil
+}
+
+// TeamURL returns the workspace base URL from the same cached auth.test
+// response Self uses, so permalinks can be built without a per-message
+// chat.getPermalink call. Empty string when unavailable.
+func (s *UnreadService) TeamURL(ctx context.Context) (string, error) {
+	if _, err := s.Self(ctx); err != nil {
+		return "", err
+	}
+	s.selfMu.RLock()
+	defer s.selfMu.RUnlock()
+	return s.teamURL, nil
 }
 
 // Enabled reports whether a user token is available.
@@ -748,4 +762,48 @@ func (s *UnreadService) MarkRead(ctx context.Context, channelID, ts string) erro
 	return ratelimit.Do(ctx, s.log, 0, func() error {
 		return s.api.MarkConversationContext(ctx, channelID, ts)
 	})
+}
+
+// ParticipationChannels returns the distinct channels and DMs the
+// operator actually posted in during the window, newest activity first.
+//
+// This is the selection primitive for an export: "channels I work in" is
+// not "channels I joined" (which includes dozens of read-only feeds) and
+// not "channels with unread" (which is about what arrived, not about
+// where the operator acts). A `from:me` search answers it directly.
+func (s *UnreadService) ParticipationChannels(ctx context.Context, hours int) ([]goslack.Channel, error) {
+	if !s.Enabled() {
+		return nil, ErrNoUserToken
+	}
+	if hours <= 0 || s.search == nil {
+		return nil, nil
+	}
+	after := s.nowUnix() - int64(hours)*3600
+	afterDate := time.Unix(after, 0).Format("2006-01-02")
+	matches, err := s.search.Messages(ctx, "from:me after:"+afterDate, 200)
+	if err != nil {
+		return nil, fmt.Errorf("search from:me: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(matches))
+	var out []goslack.Channel
+	for _, m := range matches {
+		if m.Channel.ID == "" {
+			continue
+		}
+		// search's `after:` is day-granular, so re-filter to the exact
+		// window the caller asked for.
+		if ts, _ := strconv.ParseFloat(m.Timestamp, 64); int64(ts) < after {
+			continue
+		}
+		if _, dup := seen[m.Channel.ID]; dup {
+			continue
+		}
+		seen[m.Channel.ID] = struct{}{}
+		ch := goslack.Channel{}
+		ch.ID = m.Channel.ID
+		ch.Name = m.Channel.Name
+		out = append(out, ch)
+	}
+	return out, nil
 }

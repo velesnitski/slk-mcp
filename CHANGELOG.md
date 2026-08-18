@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] - 2026-08-18
+
+### Added
+
+- **`export_conversations`** — appends conversations to a local
+  append-only JSONL corpus and returns the path. Capture is lossless:
+  thread structure, reactions with their actors, edit flags, attachment
+  refs, derived permalinks, and `reply_count` vs `replies_fetched`.
+  Credential-shaped spans are replaced with a stable hash placeholder by
+  default. Selection defaults to channels the operator posted in.
+  Re-running over an overlapping window adds nothing. See ADR 077.
+
+- `UnreadService.TeamURL` and `UnreadService.ParticipationChannels`.
+
 ## [1.32.0] - 2026-08-18
 
 ### Added
