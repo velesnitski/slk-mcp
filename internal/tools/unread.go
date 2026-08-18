@@ -31,6 +31,7 @@ type unreadParams struct {
 	dmWindowHours      int
 	threadMentionHours int
 	ownThreadHours     int
+	canvasHours        int
 	afterTS            string
 	includeRefs        bool
 	showAnswered       bool
@@ -122,6 +123,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
 				mcp.WithNumber("own_thread_hours", mcp.Description("If > 0, additionally surface NEW replies in threads the operator STARTED or already replied in, even when nobody @-mentioned them (Slack auto-follows those threads but never marks the channel unread). Catches a colleague answering your own request. Default: 24 (recommended).")),
+				mcp.WithNumber("canvas_hours", mcp.Description("If > 0, also report CANVASES updated in the last N hours, flagging the ones that @-mention the operator. A canvas edit produces no channel message at all — Slack notifies the person tagged inside the document, but conversations.history has nothing to return and search does not index canvas bodies — so without this a tag in a canvas is invisible to the sweep. When `after` is passed, the cursor wins and this only acts as the on/off switch. Default: 24 (recommended); 0 = off.")),
 				mcp.WithString("after", mcp.Description("Delta cursor. Preferred: the combined token from the previous pull's trailing 'cursor:' line (e.g. 'primary=1784012484.4;secondary=1784011290.7') — applies each workspace's own cursor exactly. A plain Slack timestamp also works and applies to every workspace. Only messages/replies strictly newer are returned; channels with nothing new are dropped. Empty (default) = full sweep.")),
 				mcp.WithBoolean("include_refs", mcp.Description("Append the trailing References block (every issue ID, MR, and branch seen). Off by default — it costs a few hundred tokens and is only worth it when you'll chain into those IDs. The newest message ts also lives in each channel's inline output, so a delta cursor doesn't need this.")),
 				mcp.WithBoolean("show_answered", mcp.Description("Also show DMs where the operator already holds the last word. By default those are suppressed to a one-line note — Slack's last_read updates on client focus, not on send, so a DM answered from a notification can stay 'unread' server-side and re-surface as a false pending item. Default: false.")),
@@ -141,6 +143,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					dmWindowHours:      int(req.GetFloat("dm_window_hours", 0)),
 					threadMentionHours: int(req.GetFloat("thread_mention_hours", 24)),
 					ownThreadHours:     int(req.GetFloat("own_thread_hours", 24)),
+					canvasHours:        int(req.GetFloat("canvas_hours", 24)),
 					afterTS:            strings.TrimSpace(req.GetString("after", "")),
 					includeRefs:        req.GetBool("include_refs", false),
 					showAnswered:       req.GetBool("show_answered", false),
@@ -402,6 +405,18 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 		h.log.Warn("auth.test failed; mention highlighting disabled", "err", err)
 	}
 
+	// Canvas delta. Canvases sit outside the message model entirely — an
+	// edit produces no channel message — so this is computed independently
+	// of `results` and must survive an otherwise-empty sweep: a canvas
+	// edit can be the only thing that happened since the cursor.
+	var canvasBlock string
+	if p.canvasHours > 0 {
+		nowUnix := time.Now().Unix()
+		if hits := h.canvasDelta(ctx, canvasSince(p.afterTS, p.canvasHours, nowUnix), selfID); len(hits) > 0 {
+			canvasBlock = renderCanvasDelta(hits, nowUnix)
+		}
+	}
+
 	if p.mentionsOnly {
 		if selfID == "" {
 			return "", "", errors.New("mentions_only requires auth.test to succeed; got an empty self id")
@@ -439,10 +454,11 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	}
 
 	if len(results) == 0 {
-		if answeredNote != "" {
-			// Everything unread was an already-answered DM — say so
-			// instead of a bare "all caught up", and keep the cursor.
-			return strings.TrimRight(answeredNote, "\n"), p.afterTS, nil
+		// No unread messages, but a canvas may still have changed — report
+		// it rather than claiming "all caught up".
+		tail := strings.TrimRight(answeredNote+canvasBlock, "\n")
+		if tail != "" {
+			return tail, p.afterTS, nil
 		}
 		// No new content: carry the caller's incoming cursor forward so a
 		// combined cursor never regresses for a caught-up workspace.
@@ -476,6 +492,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	cursor = newestTS(results)
 	if cursor != "" {
 		fmt.Fprintf(&b, "cursor: %s (pass as after= next pull for a delta)\n", cursor)
+	}
+	if canvasBlock != "" {
+		b.WriteString(canvasBlock)
 	}
 	b.WriteByte('\n')
 

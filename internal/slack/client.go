@@ -73,7 +73,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.Status = newStatusService(user, log)
 	c.DND = newDNDService(user, log)
 	c.Scheduled = newScheduledService(user, log)
-	c.Canvas = newCanvasService(primary, user, log)
+	c.Canvas = newCanvasService(primary, user, cfg.UserToken, log)
 
 	return c
 }

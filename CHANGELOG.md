@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.32.0] - 2026-08-18
+
+### Added
+
+- **Canvas activity in `get_unread_summary`** — new `canvas_hours`
+  parameter (default 24, 0 = off) reports canvases updated since the
+  cursor and flags the ones that @-mention the operator.
+
+  A canvas edit produces no channel message: Slack notifies whoever is
+  tagged inside the document, but `conversations.history` has nothing to
+  return and `search.messages` does not index canvas bodies. Every
+  existing backstop reads messages, so a tag added inside a canvas was
+  structurally invisible to the sweep.
+
+- `CanvasService.RecentCanvases` — workspace-wide canvas delta over a raw
+  `files.list` call. slack-go's `File` drops the `updated` field, which
+  makes an *edited* canvas indistinguishable from an untouched one
+  through the typed SDK; this decodes it directly. Requires the user
+  token (a bot token only sees canvases in channels it joined).
+
+### Notes
+
+- The canvas section is emitted even when there are no unread messages —
+  a canvas edit can be the only thing that happened.
+- When `after=` is passed it wins over `canvas_hours`, so canvases follow
+  the same delta as messages.
+- Only the newest 6 changed canvases are downloaded to check for a
+  mention; the rest are listed as `body not checked`.
+- See ADR 075.
+
 ## [1.31.0] - 2026-08-12
 
 ### Added — `read_document` accepts PDFs

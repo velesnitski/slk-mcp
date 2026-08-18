@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack/ratelimit"
@@ -16,14 +18,28 @@ import (
 // token (a bot that isn't a full member may see no properties at all),
 // so lookups try the primary identity first and fall back to the user
 // client when the two are distinct.
+//
+// It also carries the raw user token and an HTTP client: the
+// workspace-wide canvas delta (RecentCanvases) has to bypass slack-go
+// because the SDK drops files.list's `updated` field.
 type CanvasService struct {
 	primary *goslack.Client
 	user    *goslack.Client // may be nil, may equal primary
+	token   string          // user token for the raw files.list path
+	http    *http.Client
 	log     *slog.Logger
+	BaseURL string // override for tests; defaults to defaultFilesAPIBase
 }
 
-func newCanvasService(primary, user *goslack.Client, log *slog.Logger) *CanvasService {
-	return &CanvasService{primary: primary, user: user, log: log}
+func newCanvasService(primary, user *goslack.Client, userToken string, log *slog.Logger) *CanvasService {
+	return &CanvasService{
+		primary: primary,
+		user:    user,
+		token:   userToken,
+		http:    &http.Client{Timeout: 30 * time.Second},
+		log:     log,
+		BaseURL: defaultFilesAPIBase,
+	}
 }
 
 // clients returns the distinct API identities to try, primary first.
