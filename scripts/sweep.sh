@@ -15,6 +15,12 @@
 #      committed deny-list would publish the very strings the deny-list
 #      exists to keep out, so the guard must never carry them.
 #
+# A line carrying the marker `sweep:allow` is skipped. It exists for
+# synthetic fixtures that must MATCH a pattern in order to test it — the
+# redaction suite has to contain a credential-shaped string or it is not
+# testing anything. The marker is deliberate, visible and greppable; a
+# guard with no escape hatch fires on its own fixtures and gets disabled.
+#
 # Exit 0 = clean, 1 = hits found.
 
 set -uo pipefail
@@ -46,8 +52,11 @@ fi
 
 status=0
 
+ALLOW='sweep:allow'
+
 for p in "${PATTERNS[@]}"; do
-  if out=$(git grep -nIP -- "$p" 2>/dev/null) && [[ -n "$out" ]]; then
+  out=$(git grep -nIP -- "$p" 2>/dev/null | grep -v "$ALLOW")
+  if [[ -n "$out" ]]; then
     echo "HIT (working tree) /$p/"
     echo "$out" | sed 's/^/  /'
     status=1
@@ -62,8 +71,8 @@ if (( SCAN_HISTORY )); then
   objs=$(mktemp) || exit 2
   trap 'rm -f "$msgs" "$objs"' EXIT
 
-  git log --all --format='%H%n%B' > "$msgs"
-  git cat-file --batch-all-objects --batch --buffer > "$objs" 2>/dev/null
+  git log --all --format='%H%n%B' | grep -v "$ALLOW" > "$msgs"
+  git cat-file --batch-all-objects --batch --buffer 2>/dev/null | grep -av "$ALLOW" > "$objs"
 
   for p in "${PATTERNS[@]}"; do
     if ! SWEEP_PAT="$p" perl -ne 'BEGIN{$re=qr/$ENV{SWEEP_PAT}/} exit 1 if /$re/' "$msgs"; then

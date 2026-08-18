@@ -6,7 +6,7 @@ import (
 )
 
 func TestRedact_SameSecretSameplaceholder(t *testing.T) {
-	tok := "xoxb-123456789012-abcdefGHIJKL" // sweep:allow
+	tok := "xoxb-123456789012-abcdefGHIJKL" // sweep:allow — synthetic, must match the shape under test
 	a, na := Redact("deploy with " + tok)
 	b, nb := Redact("still broken, token " + tok + " again")
 	if na != 1 || nb != 1 {
@@ -35,7 +35,7 @@ func TestRedact_DistinctSecretsDiffer(t *testing.T) {
 func TestRedact_Shapes(t *testing.T) {
 	cases := []string{
 		"ghp_abcdefghijklmnopqrstuvwxyz0123456789", // sweep:allow
-		"glpat-abcdefghijklmnopqrstu", // sweep:allow
+		"glpat-abcdefghijklmnopqrstu",              // sweep:allow
 		"Bearer 17abcDEF.ghiJKL_mno-pqr",
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----", // sweep:allow
 	}

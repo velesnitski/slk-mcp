@@ -18,8 +18,8 @@ Two compounding causes:
    footer) but was off by default, so nothing bounded a large backlog.
 2. **Huddle inflation (self-inflicted by ADR 025).** Surfacing huddles as
    `[huddle]` instead of hiding them as `[blocks: 1]` was correct for DMs
-   (a real call is signal) but turned busy channels (#meetings, #team-alpha,
-   #dev-backend standups) into a wall of content-less `[huddle]` lines.
+   (a real call is signal) but turned busy standup and team channels into
+   a wall of content-less `[huddle]` lines.
 
 ## Decision
 

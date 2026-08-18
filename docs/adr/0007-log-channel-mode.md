@@ -58,11 +58,11 @@ Add a log-channel rendering mode. New surface:
 
 - **Bot threshold at 50%**: most genuine bot channels are 90%+
   bot-authored; lowering to 30% would catch hybrid channels
-  (e.g. `#team-alpha` where humans announce and a bot confirms),
+  (e.g. a release channel where humans announce and a bot confirms),
   but those benefit from regular-digest output. 50% lets the
   human-chat half of mixed channels stay readable.
-- **Name substrings only, no regex**: the keyword list comes
-  from common bot-channel naming conventions — bare prefix/suffix matching
+- **Name substrings only, no regex**: the keyword list follows common
+  bot-channel naming conventions — bare prefix/suffix matching
   is enough and cheaper to test. The 8-keyword list covers all
   the standard infra-channel naming conventions encountered.
 - **Severity classification on body text only**: zabbix and gitlab
