@@ -98,7 +98,7 @@ func TestRecentCanvases_SendsAuthAndCanvasType(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, canvasPayload)
+		_, _ = io.WriteString(w, canvasPayload)
 	}))
 	defer srv.Close()
 
