@@ -34,3 +34,6 @@ built version so the dialog never shows a stale version — see ADR 024.
 - Use generic placeholders in tests and docs
 - All secrets via environment variables at runtime
 - Branch workflow: develop in `dev`, merge to `main`
+- Run `make sweep` before pushing (`make sweep-history` before publishing
+  or after a rewrite). Its deployment-specific patterns live in
+  `.sweep-patterns.local`, which is gitignored on purpose — see ADR 076

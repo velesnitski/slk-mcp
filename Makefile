@@ -1,6 +1,6 @@
 BINARY := slk-mcp
 
-.PHONY: build test sync-label install
+.PHONY: build test sync-label install sweep sweep-history
 
 ## build: compile the server binary (version embedded via -ldflags)
 build:
@@ -21,3 +21,9 @@ sync-label:
 ## label is read from the config key at session start). Kept separate from
 ## `build` so plain builds never touch ~/.claude.json.
 install: build sync-label
+
+sweep:
+	./scripts/sweep.sh
+
+sweep-history:
+	./scripts/sweep.sh --history

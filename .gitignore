@@ -29,3 +29,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 slk-mcp
+
+# Local-only sensitive-pattern deny-list for scripts/sweep.sh
+.sweep-patterns.local

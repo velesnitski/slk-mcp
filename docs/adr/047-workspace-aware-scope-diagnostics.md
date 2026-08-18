@@ -19,9 +19,10 @@ errors:
   scopes is missing, Slack returns `missing_scope` and the tool surfaced
   the raw error with no guidance.
 
-This bit us concretely: reading a voice note from a **secondary-workspace** DM failed
-because that workspace's token lacks files:read (and likely im:history), but the
-error didn't make that diagnosable — it read like a generic failure.
+This bit us concretely: reading a voice note from a DM in a **secondary**
+workspace failed because that workspace's token lacks files:read (and
+likely im:history), but the error didn't make that diagnosable — it read
+like a generic failure.
 
 ## Decision
 
@@ -55,15 +56,15 @@ already carries. The failure is the cheapest scope probe.
 ## Consequences
 
 - A scope failure now tells you which workspace token to fix and which
-  scope to add — the secondary voice-note case is self-diagnosing instead of
-  opaque.
+  scope to add — the secondary-workspace voice-note case is
+  self-diagnosing instead of opaque.
 - Pure helpers (`looksLikeScopeError`, `audioScopeError`) + the sentinel
   are unit-tested: scope-vs-not classification, decoration content,
   verbatim pass-through, single-workspace label cleanliness, and
   `errors.Is` matchability. 542 → 547 tests.
 - No behaviour change on the happy path and no new API calls; purely
   better diagnostics. Patch release (1.7.1).
-- Not fixed here (config, not code): a secondary workspace's Slack app still needs
-  files:read + im:history (+ users:read/im:write for @handle DMs) added
-  and reinstalled for latest-mode to work against its DMs. This ADR only
-  makes that gap legible.
+- Not fixed here (config, not code): a secondary workspace's Slack app
+  still needs files:read + im:history (+ users:read/im:write for @handle
+  DMs) added and reinstalled for latest-mode to work against its DMs.
+  This ADR only makes that gap legible.

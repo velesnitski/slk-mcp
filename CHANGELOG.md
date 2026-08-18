@@ -419,8 +419,8 @@ A token missing **files:read** makes Slack serve its HTML sign-in page
 (HTTP 200); a token missing **im:history / im:write / users:read** makes
 latest-mode fail with `missing_scope`. Both surfaced as generic errors
 that never said *which* workspace's token to fix — painful in a
-multi-workspace setup (a voice note in a secondary-workspace DM failing while primary
-works). The file surface now decorates authorization failures with a
+multi-workspace setup (a voice note in a secondary-workspace DM failing
+while the primary works). The file surface now decorates authorization failures with a
 workspace-aware, actionable hint (mirrors `statusErrorHint`): the
 HTML-guard returns a sentinel that `finishFetch` rewrites into a
 `files:read` message naming the workspace, and Slack `missing_scope` /
