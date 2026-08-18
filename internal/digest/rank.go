@@ -22,6 +22,19 @@ const (
 	// high-volume log/git feed. A DM that also mentions you stacks
 	// both tiers (1.5M) and stays at the very top. See ADR 020.
 	dmBonus = 500_000
+
+	// feedPenalty: a bot-driven log / git / low-signal feed. Its two
+	// loudest rank signals -- raw volume and error-shaped keywords --
+	// are what such a channel is MADE of, not evidence that it matters:
+	// a feed of 50 identical "[attached: 1]" lines outranked every
+	// human channel in the workspace and evicted them under the
+	// max_chars cap. So a feed gets a tier of its own BELOW every
+	// ordinary channel, symmetric to dmBonus above them, and wide
+	// enough that no amount of volume climbs back out.
+	//
+	// The tiers still stack: a feed that @-mentions you keeps
+	// mentionBonus and stays visible, just under a human mention.
+	feedPenalty = 250_000
 )
 
 // RankUnread orders ChannelUnread results. The components, in order
@@ -36,6 +49,8 @@ const (
 //     marks, urgency reactions, recency. See urgency.go.
 //     Tunable per call via UrgencyOpts (weight + extra keywords).
 //  4. Raw volume — total unread messages + replies.
+//  5. A bot feed (log / git / low-signal) — subtracts feedPenalty, so
+//     bot volume can never evict a human channel under max_chars.
 //
 // `now` is injected so tests can fix recency. Pass time.Time{} to
 // disable the recency component.
@@ -51,7 +66,19 @@ func RankUnread(cu *slack.ChannelUnread, selfID string, now time.Time, urg Urgen
 	if ChannelMentions(cu, selfID) {
 		rank += mentionBonus
 	}
+	if IsBotFeed(cu) {
+		rank -= feedPenalty
+	}
 	return rank
+}
+
+// IsBotFeed reports whether a channel is machine-driven: a git/CI feed,
+// a log feed, or a name-flagged low-signal channel. Grouping the three
+// detectors here keeps the ranker's notion of "feed" identical to the
+// renderer's, so a channel can never be collapsed to a histogram while
+// still being ranked as if it were a conversation.
+func IsBotFeed(cu *slack.ChannelUnread) bool {
+	return DetectGitChannel(cu) || DetectLogChannel(cu) || DetectLowSignalChannel(cu)
 }
 
 // ChannelMentions reports whether any top-level message OR inlined

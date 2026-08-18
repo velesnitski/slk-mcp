@@ -356,9 +356,12 @@ func TestRankUnread_TuningBeatsBuiltinDefault(t *testing.T) {
 	// Two channels: one matched only by an extra keyword ("p0"), one
 	// with three plain messages. Without the extra keyword, the noisy
 	// plain channel wins. With the extra keyword, the p0 channel wins.
+	// Bodies are deliberately full-length: five 13-char messages would
+	// trip DetectLowSignalChannel (>=5 msgs, avg body < 16) and drop the
+	// channel a whole rank tier, which is not what this test is about.
 	noise := mkChannelUnread("noise", nil, nil)
 	for i := 0; i < 5; i++ {
-		noise.Messages = append(noise.Messages, msgWithText("status update"))
+		noise.Messages = append(noise.Messages, msgWithText("status update from the team on the current sprint"))
 	}
 	p0 := mkChannelUnread("p0",
 		[]goslack.Message{msgWithText("we have a p0")}, nil)

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] - 2026-08-18
+
+### Fixed
+
+- **Bot feeds no longer evict human channels under `max_chars`.**
+  `RankUnread` based the rank on raw message volume plus an urgency
+  score that rewards `error`/`failed`/`alert` — the two things a
+  machine-driven channel is made of. A fifty-line alert feed outranked
+  every low-volume human channel and pushed them into the omitted-by-cap
+  footer.
+
+  Adds `feedPenalty`, a rank tier below ordinary channels, symmetric to
+  the existing DM tier above them. `IsBotFeed` reuses the log/git/
+  low-signal detectors the renderer already applies, so the ranker and
+  the renderer cannot disagree about what a feed is. `mentionBonus`
+  still stacks: a ping inside a CI channel surfaces, it just ranks below
+  a ping from a person. See ADR 078.
+
+### Changed
+
+- The `max_chars` footer lists each omitted channel with its unread
+  count, so a drill-in can be chosen rather than guessed.
+
 ## [1.33.0] - 2026-08-18
 
 ### Added

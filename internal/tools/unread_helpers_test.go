@@ -118,11 +118,15 @@ func TestRankUnread_MentionsOutrankVolume(t *testing.T) {
 }
 
 func TestRankUnread_VolumeBreaksTies(t *testing.T) {
+	// Full-length bodies on purpose: five one-character messages are
+	// exactly what DetectLowSignalChannel is for, and the resulting
+	// tier demotion has nothing to do with the tie-break under test.
+	const body = "picking this up now, will report back shortly"
 	smaller := mkChannelUnread("s",
-		[]goslack.Message{mkMsg("1.0", "U2", "x"), mkMsg("1.1", "U2", "y")}, nil)
+		[]goslack.Message{mkMsg("1.0", "U2", body), mkMsg("1.1", "U2", body)}, nil)
 	bigger := mkChannelUnread("b", nil, nil)
 	for i := 0; i < 5; i++ {
-		bigger.Messages = append(bigger.Messages, mkMsg("1.0", "U2", "x"))
+		bigger.Messages = append(bigger.Messages, mkMsg("1.0", "U2", body))
 	}
 	if digest.RankUnread(bigger, "U_SELF", time.Time{}, digest.UrgencyOpts{}) <= digest.RankUnread(smaller, "U_SELF", time.Time{}, digest.UrgencyOpts{}) {
 		t.Fatalf("among non-tagged channels, busier must rank higher")

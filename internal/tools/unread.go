@@ -555,7 +555,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 			continue
 		}
 		if !budgetAppend(&b, rendered, p.maxChars) {
-			dropped = append(dropped, label)
+			// Carry the volume: a bare name doesn't say whether the
+			// channel is worth a drill-in call.
+			dropped = append(dropped, fmt.Sprintf("%s (%d)", label, len(r.Messages)))
 			continue
 		}
 	}
@@ -563,7 +565,7 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 		h.log.Debug("log mode applied", "channels", logChannels)
 	}
 	if len(dropped) > 0 {
-		fmt.Fprintf(&b, "+ %d channels omitted by max_chars cap: %s\n  (use get_channel_digest to drill in)\n\n",
+		fmt.Fprintf(&b, "+ %d channels omitted by max_chars cap, with unread counts: %s\n  (use get_channel_digest to drill in)\n\n",
 			len(dropped), strings.Join(dropped, ", "))
 	}
 	if p.includeRefs {
