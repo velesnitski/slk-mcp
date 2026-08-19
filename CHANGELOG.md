@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] - 2026-08-19
+
+### Changed
+
+- **`scripts/sweep.sh` now fails closed.** A missing or empty
+  `.sweep-patterns.local` exits 2 instead of scanning a subset and
+  printing "clean" — the reduced scan is now the explicitly named
+  `--shapes-only`. Adopts the established sweep contract:
+  tracked `.sweep-patterns.example` template, `CS:` prefix for
+  case-sensitive patterns, tracked-file count printed on success, and
+  plain `grep` over `git ls-files` rather than `git grep`.
+
+  The `sweep:allow` marker is now **partial** — it exempts a line from
+  the credential-shape rules only, never from the deny-list.
+
+### Added
+
+- `--quiet` reports `file:line` without the matched text, for public CI
+  logs that a history rewrite can never reach.
+- A CI sweep job. With the `SWEEP_PATTERNS` secret it scans full history;
+  without it, credential shapes only, and it announces which.
+
+See ADR 079, which supersedes the CI consequence of ADR 076.
+
 ## [1.34.0] - 2026-08-18
 
 ### Fixed

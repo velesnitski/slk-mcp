@@ -1,37 +1,65 @@
 #!/usr/bin/env bash
 #
-# sweep.sh — pre-push scan for content that must not reach a public repo.
+# Sensitive-data sweep — run before every push (see CLAUDE.md).
 #
-#   scripts/sweep.sh              scan tracked files at HEAD
-#   scripts/sweep.sh --history    also scan every blob and commit message
+#   scripts/sweep.sh                 scan tracked files at HEAD
+#   scripts/sweep.sh --history       also scan every blob and commit message
+#   scripts/sweep.sh --shapes-only   credential shapes only, no deny-list
+#   scripts/sweep.sh --quiet         report file:line only, never the match
 #
 # Two pattern sources:
 #
-#   1. The built-ins below: credential SHAPES only. They are safe to
-#      publish because they describe a format, never a value.
-#   2. .sweep-patterns.local (gitignored, one PCRE per line, # comments).
-#      Deployment-specific strings — workspace labels, channel names,
-#      hostnames, product codes — live ONLY here. Writing them into a
-#      committed deny-list would publish the very strings the deny-list
-#      exists to keep out, so the guard must never carry them.
+#   1. Credential SHAPES, below. Safe to publish because each describes a
+#      format, never a value. Written to require real-token entropy so the
+#      repo's own placeholders (xoxb-test, xoxp-secondary) don't trip them.
+#   2. .sweep-patterns.local — UNTRACKED, gitignored. Deployment-specific
+#      strings: workspace labels, channel names, hostnames, product and
+#      ticket codes. A committed deny-list publishes exactly what it
+#      guards, in a file whose purpose announces the strings are sensitive.
+#      Copy .sweep-patterns.example and fill it in.
 #
-# A line carrying the marker `sweep:allow` is skipped. It exists for
-# synthetic fixtures that must MATCH a pattern in order to test it — the
-# redaction suite has to contain a credential-shaped string or it is not
-# testing anything. The marker is deliberate, visible and greppable; a
-# guard with no escape hatch fires on its own fixtures and gets disabled.
+# Pattern file format (one extended regex per line; # and blank ignored):
+#   plain line   → matched case-INSENSITIVE (products, hostnames, brands)
+#   CS: prefix   → matched case-SENSITIVE (uppercase ticket / project codes;
+#                  a blanket (?i) clobbers legitimate lowercase words that
+#                  merely share the prefix)
 #
-# Exit 0 = clean, 1 = hits found.
+# FAILS CLOSED. A missing or empty pattern file exits 2 rather than
+# scanning a subset and reporting "clean" — the aborted run is the common
+# case, so a green result there would be the most dangerous output the
+# script can produce. --shapes-only is the explicit, named way to run the
+# reduced scan; it never happens by accident.
+#
+# A line carrying `sweep:allow` is exempt from the SHAPE rules only. It
+# exists for the redaction suite, which must contain credential-shaped
+# strings to prove it catches them. The exemption is deliberately PARTIAL:
+# deny-list patterns still apply to those lines, or the marker would
+# become a way to smuggle a real identifier past every rule.
+#
+# Exit 0 = clean, 1 = matches found, 2 = misconfigured (no patterns).
 
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
-SCAN_HISTORY=0
-[[ "${1:-}" == "--history" ]] && SCAN_HISTORY=1
+PATTERNS_FILE=.sweep-patterns.local
+EXAMPLE=.sweep-patterns.example
+ALLOW='sweep:allow'
 
-# Credential shapes. Deliberately require real-token entropy so the
-# repo's own placeholders (xoxb-test, xoxp-secondary, glpat-xxx) pass.
-PATTERNS=(
+SCAN_HISTORY=0
+SHAPES_ONLY=0
+QUIET=0
+for arg in "$@"; do
+  case "$arg" in
+    --history)     SCAN_HISTORY=1 ;;
+    --shapes-only) SHAPES_ONLY=1 ;;
+    --quiet)       QUIET=1 ;;
+    *) echo "sweep: unknown argument $arg" >&2; exit 2 ;;
+  esac
+done
+
+# Credential shapes. Case-sensitive: every one of these is anchored on a
+# literal prefix that is itself case-significant.
+SHAPES=(
   'xox[bpasr]-[0-9]{9,}-[0-9A-Za-z-]{10,}'
   'glpat-[A-Za-z0-9_-]{20,}'
   'gh[pousr]_[A-Za-z0-9]{36}'
@@ -39,53 +67,104 @@ PATTERNS=(
   'sk-[A-Za-z0-9]{32,}'
   '-----BEGIN [A-Z ]*PRIVATE KEY-----'
 )
+SHAPE_PATTERN="$(IFS='|'; echo "${SHAPES[*]}")"
 
-LOCAL=.sweep-patterns.local
-if [[ -f "$LOCAL" ]]; then
-  while IFS= read -r line; do
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    PATTERNS+=("$line")
-  done < "$LOCAL"
+CI_PATTERN=""
+CS_PATTERN=""
+
+if (( SHAPES_ONLY )); then
+  echo "sweep: --shapes-only — credential shapes only, deny-list NOT applied" >&2
 else
-  echo "note: $LOCAL not present — scanning credential shapes only" >&2
+  if [[ ! -f "$PATTERNS_FILE" ]]; then
+    echo "sweep: $PATTERNS_FILE not found — copy $EXAMPLE and fill in real patterns." >&2
+    echo "sweep: refusing to report a partial scan as clean (use --shapes-only to opt in)." >&2
+    exit 2
+  fi
+  CI_PATTERN="$(grep -vE '^[[:space:]]*(#|$)' "$PATTERNS_FILE" | grep -vE '^CS:' | paste -sd'|' - || true)"
+  CS_PATTERN="$(grep -E '^CS:' "$PATTERNS_FILE" | sed 's/^CS://' | paste -sd'|' - || true)"
+  if [[ -z "$CI_PATTERN" && -z "$CS_PATTERN" ]]; then
+    echo "sweep: $PATTERNS_FILE has no patterns." >&2
+    exit 2
+  fi
 fi
 
 status=0
 
-ALLOW='sweep:allow'
+# ---------------------------------------------------------------------------
+# Working tree
+# ---------------------------------------------------------------------------
+# The example template is excluded: its illustrative patterns would match
+# themselves. Plain grep over `git ls-files`, not `git grep` — the fleet has
+# seen `git grep` silently return nothing under a wrapper, and a security
+# scan that returns nothing is indistinguishable from a clean one.
+files() { git ls-files -z | grep -zv "^${EXAMPLE}\$"; }
 
-for p in "${PATTERNS[@]}"; do
-  out=$(git grep -nIP -- "$p" 2>/dev/null | grep -v "$ALLOW")
-  if [[ -n "$out" ]]; then
-    echo "HIT (working tree) /$p/"
-    echo "$out" | sed 's/^/  /'
-    status=1
+report() { # <label> <matches>
+  [[ -z "$2" ]] && return 0
+  echo "sweep: $1" >&2
+  if (( QUIET )); then
+    # A public repo's Actions logs are PUBLIC. Printing the matched line
+    # there would publish the exact string the guard exists to keep out,
+    # in a log no history rewrite ever reaches. Locations only.
+    echo "$2" | cut -d: -f1,2 | sed 's/^/  /' >&2
+    echo "  (content withheld — rerun locally without --quiet to see it)" >&2
+  else
+    echo "$2" >&2
   fi
-done
+  status=1
+}
 
+# Shapes honour the allow marker; deny-list patterns do not.
+M="$(files | xargs -0 grep -nE "$SHAPE_PATTERN" -- 2>/dev/null | grep -v "$ALLOW" || true)"
+report "CREDENTIAL SHAPE — do not push:" "$M"
+
+if [[ -n "$CI_PATTERN" ]]; then
+  M="$(files | xargs -0 grep -niE "$CI_PATTERN" -- 2>/dev/null || true)"
+  report "BANNED STRING — do not push:" "$M"
+fi
+if [[ -n "$CS_PATTERN" ]]; then
+  M="$(files | xargs -0 grep -nE "$CS_PATTERN" -- 2>/dev/null || true)"
+  report "TICKET-ID / PROJECT-CODE LEAK — do not push:" "$M"
+fi
+
+# ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+# Commit messages and the object store are separate stores: a string
+# scrubbed from the tree survives in either, and they are fixed by
+# different mechanisms. perl, not grep -P — BSD grep has no -P.
 if (( SCAN_HISTORY )); then
-  # Commit messages and blobs are separate stores: a string scrubbed from
-  # the tree survives in either. Dumped once, then matched with perl —
-  # BSD grep has no -P, and only git's grep carries PCRE.
   msgs=$(mktemp) || exit 2
   objs=$(mktemp) || exit 2
   trap 'rm -f "$msgs" "$objs"' EXIT
 
-  git log --all --format='%H%n%B' | grep -v "$ALLOW" > "$msgs"
-  git cat-file --batch-all-objects --batch --buffer 2>/dev/null | grep -av "$ALLOW" > "$objs"
+  git log --all --format='%H%n%B' > "$msgs"
+  git cat-file --batch-all-objects --batch --buffer > "$objs" 2>/dev/null
 
-  for p in "${PATTERNS[@]}"; do
-    if ! SWEEP_PAT="$p" perl -ne 'BEGIN{$re=qr/$ENV{SWEEP_PAT}/} exit 1 if /$re/' "$msgs"; then
-      echo "HIT (commit messages) /$p/"
-      SWEEP_PAT="$p" perl -ne 'BEGIN{$re=qr/$ENV{SWEEP_PAT}/} print "  $_" if /$re/' "$msgs" | head -5
-      status=1
-    fi
-    if ! SWEEP_PAT="$p" perl -ne 'BEGIN{$re=qr/$ENV{SWEEP_PAT}/} exit 1 if /$re/' "$objs"; then
-      echo "HIT (history objects) /$p/"
-      status=1
-    fi
-  done
+  scan_history() { # <regex> <case-flag i|""> <label> <honour-allow 0|1>
+    local rx="$1" ci="$2" label="$3" allow="$4" store hits
+    for store in "$msgs" "$objs"; do
+      if (( allow )); then
+        hits="$(grep -av "$ALLOW" "$store" | grep -ac"$ci"E -- "$rx" || true)"
+      else
+        hits="$(grep -ac"$ci"E -- "$rx" "$store" || true)"
+      fi
+      if [[ "$hits" != "0" ]]; then
+        local where="commit messages"; [[ "$store" == "$objs" ]] && where="history objects"
+        echo "sweep: $label in $where — $hits line(s)" >&2
+        status=1
+      fi
+    done
+  }
+
+  scan_history "$SHAPE_PATTERN" "" "CREDENTIAL SHAPE" 1
+  [[ -n "$CI_PATTERN" ]] && scan_history "$CI_PATTERN" "i" "BANNED STRING" 0
+  [[ -n "$CS_PATTERN" ]] && scan_history "$CS_PATTERN" "" "TICKET-ID / PROJECT-CODE" 0
 fi
 
-(( status )) || echo "sweep: clean"
-exit $status
+(( status )) && exit 1
+
+tracked="$(git ls-files | wc -l | tr -d ' ')"
+scope="tree"
+(( SCAN_HISTORY )) && scope="tree + history"
+echo "sweep: clean ($tracked tracked files, $scope)"

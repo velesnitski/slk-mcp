@@ -35,5 +35,6 @@ built version so the dialog never shows a stale version — see ADR 024.
 - All secrets via environment variables at runtime
 - Branch workflow: develop in `dev`, merge to `main`
 - Run `make sweep` before pushing (`make sweep-history` before publishing
-  or after a rewrite). Its deployment-specific patterns live in
-  `.sweep-patterns.local`, which is gitignored on purpose — see ADR 076
+  or after a rewrite). It FAILS CLOSED: no `.sweep-patterns.local` means
+  exit 2, never a green pass. Copy `.sweep-patterns.example` to create it;
+  it is gitignored on purpose — see ADR 076 and ADR 079

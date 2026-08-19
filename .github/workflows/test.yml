@@ -64,3 +64,35 @@ jobs:
           # The config lives at .golangci.yml — only the selective rules
           # we trust to block CI on are enabled there.
           args: --timeout=5m
+
+  sweep:
+    name: Sweep (sensitive data)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history scan reads every blob and commit message, so the
+          # default shallow clone would silently cover almost nothing.
+          fetch-depth: 0
+
+      - name: Restore deny-list
+        # The deny-list is untracked by design (ADR 076), so CI only has it
+        # when the secret is set. Without it the job runs the shapes-only
+        # scan and SAYS SO, rather than claiming coverage it does not have.
+        env:
+          SWEEP_PATTERNS: ${{ secrets.SWEEP_PATTERNS }}
+        run: |
+          if [ -n "$SWEEP_PATTERNS" ]; then
+            printf '%s\n' "$SWEEP_PATTERNS" > .sweep-patterns.local
+            echo "SWEEP_ARGS=--history --quiet" >> "$GITHUB_ENV"
+          else
+            echo "::notice::SWEEP_PATTERNS secret not set — running credential shapes only"
+            echo "SWEEP_ARGS=--shapes-only --history --quiet" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sweep
+        # --quiet is not optional here: this repo is public, so its Actions
+        # logs are public too. Printing a matched line would publish the
+        # exact string the guard exists to keep out, into a log that no
+        # history rewrite can ever reach.
+        run: ./scripts/sweep.sh $SWEEP_ARGS

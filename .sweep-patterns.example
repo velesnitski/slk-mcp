@@ -1,0 +1,29 @@
+# Template for .sweep-patterns.local (which is gitignored — NEVER commit it).
+#
+# One extended regex per line. Blank lines and # comments are ignored.
+#   plain line   -> matched case-INSENSITIVE against every tracked file
+#   CS: prefix   -> matched case-SENSITIVE (uppercase ticket / project codes;
+#                   a blanket case-insensitive match clobbers legitimate
+#                   lowercase words that merely share the prefix)
+#
+# Put the REAL banned strings only in .sweep-patterns.local, so they never
+# appear in the repo itself. Everything below is invented.
+#
+# Typical categories:
+#
+#   \bacme(corp|vpn)?\b            <- product / company / workspace names
+#   \bexample-internal\.com\b      <- internal hostnames and domains
+#   \bjdoe\b|\bjanedoe\b           <- real person handles
+#   \b(?:10\.13\.)                 <- infrastructure address prefixes, not
+#                                     single addresses: an adjacent host in
+#                                     a known range walks past a single one
+#   CS:\b(ACME|OPS|IOSP)-[0-9]+\b  <- ticket IDs
+#   CS:\b(ACME|OPS|IOSP)\b         <- and the BARE codes: a prefix with no
+#                                     digit slips past a PREFIX-<digit> rule
+#
+# Use \b word boundaries rather than lookaround: the same file is matched by
+# grep -E over the tree and by perl over history, and only \b works in both.
+#
+# Note that credential SHAPES (xox…, glpat-…, AKIA…, PEM headers) are built
+# into scripts/sweep.sh and need no entry here — a format is safe to publish,
+# a value is not.
