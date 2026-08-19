@@ -5,9 +5,9 @@ Status: accepted
 
 ## Context
 
-A sweep of 56 channels emitted the DMs, then a wall of bot feeds, then
-dropped 38 channels on the `max_chars` cap — among them every low-volume
-human channel in the workspace.
+A sweep emitted the DMs, then a wall of bot feeds, then dropped the rest
+on the `max_chars` cap — among them every low-volume human channel in
+the workspace.
 
 `RankUnread` starts from `rank := len(cu.Messages)` and adds
 `UrgencyScore`, which rewards `error` / `failed` / `alert`. Volume and an

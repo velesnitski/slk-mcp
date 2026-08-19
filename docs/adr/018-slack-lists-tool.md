@@ -130,7 +130,7 @@ renderers.
 - Sensitive-string scan over touched files — no real product names,
   workspace identifiers, channel handles, or peer names leaked into
   ADR, CHANGELOG, or test fixtures. Test fixtures use synthetic
-  `F0AHG5CBXC5` placeholder, the same generic shape Slack documents.
+  `F0ABC1234DE` placeholder, the same generic shape Slack documents.
 - Manual smoke (not part of CI):
   1. `go build -o slk-mcp .`
   2. `SLACK_USER_TOKEN=<scoped-token> ./slk-mcp -version` →

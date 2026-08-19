@@ -6,10 +6,10 @@
 
 ## Context
 
-`get_unread_summary` on a weekend backlog (55 channels, 226 top-level +
-167 thread replies across two workspaces) rendered ~57k characters and
-**overflowed the MCP host's result-size limit**, forcing the spill-to-file
-fallback — a poor experience and a hard failure of the primary tool.
+`get_unread_summary` on a weekend backlog across two workspaces rendered
+far past the MCP host's result-size limit and **overflowed it**, forcing
+the spill-to-file fallback — a poor experience and a hard failure of the
+primary tool.
 
 Two compounding causes:
 

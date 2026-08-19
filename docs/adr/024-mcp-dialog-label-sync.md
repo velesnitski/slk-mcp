@@ -17,12 +17,11 @@ set to `"slack"`, the dialog shows `slack · ✔ connected · 18 tools`; the
 `"slack v0.5.0"` we report in `serverInfo.name` only appears in the
 server-instructions header and in hosts that render `serverInfo.name`.
 
-A sibling MCP (crm-pl) "shows its version" in the dialog only because
-someone hand-typed it into the config key (`"crm-pl v0.7.0"`). That key
-does not track the binary: bump the binary and the dialog keeps showing
-the old version until the JSON is hand-edited. gl-mcp has the same
-manual re-key chore. Copying that into slk-mcp would just propagate a
-label that silently lies after the next release.
+Another server in the same config "shows its version" in the dialog only
+because someone hand-typed it into the config key. That key does not
+track the binary: bump the binary and the dialog keeps showing the old
+version until the JSON is hand-edited. Copying that approach here would
+just propagate a label that silently lies after the next release.
 
 ## Decision
 
@@ -42,9 +41,8 @@ self-report:
   must never mutate `~/.claude.json`; the sync runs only when you intend
   to reconnect.
 
-We explicitly reject hardcoding the version in the config key (the
-crm-pl/gl-mcp way): it cannot auto-update and is correct only by
-coincidence between releases.
+We explicitly reject hardcoding the version in the config key: it cannot
+auto-update and is correct only by coincidence between releases.
 
 ## Consequences
 
