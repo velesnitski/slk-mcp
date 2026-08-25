@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -45,8 +46,10 @@ func TestRenderFullMessage_NeverTruncates(t *testing.T) {
 	if !strings.Contains(got, "chars: 5000") {
 		t.Fatalf("rune count must be reported (not bytes):\n%.200s", got)
 	}
-	if !strings.Contains(got, "from: Alice at 2024-04-25") {
-		t.Fatalf("author + absolute date missing:\n%.200s", got)
+	// The timestamp renders in the runner's local zone, so assert the
+	// shape, not a specific date — a zone east of UTC flips the day.
+	if !regexp.MustCompile(`from: Alice at \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`).MatchString(got) {
+		t.Fatalf("author + absolute datetime missing:\n%.200s", got)
 	}
 }
 
