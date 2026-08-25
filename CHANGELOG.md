@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] - 2026-08-25
+
+### Added
+
+- **`get_message`** — fetch ONE message verbatim: full text with no
+  truncation, plus the metadata every preview drops (absolute time,
+  edited flag, reactions with counts, files, thread position, rune
+  count). The drill-in for any "(+N chars)" preview. Pass a permalink —
+  the workspace is auto-detected from the link's host via the cached
+  auth.test URL — or channel + ts. A thread reply resolves through its
+  own thread_ts and shows the parent as one capped context line.
+  Requested by the tool's second user. See ADR 080.
+
 ## [1.35.0] - 2026-08-19
 
 ### Changed
