@@ -30,11 +30,20 @@
 # script can produce. --shapes-only is the explicit, named way to run the
 # reduced scan; it never happens by accident.
 #
-# A line carrying `sweep:allow` is exempt from the SHAPE rules only. It
-# exists for the redaction suite, which must contain credential-shaped
-# strings to prove it catches them. The exemption is deliberately PARTIAL:
-# deny-list patterns still apply to those lines, or the marker would
-# become a way to smuggle a real identifier past every rule.
+# `sweep:allow` is now a HISTORY-ONLY exemption, and only for SHAPE rules.
+#
+# The working tree honours NO exemption: the redaction suite used to need
+# one, because it must contain credential-shaped strings to prove it
+# catches them, but those fixtures are assembled at runtime now
+# (internal/export/redact_test.go). Nothing tracked needs the marker, so
+# a credential shape in a tracked file always fails — no escape hatch to
+# reach for, and none to review.
+#
+# History still needs it: old objects carry those fixtures as literals,
+# blobs are immutable, and rewriting history to scrub synthetic strings
+# is not worth the cost. Deny-list patterns apply to marked lines even
+# there, or the marker would become a way to smuggle a real identifier
+# past every rule.
 #
 # Exit 0 = clean, 1 = matches found, 2 = misconfigured (no patterns).
 
@@ -114,8 +123,8 @@ report() { # <label> <matches>
   status=1
 }
 
-# Shapes honour the allow marker; deny-list patterns do not.
-M="$(files | xargs -0 grep -nE "$SHAPE_PATTERN" -- 2>/dev/null | grep -v "$ALLOW" || true)"
+# No exemption in the tree, for shapes or anything else.
+M="$(files | xargs -0 grep -nE "$SHAPE_PATTERN" -- 2>/dev/null || true)"
 report "CREDENTIAL SHAPE — do not push:" "$M"
 
 if [[ -n "$CI_PATTERN" ]]; then

@@ -27,8 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rendered documents pass through `export.Redact` before truncation, so
   key material in a newly-readable `.ovpn` or `.conf` never reaches the
   transcript. The number of redacted spans is reported, never silent.
+- **Credential-shaped test fixtures are assembled at runtime** instead of
+  written as literals. They were never usable secrets, but a scanner
+  matches on shape, not validity, and this repository is public.
+- **`scripts/sweep.sh` no longer honours `sweep:allow` in the working
+  tree.** With the fixtures assembled, the exemption had no users, so a
+  credential shape in a tracked file now always fails — the guard has no
+  escape hatch left to reach for. The marker survives for `--history`
+  only, where the old blobs are immutable; deny-list patterns still
+  apply to marked lines even there.
 
-See ADR 081.
+See ADR 081 and ADR 082.
 
 ## [1.36.0] - 2026-08-25
 
