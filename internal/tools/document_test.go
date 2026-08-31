@@ -49,6 +49,49 @@ func TestIsDocumentFile(t *testing.T) {
 	}
 }
 
+func TestIsDocumentFile_ExtensionRescuesGenericMimetype(t *testing.T) {
+	// The regression this tier exists for: Slack served OpenVPN client
+	// logs as octet-stream, so mimetype and filetype both said "binary"
+	// and read_document skipped them without saying so.
+	yes := []goslack.File{
+		docFile("client_a.log", "application/octet-stream", "binary"),
+		docFile("obrazets.log", "application/octet-stream", ""),
+		docFile("profile.ovpn", "application/octet-stream", "binary"),
+		docFile("server.conf", "", ""),
+	}
+	for _, f := range yes {
+		if !isDocumentFile(f) {
+			t.Errorf("%s (%q/%q) should be rescued by its extension", f.Name, f.Mimetype, f.Filetype)
+		}
+	}
+	// An explicit binary mimetype is a statement about the bytes; a
+	// misleading extension must not be able to override it.
+	no := []goslack.File{
+		docFile("screenshot.log", "image/png", "png"),
+		docFile("voice.txt", "audio/mp4", "m4a"),
+		docFile("dump.bin", "application/octet-stream", "binary"),
+		docFile("noextension", "application/octet-stream", ""),
+		docFile("trailing.", "application/octet-stream", ""),
+	}
+	for _, f := range no {
+		if isDocumentFile(f) {
+			t.Errorf("%s (%q/%q) must not be a document", f.Name, f.Mimetype, f.Filetype)
+		}
+	}
+}
+
+func TestFileExtension(t *testing.T) {
+	cases := map[string]string{
+		"client_a.log": "log", "a.TXT": "txt", "archive.tar.gz": "gz",
+		"noextension": "", "trailing.": "", ".hidden": "hidden", "": "",
+	}
+	for in, want := range cases {
+		if got := fileExtension(in); got != want {
+			t.Errorf("fileExtension(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestHTMLToText(t *testing.T) {
 	in := `<!doctype html><html><head><title>T</title>
 <style>body{color:red}</style><script>var x = "<p>not prose</p>";</script></head>
@@ -158,7 +201,7 @@ func TestCollectDocuments(t *testing.T) {
 		docMsg("200.0", playbook, pic),
 	}
 
-	all := collectDocuments(msgs, "")
+	all := collectDocuments(msgs, "", isReadableDocument)
 	if len(all) != 2 {
 		t.Fatalf("want both documents (image skipped), got %d", len(all))
 	}
@@ -167,7 +210,7 @@ func TestCollectDocuments(t *testing.T) {
 	}
 
 	// The whole point: reach the EARLIER of two documents by name.
-	got := collectDocuments(msgs, "playbook")
+	got := collectDocuments(msgs, "playbook", isReadableDocument)
 	if len(got) != 1 || got[0].File.Name != "team playbook.html" {
 		t.Fatalf("match should select the earlier document, got %+v", got)
 	}
@@ -175,11 +218,16 @@ func TestCollectDocuments(t *testing.T) {
 		t.Fatalf("candidate must carry its message ts, got %q", got[0].TS)
 	}
 	// Matching is case-insensitive and returns nothing when absent.
-	if len(collectDocuments(msgs, "PROPOSAL")) != 1 {
+	if len(collectDocuments(msgs, "PROPOSAL", isReadableDocument)) != 1 {
 		t.Fatal("match should be case-insensitive")
 	}
-	if len(collectDocuments(msgs, "nope")) != 0 {
+	if len(collectDocuments(msgs, "nope", isReadableDocument)) != 0 {
 		t.Fatal("a non-matching needle must select nothing")
+	}
+	// The listing filter keeps what a read would drop, so nothing is
+	// omitted from an inventory of what a conversation holds.
+	if len(collectDocuments(msgs, "", anyFile)) != 3 {
+		t.Fatal("a listing must include the image too")
 	}
 }
 
@@ -190,6 +238,30 @@ func TestRenderDocumentList(t *testing.T) {
 	for _, want := range []string{"team playbook.html", "text/html", "4096", "ts=200.0", "[primary]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in listing, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "not text") {
+		t.Errorf("a readable document must not be marked unreadable, got:\n%s", out)
+	}
+}
+
+func TestRenderDocumentList_MarksUnreadableAttachments(t *testing.T) {
+	doc := docFile("notes.txt", "text/plain", "text")
+	pic := docFile("shot.png", "image/png", "png")
+	out := renderDocumentList([]docCandidate{
+		{File: doc, TS: "300.0"}, {File: pic, TS: "200.0"},
+	}, " [primary]")
+
+	if !strings.Contains(out, "shot.png") {
+		t.Fatalf("an unreadable attachment must still be listed, got:\n%s", out)
+	}
+	if !strings.Contains(out, "not text") {
+		t.Fatalf("it must be marked so it is not mistaken for readable, got:\n%s", out)
+	}
+	// The mark belongs to the image line only.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "notes.txt") && strings.Contains(line, "not text") {
+			t.Fatalf("the readable document must not carry the mark: %q", line)
 		}
 	}
 }
@@ -251,5 +323,43 @@ func TestRenderDocuments_PDFIsReportedByPathAndKept(t *testing.T) {
 	}
 	if _, err := os.Stat(txt); !os.IsNotExist(err) {
 		t.Fatalf("a rendered text file must be cleaned up, stat err = %v", err)
+	}
+}
+
+// pemFixture assembles a key-shaped block at RUNTIME. The repo must not
+// contain key-shaped literals, not even fake ones — the sweep enforces
+// that on every push — so the PEM marker lines are built from parts and
+// never appear contiguously in this file.
+func pemFixture(body string) string {
+	d := strings.Repeat("-", 5)
+	kind := "PRIVATE " + "KEY"
+	return d + "BEGIN " + kind + d + "\n" + body + "\n" + d + "END " + kind + d
+}
+
+func TestRenderDocuments_RedactsKeyMaterial(t *testing.T) {
+	// A VPN config is now readable by extension, so the key inside one
+	// must not reach the transcript.
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "slk-doc-F1-node.ovpn")
+	body := "client\nremote vpn.example.invalid 1194\n<key>\n" +
+		pemFixture("MIInotarealkey") + "\n</key>\n"
+	if err := os.WriteFile(conf, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := renderDocuments([]savedFile{
+		{Path: conf, Mimetype: "application/octet-stream", Size: int64(len(body))},
+	}, " [primary]", 10_000)
+
+	if strings.Contains(out, "MIInotarealkey") || strings.Contains(out, pemFixture("MIInotarealkey")) {
+		t.Fatalf("key material must never be inlined, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 secret(s) redacted") {
+		t.Fatalf("the redaction must be reported, got:\n%s", out)
+	}
+	// Everything around the key still has to be readable — that is the
+	// point of reading the config at all.
+	if !strings.Contains(out, "remote vpn.example.invalid 1194") {
+		t.Fatalf("non-secret directives must survive, got:\n%s", out)
 	}
 }

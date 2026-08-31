@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-08-31
+
+### Fixed
+
+- **`read_document` reads `.log`, `.conf` and other octet-stream
+  attachments.** Classification gained a third tier — the filename —
+  consulted only when the mimetype is generic. Slack serves anything
+  outside its own extension table as `application/octet-stream` with
+  `filetype: binary`, which is the normal shape of operational evidence,
+  and both earlier tiers rejected it. An explicit `image/*`, `audio/*`,
+  `video/*` or zip mimetype still wins over a misleading extension.
+- **`list_only` no longer omits attachments it cannot read.** It
+  filtered before rendering, so an inventory of a conversation looked
+  complete while silently dropping every non-text file. All attachments
+  are now listed, with the non-text ones marked and pointed at
+  `view_image` / `transcribe_audio`. Reads still filter.
+
+### Security
+
+- Rendered documents pass through `export.Redact` before truncation, so
+  key material in a newly-readable `.ovpn` or `.conf` never reaches the
+  transcript. The number of redacted spans is reported, never silent.
+
+See ADR 081.
+
 ## [1.36.0] - 2026-08-25
 
 ### Added

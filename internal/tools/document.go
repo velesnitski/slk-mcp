@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/export"
 )
 
 // docMaxChars caps how much of a document is returned inline. Proposals
@@ -30,7 +31,7 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("read_document",
-			mcp.WithDescription("Read text-based attachments (HTML, Markdown, TXT, CSV, JSON, source files) from a Slack message and return their contents inline. HTML is converted to plain text. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest document. Use view_image for pictures and transcribe_audio for voice notes."),
+			mcp.WithDescription("Read text-based attachments (HTML, Markdown, TXT, CSV, JSON, source files, and .log/.conf/.ovpn artifacts Slack serves as octet-stream) from a Slack message and return their contents inline. HTML is converted to plain text; credential-shaped spans are redacted. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest document. list_only shows every attachment, marking the ones that are not text. Use view_image for pictures and transcribe_audio for voice notes."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the document (optional if permalink is provided)")),
@@ -116,12 +117,20 @@ func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from,
 	if ferr != nil {
 		return h.scopeResult(wsName, ferr)
 	}
-	msgs, merr := scoped.Messages().RecentFileMessages(ctx, channelID, isReadableDocument, fromID, docScanLimit)
+	// A listing must show everything the messages carry. Filtering it to
+	// readable files makes an incomplete list look complete: the caller
+	// sees the documents, concludes that is all there is, and never learns
+	// the logs posted beside them exist. Reads still filter.
+	accept := isReadableDocument
+	if listOnly {
+		accept = anyFile
+	}
+	msgs, merr := scoped.Messages().RecentFileMessages(ctx, channelID, accept, fromID, docScanLimit)
 	if merr != nil {
 		return h.scopeResult(wsName, merr)
 	}
 
-	candidates := collectDocuments(msgs, match)
+	candidates := collectDocuments(msgs, match, accept)
 	if len(candidates) == 0 {
 		if strings.TrimSpace(match) != "" {
 			return mcp.NewToolResultError(fmt.Sprintf("no recent document matches %q in this conversation — call again with list_only=true to see what is there", match))
@@ -149,15 +158,18 @@ func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from,
 	return mcp.NewToolResultText(renderDocuments(saved, h.wsLabel(wsName), maxChars))
 }
 
-// collectDocuments flattens the matching attachments out of messages
+// anyFile accepts every attachment — the listing filter. Pure.
+func anyFile(goslack.File) bool { return true }
+
+// collectDocuments flattens the accepted attachments out of messages
 // (already newest-first), keeping only those whose filename contains
 // match when one is given. Pure.
-func collectDocuments(msgs []goslack.Message, match string) []docCandidate {
+func collectDocuments(msgs []goslack.Message, match string, accept func(goslack.File) bool) []docCandidate {
 	needle := strings.ToLower(strings.TrimSpace(match))
 	var out []docCandidate
 	for i := range msgs {
 		for _, f := range msgs[i].Files {
-			if !isReadableDocument(f) {
+			if !accept(f) {
 				continue
 			}
 			if needle != "" && !strings.Contains(strings.ToLower(f.Name), needle) {
@@ -171,12 +183,18 @@ func collectDocuments(msgs []goslack.Message, match string) []docCandidate {
 
 // renderDocumentList shows what is available without spending a download
 // on it, including each message ts so the caller can fetch one exactly.
-// Pure.
+// Every attachment is listed, readable or not, each marked — an omission
+// here reads as "there is nothing else", which is the one thing a listing
+// must never imply falsely. Pure.
 func renderDocumentList(candidates []docCandidate, wsLabel string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d document(s)%s, newest first:\n", len(candidates), wsLabel)
+	fmt.Fprintf(&b, "%d attachment(s)%s, newest first:\n", len(candidates), wsLabel)
 	for _, c := range candidates {
-		fmt.Fprintf(&b, "- %s (%s, %d bytes) ts=%s\n", c.File.Name, c.File.Mimetype, c.File.Size, c.TS)
+		fmt.Fprintf(&b, "- %s (%s, %d bytes) ts=%s", c.File.Name, c.File.Mimetype, c.File.Size, c.TS)
+		if !isReadableDocument(c.File) {
+			b.WriteString("  [not text — try view_image or transcribe_audio]")
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("\nPass one of these as timestamp=, or narrow with match=, to read it.\n")
 	return b.String()
@@ -204,8 +222,16 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 			continue
 		}
 		text := documentToText(string(raw), f.Mimetype)
+		// Before truncation, not after: a cap that happens to bisect a
+		// private key still spills half of one. Reading a .ovpn or a .conf
+		// is now in scope, so the key material in them must not reach the
+		// transcript verbatim.
+		text, secrets := export.Redact(text)
 		text, truncated := truncateText(text, maxChars)
 		fmt.Fprintf(&b, "\n--- %s (%s, %d bytes)", displayName(f.Path), f.Mimetype, f.Size)
+		if secrets > 0 {
+			fmt.Fprintf(&b, " — %d secret(s) redacted", secrets)
+		}
 		if truncated {
 			fmt.Fprintf(&b, " — TRUNCATED to %d chars", maxChars)
 		}
@@ -246,15 +272,62 @@ var documentMimetypes = map[string]bool{
 	"application/x-sh": true, "application/sql": true,
 }
 
+// genericMimetypes carry no information: Slack falls back to them for any
+// upload it cannot classify. They are not a statement that the bytes are
+// binary, so the filename is allowed to decide instead.
+var genericMimetypes = map[string]bool{
+	"":                         true,
+	"application/octet-stream": true,
+	"binary/octet-stream":      true,
+	"application/binary":       true,
+}
+
+// documentExtensions are filename suffixes that carry text. Last tier and
+// the one that decides in practice: Slack serves an OpenVPN client log as
+// application/octet-stream, so mimetype and filetype both said "not a
+// document" and the file was skipped — silently, which is what made it
+// dangerous. Operational evidence arrives as .log and .conf far more often
+// than as anything Slack has a filetype for.
+var documentExtensions = map[string]bool{
+	"txt": true, "log": true, "out": true, "err": true,
+	"md": true, "markdown": true, "html": true, "htm": true,
+	"json": true, "csv": true, "tsv": true, "yaml": true, "yml": true,
+	"xml": true, "ini": true, "toml": true, "properties": true,
+	"conf": true, "cfg": true, "ovpn": true, "diff": true, "patch": true,
+	"sql": true, "sh": true, "bash": true, "zsh": true, "py": true,
+	"go": true, "js": true, "ts": true, "css": true, "rb": true,
+	"php": true, "java": true, "c": true, "h": true, "cpp": true,
+}
+
+// fileExtension returns a filename's lowercase extension without the dot.
+// Pure.
+func fileExtension(name string) string {
+	i := strings.LastIndex(name, ".")
+	if i < 0 || i == len(name)-1 {
+		return ""
+	}
+	return strings.ToLower(name[i+1:])
+}
+
 // isDocumentFile reports whether a Slack attachment is text this tool can
-// render. Mimetype decides first; Slack's own filetype is the fallback
-// because snippets and posts often ship with an empty mimetype. Pure.
+// render, in three tiers: mimetype, then Slack's own filetype (snippets
+// and posts often ship with an empty mimetype), then the filename.
+//
+// The filename tier is consulted ONLY when the mimetype is generic. An
+// explicit image/audio/video/zip mimetype is a statement about the bytes,
+// and a misleading extension must not be able to override it. Pure.
 func isDocumentFile(f goslack.File) bool {
 	m := strings.ToLower(strings.TrimSpace(f.Mimetype))
 	if strings.HasPrefix(m, "text/") || documentMimetypes[m] {
 		return true
 	}
-	return documentFiletypes[strings.ToLower(strings.TrimSpace(f.Filetype))]
+	if documentFiletypes[strings.ToLower(strings.TrimSpace(f.Filetype))] {
+		return true
+	}
+	if !genericMimetypes[m] {
+		return false
+	}
+	return documentExtensions[fileExtension(strings.TrimSpace(f.Name))]
 }
 
 // isPDFMimetype reports whether a mimetype names a PDF. Pure.
