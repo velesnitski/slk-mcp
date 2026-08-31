@@ -1,6 +1,6 @@
 BINARY := slk-mcp
 
-.PHONY: build test sync-label install sweep sweep-history
+.PHONY: build test sync-label install sweep sweep-history hooks
 
 ## build: compile the server binary (version embedded via -ldflags)
 build:
@@ -27,3 +27,11 @@ sweep:
 
 sweep-history:
 	./scripts/sweep.sh --history
+
+## hooks: point git at .githooks/ so pre-push runs the full sweep. Run once
+## per clone. The hook is tracked so it is reviewed like code; what it reads
+## (.sweep-patterns.local) is not (ADR 076, ADR 083).
+hooks:
+	git config core.hooksPath .githooks
+	@chmod +x .githooks/*
+	@echo "hooks: core.hooksPath -> .githooks (pre-push runs sweep --history)"

@@ -34,7 +34,13 @@ built version so the dialog never shows a stale version — see ADR 024.
 - Use generic placeholders in tests and docs
 - All secrets via environment variables at runtime
 - Branch workflow: develop in `dev`, merge to `main`
-- Run `make sweep` before pushing (`make sweep-history` before publishing
-  or after a rewrite). It FAILS CLOSED: no `.sweep-patterns.local` means
-  exit 2, never a green pass. Copy `.sweep-patterns.example` to create it;
-  it is gitignored on purpose — see ADR 076 and ADR 079
+- Run `make hooks` once per clone. It installs a `pre-push` hook that runs
+  the full sweep (`--history`) on every push, so the deny-list scan cannot
+  be forgotten and never has to leave this machine — CI only ever runs the
+  shapes-only scan (ADR 083)
+- `make sweep` / `make sweep-history` run it by hand. It FAILS CLOSED: no
+  `.sweep-patterns.local` means exit 2, never a green pass. Copy
+  `.sweep-patterns.example` to create it; it is gitignored on purpose —
+  see ADR 076 and ADR 079
+- Credential-shaped test fixtures are assembled at runtime, never written
+  as literals, and the tree scan honours no exemption — ADR 082

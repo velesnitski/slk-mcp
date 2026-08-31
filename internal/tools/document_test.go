@@ -50,12 +50,14 @@ func TestIsDocumentFile(t *testing.T) {
 }
 
 func TestIsDocumentFile_ExtensionRescuesGenericMimetype(t *testing.T) {
-	// The regression this tier exists for: Slack served OpenVPN client
-	// logs as octet-stream, so mimetype and filetype both said "binary"
-	// and read_document skipped them without saying so.
+	// The regression this tier exists for: Slack serves plain client logs
+	// as octet-stream, so mimetype and filetype both said "binary" and
+	// read_document skipped them without saying so. The non-ASCII name is
+	// deliberate — extension parsing must not depend on the byte width of
+	// what precedes the dot.
 	yes := []goslack.File{
 		docFile("client_a.log", "application/octet-stream", "binary"),
-		docFile("obrazets.log", "application/octet-stream", ""),
+		docFile("образец.log", "application/octet-stream", ""),
 		docFile("profile.ovpn", "application/octet-stream", "binary"),
 		docFile("server.conf", "", ""),
 	}
@@ -340,7 +342,7 @@ func TestRenderDocuments_RedactsKeyMaterial(t *testing.T) {
 	// A VPN config is now readable by extension, so the key inside one
 	// must not reach the transcript.
 	dir := t.TempDir()
-	conf := filepath.Join(dir, "slk-doc-F1-node.ovpn")
+	conf := filepath.Join(dir, "slk-doc-F1-profile.ovpn")
 	body := "client\nremote vpn.example.invalid 1194\n<key>\n" +
 		pemFixture("MIInotarealkey") + "\n</key>\n"
 	if err := os.WriteFile(conf, []byte(body), 0o600); err != nil {

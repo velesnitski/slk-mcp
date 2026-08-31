@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.1] - 2026-08-31
+
+### Added
+
+- **`make hooks`** installs a tracked `pre-push` hook that runs the full
+  sweep (`--history`) before every push. The deny-list is untracked by
+  design, so CI can only run the shapes-only scan; putting the list in
+  an Actions secret was rejected because this repo is public and the
+  list's contents are themselves the sensitive part. The full scan now
+  runs where the list already lives. `git push --no-verify` remains the
+  visible override; no env-var bypass was added.
+
+### Fixed
+
+- **`scripts/sweep.sh --history` now scans reachable objects only.**
+  `--batch-all-objects` also read unreachable ones, so staging a secret
+  and then correctly unstaging it left a dangling blob that blocked
+  every push until gc ran. A push publishes what is reachable from refs;
+  that is now what gets scanned. Found by the new hook's own negative
+  test before it shipped.
+
+See ADR 083.
+
 ## [1.37.0] - 2026-08-31
 
 ### Fixed

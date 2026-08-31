@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# pre-push: refuse to publish anything the sweep flags.
+#
+# This repository is PUBLIC and its deny-list is not (ADR 076), so the
+# full scan cannot run in CI without shipping the list to a third-party
+# runner — which would publish, one workflow mistake later, exactly the
+# strings the list exists to protect (ADR 083). The full scan therefore
+# lives here, on the machine that already holds the list.
+#
+# --history, not just the tree: a string committed earlier in the branch
+# and removed before pushing is still in a blob you are about to publish,
+# and the tree scan cannot see it. That is the realistic mistake, and it
+# costs about three seconds to catch.
+#
+# Install once:  make hooks
+# Deliberate override:  git push --no-verify   (visible in your shell
+# history; there is no quiet env-var escape on purpose)
+
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)" || exit 1
+cd "$repo_root" || exit 1
+
+if [[ ! -x scripts/sweep.sh ]]; then
+  echo "pre-push: scripts/sweep.sh missing or not executable — refusing to push blind." >&2
+  exit 1
+fi
+
+echo "pre-push: sweeping tree + history…" >&2
+./scripts/sweep.sh --history
+status=$?
+
+case $status in
+  0) exit 0 ;;
+  2)
+    echo >&2
+    echo "pre-push: the sweep is not configured, so it cannot clear this push." >&2
+    echo "  cp .sweep-patterns.example .sweep-patterns.local  and fill it in." >&2
+    echo "  The file is gitignored by design — see ADR 076." >&2
+    exit 1
+    ;;
+  *)
+    echo >&2
+    echo "pre-push: sweep found something. Push blocked." >&2
+    echo "  Fix the finding, or override deliberately with: git push --no-verify" >&2
+    exit 1
+    ;;
+esac

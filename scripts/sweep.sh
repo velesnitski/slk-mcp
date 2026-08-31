@@ -148,7 +148,17 @@ if (( SCAN_HISTORY )); then
   trap 'rm -f "$msgs" "$objs"' EXIT
 
   git log --all --format='%H%n%B' > "$msgs"
-  git cat-file --batch-all-objects --batch --buffer > "$objs" 2>/dev/null
+  # REACHABLE objects only, not --batch-all-objects.
+  #
+  # A push publishes what is reachable from refs; unreachable loose
+  # objects are never sent and are collected by gc. Scanning them anyway
+  # means that staging a secret and then correctly unstaging it leaves a
+  # dangling blob that blocks every push for the next two weeks, with a
+  # message pointing at a file that no longer exists. The developer did
+  # the right thing and the guard still says no — which is how a guard
+  # teaches people to reach for --no-verify.
+  git rev-list --objects --all 2>/dev/null | cut -d' ' -f1 \
+    | git cat-file --batch --buffer > "$objs" 2>/dev/null
 
   scan_history() { # <regex> <case-flag i|""> <label> <honour-allow 0|1>
     local rx="$1" ci="$2" label="$3" allow="$4" store hits
