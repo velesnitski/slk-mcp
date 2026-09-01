@@ -44,7 +44,7 @@ func TestIsDMRef(t *testing.T) {
 			t.Errorf("%q should be a DM ref", dm)
 		}
 	}
-	for _, ch := range []string{"general", "#general", "C0ABC1234DE", "G0ABC1234DE", "devops-main", "", "beta-project"} {
+	for _, ch := range []string{"general", "#general", "C0ABC1234DE", "G0ABC1234DE", "platform-main", "", "beta-project"} {
 		if isDMRef(ch) {
 			t.Errorf("%q must NOT be a DM ref", ch)
 		}

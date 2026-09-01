@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
@@ -107,7 +108,110 @@ func (s *ChannelService) ResolveID(ctx context.Context, name string) (string, er
 		}
 		cursor = next
 	}
+	if s := s.suggestFor(name, 3); len(s) > 0 {
+		return "", fmt.Errorf("channel #%s not found — did you mean %s?", name, strings.Join(s, ", "))
+	}
 	return "", fmt.Errorf("channel #%s not found", name)
+}
+
+// suggestFor reads the name cache — fully populated by the walk that
+// just failed — and returns the closest known channels.
+func (s *ChannelService) suggestFor(name string, limit int) []string {
+	s.mu.RLock()
+	known := make([]string, 0, len(s.cache))
+	for n := range s.cache {
+		known = append(known, n)
+	}
+	s.mu.RUnlock()
+	return suggestChannels(name, known, limit)
+}
+
+// suggestChannels ranks known channel names by how plausibly they are
+// what the caller meant.
+//
+// The realistic miss is a SHORTHAND, not a typo: someone says
+// "#orbit-relay" for a channel actually named "#orbit-relay-monitoring".
+// So prefix matches rank above substring matches, and both rank above
+// edit distance, which only exists to catch a slip of the finger.
+// Within a tier the shortest name wins, since it is the closest fit.
+// Pure.
+func suggestChannels(name string, known []string, limit int) []string {
+	name = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(name), "#"))
+	if name == "" || limit <= 0 {
+		return nil
+	}
+	type cand struct {
+		name string
+		tier int
+	}
+	var out []cand
+	for _, k := range known {
+		lk := strings.ToLower(k)
+		switch {
+		case lk == name:
+			continue // an exact match would not have reached the miss path
+		case strings.HasPrefix(lk, name):
+			out = append(out, cand{k, 0})
+		case strings.HasPrefix(name, lk):
+			out = append(out, cand{k, 1})
+		case strings.Contains(lk, name) || strings.Contains(name, lk):
+			out = append(out, cand{k, 2})
+		case editDistanceWithin(lk, name, 2):
+			out = append(out, cand{k, 3})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].tier != out[j].tier {
+			return out[i].tier < out[j].tier
+		}
+		if len(out[i].name) != len(out[j].name) {
+			return len(out[i].name) < len(out[j].name)
+		}
+		return out[i].name < out[j].name
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	names := make([]string, 0, len(out))
+	for _, c := range out {
+		names = append(names, "#"+c.name)
+	}
+	return names
+}
+
+// editDistanceWithin reports whether a and b are within max edits of one
+// another. Bounded on purpose: the full matrix over every channel in a
+// large workspace is wasted work when anything past a couple of edits is
+// not a plausible suggestion anyway. Pure.
+func editDistanceWithin(a, b string, max int) bool {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra)-len(rb) > max || len(rb)-len(ra) > max {
+		return false
+	}
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+		best := curr[0]
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
+			if curr[j] < best {
+				best = curr[j]
+			}
+		}
+		if best > max {
+			return false // no cell in this row can lead to an accepted distance
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(rb)] <= max
 }
 
 // List returns channels the bot has access to, up to limit.

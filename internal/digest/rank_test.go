@@ -19,7 +19,7 @@ func TestRankUnread_BotFeedNeverEvictsHumanChannel(t *testing.T) {
 		m.Text = "error: task failed"
 		feed.Messages = append(feed.Messages, m)
 	}
-	human := mkChannelUnread("devops-main",
+	human := mkChannelUnread("platform-main",
 		[]goslack.Message{msgWithText("has anyone looked at the staging rollout")}, nil)
 
 	if RankUnread(feed, "", time.Time{}, UrgencyOpts{}) >= RankUnread(human, "", time.Time{}, UrgencyOpts{}) {

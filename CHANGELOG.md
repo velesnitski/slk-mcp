@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] - 2026-09-01
+
+### Changed
+
+- **A channel that cannot be resolved now names the closest matches.**
+  `channel #orbit-relay not found` becomes `channel #orbit-relay not
+  found — did you mean #orbit-relay-alerts, #orbit-relay-monitoring?`
+  The lookup already walked and cached every channel in the workspace
+  before failing, so the suggestions cost nothing extra. Ranking follows
+  how people actually miss: shorthand prefixes first, then containment,
+  then a bounded edit distance for typos. Unrelated input still gets a
+  bare "not found". See ADR 084.
+
 ## [1.37.1] - 2026-08-31
 
 ### Added
