@@ -22,7 +22,64 @@ var (
 	channelRefRe = regexp.MustCompile(`<#([CG][A-Z0-9]{6,})(?:\|([^>]*))?>`)
 	linkRefRe    = regexp.MustCompile(`<(https?://[^|>]+)\|([^>]+)>`)
 	bareLinkRe   = regexp.MustCompile(`<(https?://[^>]+)>`)
+
+	// bareRefRe matches a mention that has lost Slack's angle brackets:
+	// "@U0ABC1234DE" rather than "<@U0ABC1234DE>". Canvases arrive as
+	// HTML, and flattening that HTML strips the brackets along with the
+	// tags — so by the time the text is readable, the standard markup
+	// the other renderers rely on is already gone.
+	bareRefRe = regexp.MustCompile(`([@#])([UWCGD][A-Z0-9]{7,})\b`)
 )
+
+// CollectRefIDsInText returns every user and channel ID referenced in a
+// plain string, in both Slack's angle-bracket markup and the bare form
+// left behind when that markup has been stripped. Order is stable
+// (first appearance) and IDs are deduped. Pure.
+func CollectRefIDsInText(text string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, re := range []*regexp.Regexp{mentionRefRe, channelRefRe} {
+		for _, m := range re.FindAllStringSubmatch(text, -1) {
+			if len(m) >= 2 {
+				add(m[1])
+			}
+		}
+	}
+	for _, m := range bareRefRe.FindAllStringSubmatch(text, -1) {
+		if len(m) >= 3 {
+			add(m[2])
+		}
+	}
+	return out
+}
+
+// RenderCanvasText is RenderText plus the bare-mention pass canvases
+// need. Kept separate rather than folded into RenderText so message
+// rendering — used on every read surface — keeps its current behaviour
+// exactly. Pure.
+func RenderCanvasText(text string, refs map[string]string) string {
+	text = RenderText(text, refs)
+	return bareRefRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := bareRefRe.FindStringSubmatch(m)
+		if len(sub) < 3 {
+			return m
+		}
+		if name, ok := refs[sub[2]]; ok && name != "" {
+			return sub[1] + name
+		}
+		return m // unknown id: leave it, never invent a name
+	})
+}
 
 // RenderText cleans Slack-flavoured markup in a message body for
 // readable, token-efficient output:

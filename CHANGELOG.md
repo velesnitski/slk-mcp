@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] - 2026-09-01
+
+### Fixed
+
+- **`read_canvas` resolves mentions.** It was the only read surface that
+  did not, so a canvas came back as raw `@U…` ids — and directly
+  contradicted the unread summary, which flags a canvas as *mentioning
+  you* and then left no way to find where. Canvases download as HTML and
+  the flattener strips tags, taking `<@U…>`'s angle brackets with them,
+  so the new `format.RenderCanvasText` resolves the bare form too.
+  Message rendering is unchanged: `RenderText` still ignores bare
+  mentions, and a test holds that line. Unresolvable ids are left as-is
+  rather than guessed. See ADR 086.
+
 ## [1.38.0] - 2026-09-01
 
 ### Fixed

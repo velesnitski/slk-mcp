@@ -123,6 +123,29 @@ func (h *Hub) resolveRefs(ctx context.Context, messages []goslack.Message) map[s
 	return mergeRefs(users, channels)
 }
 
+// resolveTextRefs is resolveRefs for a body that is not a message —
+// a canvas, a document — where the IDs can only be found by scanning
+// the text itself. Splits by Slack's prefix rule (U/W are people,
+// C/G/D are conversations) so each ID is asked of the right service.
+func (h *Hub) resolveTextRefs(ctx context.Context, text string) map[string]string {
+	var userIDs, channelIDs []string
+	for _, id := range format.CollectRefIDsInText(text) {
+		switch id[0] {
+		case 'U', 'W':
+			userIDs = append(userIDs, id)
+		default:
+			channelIDs = append(channelIDs, id)
+		}
+	}
+	if len(userIDs) == 0 && len(channelIDs) == 0 {
+		return map[string]string{}
+	}
+	return mergeRefs(
+		h.Users().NamesFor(ctx, userIDs),
+		h.Channels().NamesForIDs(ctx, channelIDs),
+	)
+}
+
 // mergeRefs merges name lookup maps for users and channels into one,
 // always returning a usable (non-nil) map. Channel and user IDs cannot
 // collide due to Slack's prefix rules (U/W vs C/G/D), so a single map

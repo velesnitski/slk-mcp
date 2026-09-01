@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/format"
 )
 
 // canvasMaxBytes caps how much of a channel canvas we download and
@@ -188,6 +189,11 @@ func (h *Hub) renderCanvasFile(ctx context.Context, channel string, file goslack
 	}
 
 	body, truncated := canvasToText(buf.Bytes(), file.Mimetype, canvasMaxBytes)
+	// Resolve mentions like every other read surface does. Without this a
+	// canvas renders raw IDs, which is unreadable on its own and actively
+	// misleading next to the unread summary's "mentions you" flag: the
+	// reader is told they were named and then cannot find where.
+	body = format.RenderCanvasText(body, h.resolveTextRefs(ctx, body))
 	title := strings.TrimSpace(file.Title)
 	if title == "" {
 		title = "Canvas"
