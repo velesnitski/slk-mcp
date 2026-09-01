@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.0] - 2026-09-01
+
+### Fixed
+
+- **Thread replies whose parent is out of window are no longer dropped.**
+  A sweep would report "N thread replies" in its header and render none
+  of them: `ChannelDigest` is driven by top-level messages, so a channel
+  whose only new content was replies to an older parent collapsed to ""
+  under `WithOmitEmpty` and was skipped — after the counters had already
+  counted it. This hides escalations specifically, since an escalation is
+  usually a reply to a report filed hours earlier. Such replies now
+  render as their own block, ordered by parent timestamp and labelled
+  with the parent's time. `WithOmitEmpty` still drops a genuinely empty
+  channel. See ADR 087.
+
 ## [1.39.0] - 2026-09-01
 
 ### Fixed

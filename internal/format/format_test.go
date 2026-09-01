@@ -59,30 +59,42 @@ func TestChannelDigest_Empty(t *testing.T) {
 	}
 }
 
-// A channel with no top-level messages but lingering thread replies
-// (e.g. a DM pulled in by dm_window_hours) renders "(no activity)" by
-// default — useful for single-channel get_channel_digest.
-func TestChannelDigest_NoTopLevelShowsNoActivity(t *testing.T) {
+// A channel with no top-level message but with thread replies renders
+// those replies — on BOTH paths. These two tests used to assert the
+// opposite, on the premise that such replies were stale leftovers from
+// dm_window_hours. That premise does not survive the sweep: the cursor
+// filter removes everything at or before `after` before rendering, so
+// a reply that reaches here is new by construction. Dropping it hid
+// escalations, which land as replies to reports filed hours earlier
+// (ADR 087).
+func TestChannelDigest_NoTopLevelRendersReplies(t *testing.T) {
 	replies := map[string][]goslack.Message{
-		"1.0": {{Msg: goslack.Msg{Timestamp: "1.1", User: "U2", Text: "stale reply"}}},
+		"1.0": {{Msg: goslack.Msg{Timestamp: "1.1", User: "U2", Text: "the follow-up"}}},
 	}
 	out := ChannelDigest("@peer", nil, nil, 5, WithThreadReplies(replies))
-	if !strings.Contains(out, "(no activity)") {
-		t.Fatalf("default should render (no activity); got %q", out)
+	if !strings.Contains(out, "the follow-up") {
+		t.Fatalf("replies must be rendered; got %q", out)
+	}
+	if strings.Contains(out, "(no activity)") {
+		t.Fatalf("a channel with replies is not inactive; got %q", out)
 	}
 }
 
-// With WithOmitEmpty (the unread-sweep path), that same content-less
-// channel collapses to "" so the aggregator drops it instead of
-// emitting an empty stub block.
-func TestChannelDigest_OmitEmptySuppressesNoActivity(t *testing.T) {
+func TestChannelDigest_OmitEmptyStillRendersReplies(t *testing.T) {
 	replies := map[string][]goslack.Message{
-		"1.0": {{Msg: goslack.Msg{Timestamp: "1.1", User: "U2", Text: "stale reply"}}},
+		"1.0": {{Msg: goslack.Msg{Timestamp: "1.1", User: "U2", Text: "the follow-up"}}},
 	}
 	out := ChannelDigest("@peer", nil, nil, 5,
 		WithThreadReplies(replies), WithOmitEmpty())
-	if out != "" {
-		t.Fatalf("WithOmitEmpty must suppress the (no activity) stub; got %q", out)
+	if !strings.Contains(out, "the follow-up") {
+		t.Fatalf("omitEmpty must not discard real replies; got %q", out)
+	}
+}
+
+// What WithOmitEmpty still suppresses: a channel with nothing at all.
+func TestChannelDigest_OmitEmptySuppressesTrulyEmpty(t *testing.T) {
+	if out := ChannelDigest("@peer", nil, nil, 5, WithOmitEmpty()); out != "" {
+		t.Fatalf("an empty channel must collapse to \"\"; got %q", out)
 	}
 }
 

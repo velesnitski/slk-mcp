@@ -10,6 +10,7 @@ package format
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -628,6 +629,16 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		return ""
 	}
 	if len(messages) == 0 {
+		// Replies with no top-level message: the thread parent is older
+		// than this window, so nothing anchors them — but the replies
+		// themselves are new and are usually where the substance is. An
+		// escalation lands as a reply to a report filed hours earlier;
+		// dropping the channel because its parent is stale hides exactly
+		// the message that mattered, while the caller's own counters have
+		// already counted it. Render them on their own.
+		if n := countReplies(cfg.replies); n > 0 {
+			return renderOrphanReplies(channelLabel, cfg, users, n)
+		}
 		if cfg.omitEmpty {
 			return ""
 		}
@@ -663,6 +674,48 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 	if huddleCount > 0 {
 		b.WriteString(huddleNote(huddleCount))
 		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// countReplies totals the replies across every thread. Pure.
+func countReplies(replies map[string][]goslack.Message) int {
+	n := 0
+	for _, rs := range replies {
+		n += len(rs)
+	}
+	return n
+}
+
+// renderOrphanReplies renders reply chains whose parent falls outside
+// the window. Threads are ordered by their parent timestamp so the
+// output reads chronologically, and each is labelled with the parent's
+// time — the one handle the reader has for finding the thread, since
+// the parent message itself is not in this result. Pure.
+func renderOrphanReplies(channelLabel string, cfg digestOpts, users map[string]string, total int) string {
+	parents := make([]string, 0, len(cfg.replies))
+	for ts := range cfg.replies {
+		parents = append(parents, ts)
+	}
+	sort.Slice(parents, func(i, j int) bool { return parents[i] < parents[j] })
+
+	var b strings.Builder
+	noun := "replies"
+	if total == 1 {
+		noun = "reply"
+	}
+	fmt.Fprintf(&b, "## %s (%d %s in earlier threads)\n", channelLabel, total, noun)
+	for _, ts := range parents {
+		replies := cfg.replies[ts]
+		if len(replies) == 0 {
+			continue
+		}
+		if when := ParseTS(ts); !when.IsZero() {
+			fmt.Fprintf(&b, "thread from %s:\n", when.Format("15:04"))
+		} else {
+			b.WriteString("thread:\n")
+		}
+		writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
