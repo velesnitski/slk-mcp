@@ -4,6 +4,7 @@
 #
 #   scripts/sweep.sh                 scan tracked files at HEAD
 #   scripts/sweep.sh --history       also scan every blob and commit message
+#   scripts/sweep.sh --range REV     scan only the commits in REV (pre-push scope)
 #   scripts/sweep.sh --shapes-only   credential shapes only, no deny-list
 #   scripts/sweep.sh --quiet         report file:line only, never the match
 #
@@ -57,13 +58,17 @@ ALLOW='sweep:allow'
 SCAN_HISTORY=0
 SHAPES_ONLY=0
 QUIET=0
-for arg in "$@"; do
-  case "$arg" in
+RANGE=""
+while (( $# )); do
+  case "$1" in
     --history)     SCAN_HISTORY=1 ;;
     --shapes-only) SHAPES_ONLY=1 ;;
     --quiet)       QUIET=1 ;;
-    *) echo "sweep: unknown argument $arg" >&2; exit 2 ;;
+    --range)       shift; RANGE="${1:-}"; SCAN_HISTORY=1
+                   [[ -z "$RANGE" ]] && { echo "sweep: --range needs a rev-range" >&2; exit 2; } ;;
+    *) echo "sweep: unknown argument $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
 # Credential shapes. Case-sensitive: every one of these is anchored on a
@@ -147,18 +152,31 @@ if (( SCAN_HISTORY )); then
   objs=$(mktemp) || exit 2
   trap 'rm -f "$msgs" "$objs"' EXIT
 
-  git log --all --format='%H%n%B' > "$msgs"
-  # REACHABLE objects only, not --batch-all-objects.
-  #
-  # A push publishes what is reachable from refs; unreachable loose
-  # objects are never sent and are collected by gc. Scanning them anyway
-  # means that staging a secret and then correctly unstaging it leaves a
-  # dangling blob that blocks every push for the next two weeks, with a
-  # message pointing at a file that no longer exists. The developer did
-  # the right thing and the guard still says no — which is how a guard
-  # teaches people to reach for --no-verify.
-  git rev-list --objects --all 2>/dev/null | cut -d' ' -f1 \
-    | git cat-file --batch --buffer > "$objs" 2>/dev/null
+  # --range scans ONLY the commits being published. Scanning all of
+  # history in a pre-push check is the wrong question: a string that went
+  # out a year ago cannot be un-published by refusing today's push, so an
+  # all-history check turns any pre-existing hit into a PERMANENT block,
+  # and the only exits are --no-verify or a weaker deny-list — both worse
+  # than the leak. `--history` still audits everything, which is the
+  # right scope before publishing a repo or after a rewrite.
+  if [[ -n "$RANGE" ]]; then
+    git log $RANGE --format='%H%n%B' > "$msgs" 2>/dev/null
+    git rev-list --objects $RANGE 2>/dev/null | cut -d' ' -f1 \
+      | git cat-file --batch --buffer > "$objs" 2>/dev/null
+  else
+    git log --all --format='%H%n%B' > "$msgs"
+    # REACHABLE objects only, not --batch-all-objects.
+    #
+    # A push publishes what is reachable from refs; unreachable loose
+    # objects are never sent and are collected by gc. Scanning them anyway
+    # means that staging a secret and then correctly unstaging it leaves a
+    # dangling blob that blocks every push for the next two weeks, with a
+    # message pointing at a file that no longer exists. The developer did
+    # the right thing and the guard still says no — which is how a guard
+    # teaches people to reach for --no-verify.
+    git rev-list --objects --all 2>/dev/null | cut -d' ' -f1 \
+      | git cat-file --batch --buffer > "$objs" 2>/dev/null
+  fi
 
   scan_history() { # <regex> <case-flag i|""> <label> <honour-allow 0|1>
     local rx="$1" ci="$2" label="$3" allow="$4" store hits
@@ -186,4 +204,5 @@ fi
 tracked="$(git ls-files | wc -l | tr -d ' ')"
 scope="tree"
 (( SCAN_HISTORY )) && scope="tree + history"
+[[ -n "$RANGE" ]] && scope="tree + pushed commits"
 echo "sweep: clean ($tracked tracked files, $scope)"

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.38.0] - 2026-09-01
 
+### Fixed
+
+- **The `pre-push` hook now scans the commits being pushed, not all of
+  history.** Git hands a pre-push hook the exact range on stdin;
+  `sweep.sh` gained `--range` to use it. Scanning all history meant the
+  first deny-list pattern matching an already-published string blocked
+  *every* subsequent push, for content the developer could not affect —
+  leaving only `--no-verify` or a weaker deny-list as exits. `make
+  sweep-history` still audits the whole object store, which is the right
+  scope before publishing a repo or after a rewrite. Amends ADR 083;
+  see ADR 085.
+
 ### Changed
 
 - **A channel that cannot be resolved now names the closest matches.**

@@ -8,10 +8,15 @@
 # strings the list exists to protect (ADR 083). The full scan therefore
 # lives here, on the machine that already holds the list.
 #
-# --history, not just the tree: a string committed earlier in the branch
-# and removed before pushing is still in a blob you are about to publish,
-# and the tree scan cannot see it. That is the realistic mistake, and it
-# costs about three seconds to catch.
+# SCOPE: the working tree plus THE COMMITS BEING PUSHED — not all of
+# history. Git hands us that range on stdin, and it is the only question
+# a pre-push check can honestly answer. Scanning everything ever
+# published turns any pre-existing hit into a permanent block: refusing
+# today's push cannot un-publish a string that went out a year ago, so
+# the only exits become --no-verify or a weaker deny-list, and both are
+# worse than the leak (ADR 085). `make sweep-history` still audits the
+# whole object store — the right scope before publishing a repo or
+# after a rewrite.
 #
 # Install once:  make hooks
 # Deliberate override:  git push --no-verify   (visible in your shell
@@ -27,8 +32,28 @@ if [[ ! -x scripts/sweep.sh ]]; then
   exit 1
 fi
 
-echo "pre-push: sweeping tree + history…" >&2
-./scripts/sweep.sh --history
+ZERO=0000000000000000000000000000000000000000
+
+# Build the rev-range from what git is actually sending. A branch with no
+# counterpart on the remote has no "before", so bound it by every other
+# remote ref rather than walking back to the project's first commit.
+ranges=()
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [[ -z "${local_sha:-}" || "$local_sha" == "$ZERO" ]] && continue   # branch deletion
+  if [[ "${remote_sha:-$ZERO}" == "$ZERO" ]]; then
+    ranges+=("$local_sha" --not --remotes)
+  else
+    ranges+=("$remote_sha..$local_sha")
+  fi
+done
+
+if (( ${#ranges[@]} == 0 )); then
+  echo "pre-push: nothing new to publish; sweeping the tree only." >&2
+  ./scripts/sweep.sh
+else
+  echo "pre-push: sweeping tree + commits being pushed…" >&2
+  ./scripts/sweep.sh --range "${ranges[*]}"
+fi
 status=$?
 
 case $status in
@@ -42,7 +67,7 @@ case $status in
     ;;
   *)
     echo >&2
-    echo "pre-push: sweep found something. Push blocked." >&2
+    echo "pre-push: sweep found something in what you are about to publish. Push blocked." >&2
     echo "  Fix the finding, or override deliberately with: git push --no-verify" >&2
     exit 1
     ;;
