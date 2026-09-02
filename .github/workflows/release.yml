@@ -1,0 +1,48 @@
+name: Release
+
+# A tag without a GitHub Release makes an active project look abandoned:
+# the Releases page is what a stranger checks first, and ours sat seven
+# tags behind because publishing was a manual step someone had to
+# remember. Tagging is the decision; publishing is bookkeeping, so it
+# runs here.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release notes from CHANGELOG
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # A tag with no CHANGELOG entry is an authoring mistake, not a
+          # reason to publish empty notes — fail loudly instead.
+          if ! ./scripts/changelog-section.sh "$version" > /tmp/notes.md; then
+            echo "::error::no CHANGELOG.md entry for $version — add one and re-tag"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Idempotent: re-running on an existing release updates its
+          # notes rather than failing, so a re-run is always safe.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file /tmp/notes.md \
+              --verify-tag
+          fi

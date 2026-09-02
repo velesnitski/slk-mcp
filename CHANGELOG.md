@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.1] - 2026-09-02
+
+### Added
+
+- **Releases publish themselves.** `.github/workflows/release.yml` fires
+  on a `v*` tag and creates the GitHub Release from that version's
+  `CHANGELOG.md` section, read through the new
+  `scripts/changelog-section.sh` so the notes on GitHub and in the repo
+  share one source. A tag with no changelog entry fails the workflow
+  rather than publishing empty notes; re-running on an existing release
+  updates it. Releases had drifted seven tags behind because publishing
+  was manual.
+- **`.github/dependabot.yml`** watches Go modules and the pinned GitHub
+  Actions weekly, targeting `dev` (everything reaches `main` by
+  fast-forward). Minor and patch updates are grouped into one PR;
+  majors stay separate.
+
+See ADR 088.
+
 ## [1.40.0] - 2026-09-01
 
 ### Fixed

@@ -1,0 +1,37 @@
+version: 2
+
+# Targets `dev`, not `main`. Every change reaches main by fast-forward
+# from dev (CLAUDE.md); a bot opening PRs straight at main would be the
+# only path that skips that, and main is protected anyway.
+#
+# Updates are grouped so a quiet week produces one PR instead of six.
+# Six separate PRs against a two-dependency project is how dependency
+# automation gets muted, and a muted bot is worse than none — it looks
+# like coverage while providing nothing.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # Majors stay ungrouped: they need reading, not batching.
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
