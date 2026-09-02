@@ -31,7 +31,7 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("read_document",
-			mcp.WithDescription("Read text-based attachments (HTML, Markdown, TXT, CSV, JSON, source files, and .log/.conf/.ovpn artifacts Slack serves as octet-stream) from a Slack message and return their contents inline. HTML is converted to plain text; credential-shaped spans are redacted. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest document. list_only shows every attachment, marking the ones that are not text. Use view_image for pictures and transcribe_audio for voice notes."),
+			mcp.WithDescription("Read attachments from a Slack message and return their contents inline: text (HTML, Markdown, TXT, CSV, JSON, source files, and .log/.conf/.ovpn artifacts Slack serves as octet-stream) and .xlsx workbooks, which are flattened per sheet WITH their cell comments — a spreadsheet sent for review carries the review in its comments. HTML is converted to plain text; credential-shaped spans are redacted. Pass a permalink, or channel + timestamp, or just a channel/DM to grab its newest document. list_only shows every attachment, marking the ones that are not text. Use view_image for pictures and transcribe_audio for voice notes."),
 			mcp.WithString("permalink", mcp.Description("Slack message permalink (…/archives/…/p…) OR a Slack file URL (…/files/…/F…/name) — either resolves the attachment on its own")),
 			mcp.WithString("channel", mcp.Description("Channel name or ID, or a DM as @handle (optional if permalink is provided). With no timestamp, the newest matching attachment in this conversation is used.")),
 			mcp.WithString("timestamp", mcp.Description("Message ts holding the document (optional if permalink is provided)")),
@@ -221,7 +221,18 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 			fmt.Fprintf(&b, "\n--- %s: read failed: %v\n", f.Path, rerr)
 			continue
 		}
-		text := documentToText(string(raw), f.Mimetype)
+		var text string
+		var sheetsCut bool
+		if isSpreadsheetMimetype(f.Mimetype) || strings.HasSuffix(strings.ToLower(f.Path), ".xlsx") {
+			var xerr error
+			text, sheetsCut, xerr = xlsxToText(raw)
+			if xerr != nil {
+				fmt.Fprintf(&b, "\n--- %s (%s, %d bytes): %v\n", displayName(f.Path), f.Mimetype, f.Size, xerr)
+				continue
+			}
+		} else {
+			text = documentToText(string(raw), f.Mimetype)
+		}
 		// Before truncation, not after: a cap that happens to bisect a
 		// private key still spills half of one. Reading a .ovpn or a .conf
 		// is now in scope, so the key material in them must not reach the
@@ -231,6 +242,9 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 		fmt.Fprintf(&b, "\n--- %s (%s, %d bytes)", displayName(f.Path), f.Mimetype, f.Size)
 		if secrets > 0 {
 			fmt.Fprintf(&b, " — %d secret(s) redacted", secrets)
+		}
+		if sheetsCut {
+			b.WriteString(" — TRUNCATED at the workbook cell cap")
 		}
 		if truncated {
 			fmt.Fprintf(&b, " — TRUNCATED to %d chars", maxChars)
@@ -330,6 +344,12 @@ func isDocumentFile(f goslack.File) bool {
 	return documentExtensions[fileExtension(strings.TrimSpace(f.Name))]
 }
 
+// isSpreadsheetMimetype reports whether a mimetype names an .xlsx
+// workbook. Pure.
+func isSpreadsheetMimetype(mimetype string) bool {
+	return strings.Contains(strings.ToLower(mimetype), "spreadsheetml.sheet")
+}
+
 // isPDFMimetype reports whether a mimetype names a PDF. Pure.
 func isPDFMimetype(mimetype string) bool {
 	return strings.Contains(strings.ToLower(mimetype), "pdf")
@@ -344,10 +364,22 @@ func isPDFFile(f goslack.File) bool {
 		strings.EqualFold(strings.TrimSpace(f.Filetype), "pdf")
 }
 
+// isSpreadsheetFile reports whether an attachment is an .xlsx workbook.
+// Binary like a PDF, but unlike a PDF it flattens to useful text, so it
+// is rendered inline rather than handed back as a path. Pure.
+func isSpreadsheetFile(f goslack.File) bool {
+	if strings.Contains(strings.ToLower(f.Mimetype), "spreadsheetml.sheet") {
+		return true
+	}
+	return fileExtension(strings.TrimSpace(f.Name)) == "xlsx" ||
+		strings.EqualFold(strings.TrimSpace(f.Filetype), "xlsx")
+}
+
 // isReadableDocument is what read_document accepts: text it can render
-// inline, plus PDFs it hands back as a local path. Pure.
+// inline, spreadsheets it flattens, plus PDFs it hands back as a local
+// path. Pure.
 func isReadableDocument(f goslack.File) bool {
-	return isDocumentFile(f) || isPDFFile(f)
+	return isDocumentFile(f) || isPDFFile(f) || isSpreadsheetFile(f)
 }
 
 // expectsTextBody reports whether an attachment is *supposed* to contain
@@ -356,7 +388,7 @@ func isReadableDocument(f goslack.File) bool {
 // right for audio/video/images but would reject a genuine .html
 // attachment as a scope failure. Pure.
 func expectsTextBody(f goslack.File) bool {
-	return isDocumentFile(f)
+	return isDocumentFile(f) && !isSpreadsheetFile(f)
 }
 
 var (

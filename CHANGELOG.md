@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.0] - 2026-09-02
+
+### Added
+
+- **`read_document` reads `.xlsx` workbooks**, flattened per sheet and
+  **with their cell comments** — a spreadsheet sent for review carries
+  the review in its comments, so extracting only the grid would drop the
+  part worth reading. Parsed with `archive/zip` + `encoding/xml` rather
+  than a spreadsheet library: this server is public and parses files
+  other people hand it, so the dependency it does not have is attack
+  surface it does not have. Dates render as serial numbers rather than
+  guessed formats. Capped at 20k cells / 64 columns, reported when hit.
+  See ADR 089.
+
 ## [1.40.1] - 2026-09-02
 
 ### Added
