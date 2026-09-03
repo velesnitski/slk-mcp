@@ -177,3 +177,62 @@ func TestIsSpreadsheetFile(t *testing.T) {
 		}
 	}
 }
+
+func TestOOXMLFamilyIsRead(t *testing.T) {
+	// .xlsm and the template formats are the same ZIP-of-XML container,
+	// so they cost nothing to support and would be a confusing gap.
+	for _, f := range []goslack.File{
+		docFile("macros.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", "xlsm"),
+		docFile("template.xltx", "application/vnd.openxmlformats-officedocument.spreadsheetml.template", "xltx"),
+		docFile("form.xlsm", "application/octet-stream", ""),
+	} {
+		if !isSpreadsheetFile(f) {
+			t.Errorf("%s (%q/%q) should be read as a workbook", f.Name, f.Mimetype, f.Filetype)
+		}
+		if isLegacyExcelFile(f) {
+			t.Errorf("%s is OOXML, not legacy", f.Name)
+		}
+	}
+}
+
+func TestLegacyXlsIsRecognisedNotGuessed(t *testing.T) {
+	for _, f := range []goslack.File{
+		docFile("old.xls", "application/vnd.ms-excel", "xls"),
+		docFile("old.xls", "application/octet-stream", ""),
+		docFile("old", "", "xls"),
+	} {
+		if !isLegacyExcelFile(f) {
+			t.Errorf("%s (%q/%q) should be recognised as legacy .xls", f.Name, f.Mimetype, f.Filetype)
+		}
+	}
+	// A macro-enabled workbook shares the vnd.ms-excel prefix but is OOXML.
+	if isLegacyExcelFile(docFile("m.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", "xlsm")) {
+		t.Fatal("macro-enabled OOXML must not be mistaken for legacy .xls")
+	}
+}
+
+func TestLegacyExcelNote_ChecksTheBytes(t *testing.T) {
+	// The note must describe the file, not its name.
+	ole2 := append(append([]byte{}, ole2Magic...), 0x00, 0x01)
+	if got := legacyExcelNote(ole2); !strings.Contains(got, "re-save as .xlsx") {
+		t.Errorf("a real .xls needs the conversion hint, got:\n%s", got)
+	}
+	if got := legacyExcelNote([]byte("PK\x03\x04rest")); !strings.Contains(got, "wrong extension") {
+		t.Errorf("a mislabelled OOXML file must be called out, got:\n%s", got)
+	}
+	if got := legacyExcelNote([]byte("hello there")); !strings.Contains(got, "not a\nworkbook at all") {
+		t.Errorf("a non-workbook must be called out, got:\n%s", got)
+	}
+}
+
+func TestIsLegacyExcelPath(t *testing.T) {
+	if !isLegacyExcelPath("application/vnd.ms-excel", "/tmp/slk-doc-F1-old.xls") {
+		t.Fatal("mimetype should identify a legacy workbook")
+	}
+	if !isLegacyExcelPath("application/octet-stream", "/tmp/slk-doc-F1-old.xls") {
+		t.Fatal("extension should identify a legacy workbook")
+	}
+	if isLegacyExcelPath("application/vnd.ms-excel.sheet.macroEnabled.12", "/tmp/x.xlsm") {
+		t.Fatal("macro-enabled OOXML is not legacy")
+	}
+}

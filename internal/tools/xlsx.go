@@ -375,3 +375,37 @@ func xlsxComments(files map[string]*zip.File, sheetPart string) []xlsxComment {
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Cell < out[j].Cell })
 	return out
 }
+
+// ole2Magic is the OLE2 compound-file signature that opens every
+// pre-2007 .xls. Checking it distinguishes a genuine legacy workbook
+// from a file that merely carries the extension.
+var ole2Magic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+
+// isLegacyExcelPath reports whether a downloaded file is a pre-2007
+// .xls, by mimetype or by the saved name. Pure.
+func isLegacyExcelPath(mimetype, path string) bool {
+	m := strings.ToLower(mimetype)
+	if strings.Contains(m, "vnd.ms-excel") && !strings.Contains(m, "macroenabled") {
+		return true
+	}
+	return fileExtension(path) == "xls"
+}
+
+// legacyExcelNote explains why an .xls was not rendered, and confirms
+// from the bytes whether it really is one — a claim about a file should
+// be checked against the file, not taken from its name. Pure.
+func legacyExcelNote(raw []byte) string {
+	if len(raw) >= len(ole2Magic) && bytes.Equal(raw[:len(ole2Magic)], ole2Magic) {
+		return "Legacy .xls workbook (OLE2/BIFF), not rendered.\n" +
+			"This is the pre-2007 binary format, unrelated to .xlsx: a different\n" +
+			"container and a different cell encoding. A partial reader for it would\n" +
+			"emit plausible but wrong values, so it is declined rather than guessed.\n" +
+			"To read it here: open it and re-save as .xlsx (or export to CSV)."
+	}
+	if len(raw) >= 2 && raw[0] == 'P' && raw[1] == 'K' {
+		return "Named .xls but the bytes are a ZIP — this is an OOXML workbook with\n" +
+			"the wrong extension. Re-upload it as .xlsx and it will render."
+	}
+	return "Named .xls but the bytes are neither OLE2 nor ZIP, so this is not a\n" +
+		"workbook at all. Check what was uploaded."
+}

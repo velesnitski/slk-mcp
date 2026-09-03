@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.1] - 2026-09-03
+
+### Added
+
+- **`.xlsm`, `.xltx` and `.xltm` read like `.xlsx`** — same ZIP-of-XML
+  container, so declining them was an arbitrary gap.
+
+### Changed
+
+- **Legacy `.xls` is recognised and explained instead of being sent to
+  `view_image`.** It is an OLE2/BIFF binary, unrelated to `.xlsx`, and a
+  partial reader for it would emit plausible but wrong numbers — so it
+  is declined deliberately, with the reason and a one-step fix. The note
+  is derived from the file's bytes: OLE2 magic confirms a real legacy
+  workbook, a `PK` header reports an OOXML file with the wrong
+  extension. See ADR 090.
+
 ## [1.41.0] - 2026-09-02
 
 ### Added

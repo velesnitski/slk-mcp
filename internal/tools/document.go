@@ -191,7 +191,10 @@ func renderDocumentList(candidates []docCandidate, wsLabel string) string {
 	fmt.Fprintf(&b, "%d attachment(s)%s, newest first:\n", len(candidates), wsLabel)
 	for _, c := range candidates {
 		fmt.Fprintf(&b, "- %s (%s, %d bytes) ts=%s", c.File.Name, c.File.Mimetype, c.File.Size, c.TS)
-		if !isReadableDocument(c.File) {
+		switch {
+		case isLegacyExcelFile(c.File):
+			b.WriteString("  [legacy .xls — re-save as .xlsx to read it here]")
+		case !isReadableDocument(c.File):
 			b.WriteString("  [not text — try view_image or transcribe_audio]")
 		}
 		b.WriteString("\n")
@@ -223,7 +226,12 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 		}
 		var text string
 		var sheetsCut bool
-		if isSpreadsheetMimetype(f.Mimetype) || strings.HasSuffix(strings.ToLower(f.Path), ".xlsx") {
+		if isLegacyExcelPath(f.Mimetype, f.Path) {
+			fmt.Fprintf(&b, "\n--- %s (%s, %d bytes) ---\n%s\n",
+				displayName(f.Path), f.Mimetype, f.Size, legacyExcelNote(raw))
+			continue
+		}
+		if isSpreadsheetMimetype(f.Mimetype) || ooxmlSpreadsheetExtensions[fileExtension(f.Path)] {
 			var xerr error
 			text, sheetsCut, xerr = xlsxToText(raw)
 			if xerr != nil {
@@ -344,10 +352,40 @@ func isDocumentFile(f goslack.File) bool {
 	return documentExtensions[fileExtension(strings.TrimSpace(f.Name))]
 }
 
-// isSpreadsheetMimetype reports whether a mimetype names an .xlsx
+// ooxmlSpreadsheetExtensions are the Excel formats that are a ZIP of
+// XML parts, so the .xlsx reader handles them unchanged: macro-enabled
+// workbooks and templates differ from .xlsx in what they may contain,
+// not in how the cells are stored.
+var ooxmlSpreadsheetExtensions = map[string]bool{
+	"xlsx": true, "xlsm": true, "xltx": true, "xltm": true,
+}
+
+// isSpreadsheetMimetype reports whether a mimetype names an OOXML
 // workbook. Pure.
 func isSpreadsheetMimetype(mimetype string) bool {
-	return strings.Contains(strings.ToLower(mimetype), "spreadsheetml.sheet")
+	m := strings.ToLower(mimetype)
+	return strings.Contains(m, "spreadsheetml.sheet") ||
+		strings.Contains(m, "spreadsheetml.template") ||
+		strings.Contains(m, "ms-excel.sheet.macroenabled") ||
+		strings.Contains(m, "ms-excel.template.macroenabled")
+}
+
+// isLegacyExcelFile reports whether an attachment is a pre-2007 .xls
+// workbook. That format is not a ZIP of XML but an OLE2 container of
+// binary BIFF records — a different parser entirely, deliberately not
+// written: a partial BIFF reader emits plausible but wrong numbers,
+// which is worse than declining. Recognising it still matters, so the
+// caller can be told what it is instead of being pointed at
+// view_image. Pure.
+func isLegacyExcelFile(f goslack.File) bool {
+	m := strings.ToLower(f.Mimetype)
+	if strings.Contains(m, "vnd.ms-excel") && !strings.Contains(m, "macroenabled") {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(f.Filetype), "xls") {
+		return true
+	}
+	return fileExtension(strings.TrimSpace(f.Name)) == "xls"
 }
 
 // isPDFMimetype reports whether a mimetype names a PDF. Pure.
@@ -371,8 +409,10 @@ func isSpreadsheetFile(f goslack.File) bool {
 	if strings.Contains(strings.ToLower(f.Mimetype), "spreadsheetml.sheet") {
 		return true
 	}
-	return fileExtension(strings.TrimSpace(f.Name)) == "xlsx" ||
-		strings.EqualFold(strings.TrimSpace(f.Filetype), "xlsx")
+	if ooxmlSpreadsheetExtensions[strings.ToLower(strings.TrimSpace(f.Filetype))] {
+		return true
+	}
+	return ooxmlSpreadsheetExtensions[fileExtension(strings.TrimSpace(f.Name))]
 }
 
 // isReadableDocument is what read_document accepts: text it can render
