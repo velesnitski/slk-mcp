@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.2] - 2026-09-03
+
+### Fixed
+
+- **File downloads fall back to the user token when the bot is refused.**
+  `read_document` could classify a file correctly and still return `401
+  Unauthorized` for a document the operator had open in their own Slack
+  client: downloads authenticated as the bot, and a bot is only a member
+  of channels it was invited to. HR material, review forms and board
+  documents live in private channels and group DMs — exactly where the
+  bot is not. Only auth refusals retry (a 404 is 404 for both tokens),
+  the fallback never repeats an identical request when one token serves
+  both roles, and the sink is reset before the retry so a partial body
+  cannot be appended to. See ADR 091.
+
 ## [1.41.1] - 2026-09-03
 
 ### Added

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack/ratelimit"
@@ -15,13 +16,17 @@ import (
 // MessageService reads channel history, thread replies, and posts messages.
 type MessageService struct {
 	api      *goslack.Client
+	fallback *goslack.Client // user client, when it differs from api
 	channels *ChannelService
 	users    *UserService
 	log      *slog.Logger
 }
 
-func newMessageService(api *goslack.Client, channels *ChannelService, users *UserService, log *slog.Logger) *MessageService {
-	return &MessageService{api: api, channels: channels, users: users, log: log}
+func newMessageService(api, fallback *goslack.Client, channels *ChannelService, users *UserService, log *slog.Logger) *MessageService {
+	if fallback == api {
+		fallback = nil
+	}
+	return &MessageService{api: api, fallback: fallback, channels: channels, users: users, log: log}
 }
 
 // HistoryParams controls a conversations.history fetch.
@@ -379,14 +384,65 @@ func (s *MessageService) FileInfo(ctx context.Context, fileID string) (goslack.F
 // w, authenticating with this client's token. The token never leaves
 // the server process — callers receive bytes, not credentials. The
 // caller owns w (creation and close).
+//
+// Falls back to the USER token when the primary is refused. A bot is a
+// member of the channels it was invited to; the operator is a member of
+// everything they can see. Files that matter most — HR material, board
+// documents, anything in a private channel or group DM — live exactly
+// where the bot was never invited, so a bot-only download reports "401
+// Unauthorized" for a file the operator is looking at in their client.
+// The fallback only fires on an auth refusal, so a genuinely missing
+// file still fails as missing rather than being retried pointlessly.
 func (s *MessageService) DownloadFile(ctx context.Context, downloadURL string, w io.Writer) error {
 	err := ratelimit.Do(ctx, s.log, 0, func() error {
 		return s.api.GetFileContext(ctx, downloadURL, w)
 	})
-	if err != nil {
+	if err == nil {
+		return nil
+	}
+	if s.fallback == nil || !isAuthRefusal(err) {
 		return fmt.Errorf("file download: %w", err)
 	}
+	// w may hold a partial body from the refused attempt; the caller
+	// owns it, so signal rather than silently appending to it.
+	if t, ok := w.(interface{ Truncate(int64) error }); ok {
+		if terr := t.Truncate(0); terr != nil {
+			return fmt.Errorf("file download: %w (user-token retry needed but the sink could not be reset: %v)", err, terr)
+		}
+		if sk, ok := w.(io.Seeker); ok {
+			if _, serr := sk.Seek(0, io.SeekStart); serr != nil {
+				return fmt.Errorf("file download: %w (user-token retry needed but the sink could not be rewound: %v)", err, serr)
+			}
+		}
+	}
+	s.log.Debug("file download refused for the primary token, retrying with the user token")
+	ferr := ratelimit.Do(ctx, s.log, 0, func() error {
+		return s.fallback.GetFileContext(ctx, downloadURL, w)
+	})
+	if ferr != nil {
+		return fmt.Errorf("file download: %w (user token also refused: %v)", err, ferr)
+	}
 	return nil
+}
+
+// isAuthRefusal reports whether an error is Slack refusing the token,
+// as opposed to the file being absent or the network failing. Slack
+// answers a file request from a non-member with a bare HTTP status, so
+// this matches on the status text rather than a typed error. Pure.
+func isAuthRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"401", "403", "unauthorized", "forbidden",
+		"not_allowed_token_type", "missing_scope", "access_denied",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // AddReaction attaches an emoji reaction to a message.
