@@ -147,6 +147,24 @@ func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from,
 		candidates = candidates[:limit]
 	}
 
+	// Refuse external documents before the fetch. Downloading one
+	// produces a 401 from the third party that is indistinguishable from
+	// a Slack permissions failure, and sends the reader hunting through
+	// tokens and channel membership for a problem that is neither.
+	var external []string
+	local := make([]docCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if isExternalFile(c.File) {
+			external = append(external, externalFileNote(c.File))
+			continue
+		}
+		local = append(local, c)
+	}
+	if len(local) == 0 {
+		return mcp.NewToolResultError(strings.Join(external, "\n\n"))
+	}
+	candidates = local
+
 	files := make([]goslack.File, 0, len(candidates))
 	for _, c := range candidates {
 		files = append(files, c.File)
@@ -155,7 +173,11 @@ func (h *Hub) readRecentDocuments(ctx context.Context, workspace, channel, from,
 	if derr != nil {
 		return mcp.NewToolResultError(derr.Error())
 	}
-	return mcp.NewToolResultText(renderDocuments(saved, h.wsLabel(wsName), maxChars))
+	out := renderDocuments(saved, h.wsLabel(wsName), maxChars)
+	if len(external) > 0 {
+		out += "\n\nSkipped:\n" + strings.Join(external, "\n\n")
+	}
+	return mcp.NewToolResultText(out)
 }
 
 // anyFile accepts every attachment — the listing filter. Pure.
@@ -192,6 +214,12 @@ func renderDocumentList(candidates []docCandidate, wsLabel string) string {
 	for _, c := range candidates {
 		fmt.Fprintf(&b, "- %s (%s, %d bytes) ts=%s", c.File.Name, c.File.Mimetype, c.File.Size, c.TS)
 		switch {
+		case isExternalFile(c.File):
+			host := strings.TrimSpace(c.File.ExternalType)
+			if host == "" {
+				host = "external"
+			}
+			fmt.Fprintf(&b, "  [linked %s document — not stored in Slack, cannot be read here]", host)
 		case isLegacyExcelFile(c.File):
 			b.WriteString("  [legacy .xls — re-save as .xlsx to read it here]")
 		case !isReadableDocument(c.File):
@@ -418,6 +446,37 @@ func isSpreadsheetFile(f goslack.File) bool {
 // isReadableDocument is what read_document accepts: text it can render
 // inline, spreadsheets it flattens, plus PDFs it hands back as a local
 // path. Pure.
+// isExternalFile reports whether the attachment lives outside Slack —
+// a Google Drive, Dropbox or Box item linked into a conversation rather
+// than uploaded to it.
+//
+// Slack returns full metadata for these (name, mimetype, size), so they
+// are indistinguishable from real uploads until you try to fetch one:
+// url_private points at the third-party document, and Slack's own
+// credentials mean nothing there. The download then fails with a bare
+// 401 that reads exactly like a permissions problem on the Slack side,
+// which is the wrong place to go looking. See ADR 094.
+func isExternalFile(f goslack.File) bool {
+	return f.IsExternal || strings.TrimSpace(f.ExternalType) != ""
+}
+
+// externalFileNote explains an external attachment and hands back the
+// link, so the caller can open it with credentials that apply. Pure.
+func externalFileNote(f goslack.File) string {
+	host := strings.TrimSpace(f.ExternalType)
+	if host == "" {
+		host = "external"
+	}
+	url := strings.TrimSpace(f.URLPrivate)
+	msg := fmt.Sprintf(
+		"%s is not stored in Slack: it is a linked %s document. Slack holds only its metadata, so no Slack token can fetch the contents.",
+		f.Name, host)
+	if url != "" {
+		msg += "\nOpen it where it lives: " + url
+	}
+	return msg
+}
+
 func isReadableDocument(f goslack.File) bool {
 	return isDocumentFile(f) || isPDFFile(f) || isSpreadsheetFile(f)
 }
