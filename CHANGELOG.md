@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.42.0] - 2026-09-07
+
+### Added
+
+- **Bot payloads render their text instead of a count.** Alert feeds,
+  scanner reports and billing notices post with an empty `text` field
+  and put everything a human reads into an attachment. Those rendered
+  as `[attached: 1]`, so the only way to learn what one said was to
+  open Slack. The renderer now lifts `title`, `text`, fields and nested
+  blocks out of each attachment, falling back to Slack's own `fallback`
+  summary only when the structured fields are empty. Identical strings
+  collapse, output is capped with an exact overflow count, and the
+  counter survives for payloads that genuinely carry no prose so a line
+  is never silently empty. See ADR 092.
+- **`list_users` leads each row with the Slack ID.** Payloads carry IDs,
+  the roster listed only handles, so an unresolved `<@U…>` had no route
+  back to a person. See ADR 096.
+- **Rendered clock times name their zone.** The unread-summary header
+  carries `times: <zone> (UTC±HH:MM)`, so times copied into an incident
+  timeline or compared against UTC logs can be lined up without
+  guessing the offset. See ADR 095.
+
+### Fixed
+
+- **A failed name lookup is no longer permanent.** Any error resolving a
+  user ID was written into the success cache, so one transient
+  rate-limit pause pinned that person to a raw `U…` on every surface for
+  the rest of the session, with no indication anything had failed.
+  Failures now live in a separate map honoured for one minute: inside
+  the window the ID is returned without an API call, after it the
+  lookup is retried, and a success clears the record. See ADR 093.
+- **External documents are refused before the fetch.** A file linked in
+  from a third-party service looks like an upload in every visible
+  field, but its content lives elsewhere, so downloading it returned a
+  bare `401` — the same status a genuine Slack permissions problem
+  gives, sending the reader after tokens and channel membership that
+  were never the cause. These are now detected from metadata, named
+  with their service, and answered with the link instead of an error.
+  Listings mark them in place. See ADR 094.
+
+### Changed
+
+- `renderUserRows` split out of the `list_users` handler as a pure
+  function so the row format is testable without a live roster fetch.
+
 ## [1.41.2] - 2026-09-03
 
 ### Fixed
