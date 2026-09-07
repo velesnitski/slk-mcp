@@ -279,13 +279,13 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 		case body == "":
 			sections = append(sections, workspaceSection(ws.Name, unreadEmptyMsg(p.mentionsOnly)))
 		case !multi:
-			return mcp.NewToolResultText("# Unread summary" + titleSuffix + "\n" + body)
+			return mcp.NewToolResultText("# Unread summary" + titleSuffix + " · " + format.TimeZoneNote() + "\n" + body)
 		default:
 			sections = append(sections, workspaceSection(ws.Name, body))
 		}
 	}
 
-	header := fmt.Sprintf("# Unread summary%s — %d workspaces", titleSuffix, len(targets))
+	header := fmt.Sprintf("# Unread summary%s — %d workspaces · %s", titleSuffix, len(targets), format.TimeZoneNote())
 	out := header + "\n\n" + strings.Join(sections, "\n\n")
 	// One exact token for the next delta pull — no more taking the min of
 	// the per-workspace cursor lines by hand.
