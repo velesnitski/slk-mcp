@@ -19,7 +19,7 @@ func (h *Hub) registerUserTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("list_users",
-			mcp.WithDescription("List active workspace users with handle, real name, job title, role flags, and profile-update date. Optionally include last-message date. With multiple workspaces configured, empty workspace lists every one under a [label] heading."),
+			mcp.WithDescription("List active workspace users with Slack ID, handle, real name, job title, role flags, and profile-update date. The ID is what messages and API payloads carry, so it is the column that turns a raw <@U…> back into a person. Optionally include last-message date. With multiple workspaces configured, empty workspace lists every one under a [label] heading."),
 			mcp.WithBoolean("include_bots", mcp.Description("Include bot/integration accounts (default: false)")),
 			mcp.WithBoolean("with_activity", mcp.Description("Fetch each user's last-message date via search (slower; one search.messages call per user, run in parallel) (default: false)")),
 			mcp.WithString("filter", mcp.Description("Case-insensitive substring filter — matches against handle, real name, and job title. Useful for 'marketing', 'qa', 'devops' etc.")),
@@ -94,8 +94,22 @@ func (h *Hub) listUsersBody(ctx context.Context, includeBots, withActivity bool,
 		lastPost = h.fetchLastPostDates(ctx, filtered)
 	}
 
+	return renderUserRows(filtered, lastPost, withActivity), nil
+}
+
+// renderUserRows renders the roster one user per line. Split out of
+// listUsersBody so the row format can be tested without a live roster
+// fetch. Pure.
+//
+// The Slack ID leads the line. Message bodies, search results and API
+// payloads all carry IDs, not handles, and any of them can arrive with
+// the name unresolved — a rate-limited users.info, a bot post, a
+// stripped canvas mention. Without the ID in the roster there is no
+// second route from "<@U…>" back to a person, and the reader is left
+// correlating by guesswork. See ADR 096.
+func renderUserRows(users []goslack.User, lastPost map[string]string, withActivity bool) string {
 	var b strings.Builder
-	for _, u := range filtered {
+	for _, u := range users {
 		flags := ""
 		switch {
 		case u.IsAdmin:
@@ -125,15 +139,15 @@ func (h *Hub) listUsersBody(ctx context.Context, includeBots, withActivity bool,
 			if last == "" {
 				last = "(none found)"
 			}
-			fmt.Fprintf(&b, "%s | %s | %s |%s | profile_updated=%s | last_post=%s\n",
-				u.Name, real, title, flags, updated, last)
+			fmt.Fprintf(&b, "%s | %s | %s | %s |%s | profile_updated=%s | last_post=%s\n",
+				u.ID, u.Name, real, title, flags, updated, last)
 		} else {
-			fmt.Fprintf(&b, "%s | %s | %s |%s | profile_updated=%s\n",
-				u.Name, real, title, flags, updated)
+			fmt.Fprintf(&b, "%s | %s | %s | %s |%s | profile_updated=%s\n",
+				u.ID, u.Name, real, title, flags, updated)
 		}
 	}
-	header := fmt.Sprintf("%d users\n", len(filtered))
-	return header + strings.TrimRight(b.String(), "\n"), nil
+	header := fmt.Sprintf("%d users\n", len(users))
+	return header + strings.TrimRight(b.String(), "\n")
 }
 
 // userMatchesFilter returns true if needle (already lowercased) is a
