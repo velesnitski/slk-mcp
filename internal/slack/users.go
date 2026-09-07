@@ -6,36 +6,65 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/slack/ratelimit"
 )
 
+// userResolveRetryAfter is how long a failed users.info lookup is
+// remembered before the ID is tried again. A failure is usually
+// transient — a rate-limit pause, a dropped connection — and caching it
+// permanently means one bad moment renders that person as a raw ID for
+// the rest of the process's life, on every surface, with no way to
+// recover short of a restart. Long enough to stop a hot loop from
+// hammering the API, short enough that a sweep a minute later is clean.
+// See ADR 093.
+const userResolveRetryAfter = time.Minute
+
 // UserService resolves Slack user IDs to display names with an in-memory cache.
+//
+// Successful resolutions are cached for the life of the process — display
+// names change rarely and a stale name is harmless. Failures are cached
+// separately and briefly: see userResolveRetryAfter.
 type UserService struct {
-	api   *goslack.Client
-	log   *slog.Logger
-	mu    sync.RWMutex
-	cache map[string]string
+	api    *goslack.Client
+	log    *slog.Logger
+	mu     sync.RWMutex
+	cache  map[string]string
+	failed map[string]time.Time
+	now    func() time.Time
 }
 
 func newUserService(api *goslack.Client, log *slog.Logger) *UserService {
-	return &UserService{api: api, log: log, cache: make(map[string]string)}
+	return &UserService{
+		api:    api,
+		log:    log,
+		cache:  make(map[string]string),
+		failed: make(map[string]time.Time),
+		now:    time.Now,
+	}
 }
 
 // Name returns a display name for the given user ID, resolving via
 // the Slack API on cache miss. On any error the ID itself is returned
-// so callers can render output without a branch.
+// so callers can render output without a branch — but the failure is
+// only remembered for userResolveRetryAfter, so a transient error does
+// not pin that person to a raw ID for the rest of the session.
 func (s *UserService) Name(ctx context.Context, userID string) string {
 	if userID == "" {
 		return ""
 	}
 	s.mu.RLock()
-	if n, ok := s.cache[userID]; ok {
-		s.mu.RUnlock()
+	n, cached := s.cache[userID]
+	failedAt, everFailed := s.failed[userID]
+	s.mu.RUnlock()
+	if cached {
 		return n
 	}
-	s.mu.RUnlock()
+	if everFailed && s.now().Sub(failedAt) < userResolveRetryAfter {
+		return userID
+	}
 
 	user, err := ratelimit.DoR(ctx, s.log, func() (*goslack.User, error) {
 		return s.api.GetUserInfoContext(ctx, userID)
@@ -43,7 +72,7 @@ func (s *UserService) Name(ctx context.Context, userID string) string {
 	if err != nil {
 		s.log.Debug("resolve user failed", "user_id", userID, "err", err)
 		s.mu.Lock()
-		s.cache[userID] = userID
+		s.failed[userID] = s.now()
 		s.mu.Unlock()
 		return userID
 	}
@@ -51,6 +80,7 @@ func (s *UserService) Name(ctx context.Context, userID string) string {
 	name := formatUserDisplay(user, userID)
 	s.mu.Lock()
 	s.cache[userID] = name
+	delete(s.failed, userID)
 	s.mu.Unlock()
 	return name
 }
