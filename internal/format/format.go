@@ -426,15 +426,88 @@ func HasContent(msg goslack.Message) bool {
 	return false
 }
 
-// renderHiddenPayloadMarker returns a short marker describing any
-// non-text payload (legacy Attachments or Block Kit Blocks) attached
-// to msg. Callers gate the call on body-empty-and-files-empty —
-// otherwise we'd add noise to every URL-preview message.
+// HiddenPayloadLimit caps the text lifted out of a non-text payload so
+// one verbose bot attachment cannot dominate a digest line.
+const HiddenPayloadLimit = 220
+
+// blocksText extracts the human-readable strings from a Block Kit
+// block set, in document order. Only the blocks bots actually use for
+// prose are walked — section, header, context; layout-only blocks
+// (divider, image, actions) carry no text worth surfacing. Unknown
+// block types are skipped rather than guessed at. Pure.
+func blocksText(bs goslack.Blocks) []string {
+	var out []string
+	for _, blk := range bs.BlockSet {
+		switch v := blk.(type) {
+		case *goslack.SectionBlock:
+			if v.Text != nil {
+				out = append(out, v.Text.Text)
+			}
+			for _, f := range v.Fields {
+				if f != nil {
+					out = append(out, f.Text)
+				}
+			}
+		case *goslack.HeaderBlock:
+			if v.Text != nil {
+				out = append(out, v.Text.Text)
+			}
+		case *goslack.ContextBlock:
+			if v.ContextElements.Elements == nil {
+				continue
+			}
+			for _, el := range v.ContextElements.Elements {
+				if t, ok := el.(*goslack.TextBlockObject); ok {
+					out = append(out, t.Text)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// attachmentText returns the readable prose carried by one legacy
+// attachment, richest field first. Fallback is consulted only when the
+// structured fields yield nothing: it is Slack's own plain-text
+// rendering, set by well-behaved bots precisely so a client that cannot
+// draw the rich form still shows something true — but it duplicates the
+// title when both are present, so it is a last resort, not a first
+// choice. Pure.
+func attachmentText(a goslack.Attachment) []string {
+	var out []string
+	out = append(out, a.Pretext, a.Title, a.Text)
+	for _, f := range a.Fields {
+		out = append(out, strings.TrimSpace(f.Title+" "+f.Value))
+	}
+	out = append(out, blocksText(a.Blocks)...)
+	if !anyNonEmpty(out) {
+		return []string{a.Fallback}
+	}
+	return out
+}
+
+// anyNonEmpty reports whether any string has non-space content. Pure.
+func anyNonEmpty(ss []string) bool {
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// renderHiddenPayloadMarker describes the non-text payload (legacy
+// Attachments or Block Kit Blocks) of a message whose body and file
+// list are both empty. Callers gate on that emptiness — otherwise this
+// would add noise to every URL-preview message.
 //
-// The marker exists so MessageLine never renders an effectively
-// empty line for a real message; the reader knows there is content
-// reachable via the permalink even if the renderer can't surface it
-// as plain text.
+// Bot-driven channels (alert feeds, scanner reports, billing notices)
+// post exclusively this way: the text field is empty and everything
+// the human reads lives in an attachment. Rendering only a count made
+// those channels unreadable through this server — the reader saw
+// "[attached: 1]" and had to open Slack. So the text is lifted out
+// when there is text, and the count remains only as the honest answer
+// when there genuinely isn't one. See ADR 092.
 func renderHiddenPayloadMarker(msg goslack.Message) string {
 	// A huddle (audio room) arrives as a block-kit message with empty
 	// text — without this it would render as a meaningless "[blocks: 1]"
@@ -444,14 +517,48 @@ func renderHiddenPayloadMarker(msg goslack.Message) string {
 	if IsHuddle(msg) {
 		return "[huddle]"
 	}
+
 	var parts []string
+	seen := map[string]struct{}{}
+	add := func(raw string) {
+		s := collapseWhitespace(raw)
+		if s == "" {
+			return
+		}
+		if _, dup := seen[s]; dup {
+			return
+		}
+		seen[s] = struct{}{}
+		parts = append(parts, s)
+	}
+	for _, a := range msg.Attachments {
+		for _, s := range attachmentText(a) {
+			add(s)
+		}
+	}
+	for _, s := range blocksText(msg.Blocks) {
+		add(s)
+	}
+
+	if len(parts) > 0 {
+		body := strings.Join(parts, " · ")
+		if len(body) > HiddenPayloadLimit {
+			over := len(body) - HiddenPayloadLimit
+			body = body[:HiddenPayloadLimit] + fmt.Sprintf(" (+%d chars)", over)
+		}
+		return body
+	}
+
+	// No prose anywhere: keep the count so the line is never silently
+	// empty and the reader knows to follow the permalink.
+	var counts []string
 	if n := len(msg.Attachments); n > 0 {
-		parts = append(parts, fmt.Sprintf("[attached: %d]", n))
+		counts = append(counts, fmt.Sprintf("[attached: %d]", n))
 	}
 	if n := len(msg.Blocks.BlockSet); n > 0 {
-		parts = append(parts, fmt.Sprintf("[blocks: %d]", n))
+		counts = append(counts, fmt.Sprintf("[blocks: %d]", n))
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(counts, " ")
 }
 
 // HuddleSubtype is the message subtype Slack assigns to huddle (audio
@@ -463,6 +570,24 @@ const HuddleSubtype = "huddle_thread"
 // renderer surface "[huddle]" instead of an opaque "[blocks: 1]".
 func IsHuddle(msg goslack.Message) bool {
 	return msg.SubType == HuddleSubtype
+}
+
+// TimeZoneNote names the zone every rendered clock time is in.
+//
+// Slack timestamps are epoch seconds; this server renders them in the
+// host's local zone. That is the right default — the operator reads
+// them against their own clock — but the zone is invisible in a bare
+// "15:04", and a reader correlating those against UTC log lines or a
+// provider's CET timestamps has no way to know the offset. Naming it
+// once per report costs a few tokens and removes a whole class of
+// silent off-by-hours. See ADR 095.
+func TimeZoneNote() string {
+	name, offset := time.Now().Zone()
+	sign := "+"
+	if offset < 0 {
+		sign, offset = "-", -offset
+	}
+	return fmt.Sprintf("times: %s (UTC%s%02d:%02d)", name, sign, offset/3600, (offset%3600)/60)
 }
 
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.
