@@ -2,6 +2,7 @@ package tools
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseRange_hoursFallback(t *testing.T) {
@@ -25,9 +26,28 @@ func TestParseRange_afterBefore(t *testing.T) {
 	if o.Format("2006-01-02") != "2026-04-30" {
 		t.Fatalf("after wrong: %v", o)
 	}
-	// before is end-exclusive: 2026-05-01 + 24h = 2026-05-02 00:00 UTC
+	// The named `before` day is included, so the cutoff lands at the
+	// start of the NEXT day: 2026-05-01 + 24h = 2026-05-02 00:00 UTC.
 	if l.Format("2006-01-02") != "2026-05-02" {
-		t.Fatalf("before-end-exclusive wrong: %v", l)
+		t.Fatalf("before-day-inclusive wrong: %v", l)
+	}
+}
+
+// A single day is expressed by naming it as both bounds — the guard
+// against an inverted range must not reject that.
+func TestParseRange_sameDayIsOneFullDay(t *testing.T) {
+	o, l, err := parseRange("2026-04-30", "2026-04-30", 0)
+	if err != nil {
+		t.Fatalf("same-day range rejected: %v", err)
+	}
+	if o.Format("2006-01-02") != "2026-04-30" {
+		t.Fatalf("oldest wrong: %v", o)
+	}
+	if l.Format("2006-01-02") != "2026-05-01" {
+		t.Fatalf("latest wrong: %v", l)
+	}
+	if l.Sub(o) != 24*time.Hour {
+		t.Fatalf("want exactly 24h, got %v", l.Sub(o))
 	}
 }
 

@@ -890,15 +890,17 @@ func DecisionLine(msg goslack.Message, channel, user, reason string) string {
 // SearchResult renders a single search hit as a compact line. Body
 // is collapsed to single-space and truncated to 200 chars.
 func SearchResult(m goslack.SearchMessage) string {
-	return searchResultLine(m, false)
+	return searchResultLine(m, false, nil)
 }
 
 // SearchResultExt renders a search hit with a permalink + thread_ts
 // appended on a tab-indented continuation line. When fullText is true
 // the body is not truncated. The continuation line lets the LLM chain
-// to get_thread without re-searching.
-func SearchResultExt(m goslack.SearchMessage, fullText bool) string {
-	line := searchResultLine(m, fullText)
+// to get_thread without re-searching. `names` resolves DM counterpart
+// IDs to handles for the channel label; a nil map falls back to the
+// bare ID.
+func SearchResultExt(m goslack.SearchMessage, fullText bool, names map[string]string) string {
+	line := searchResultLine(m, fullText, names)
 	threadTS := ExtractThreadTS(m)
 	if threadTS == "" || m.Permalink == "" {
 		return line
@@ -930,7 +932,7 @@ func ThreadContextLine(marker string, m goslack.Message, displayName string) str
 	return "\t" + marker + " [" + when + " " + name + "] " + body
 }
 
-func searchResultLine(m goslack.SearchMessage, fullText bool) string {
+func searchResultLine(m goslack.SearchMessage, fullText bool, names map[string]string) string {
 	body := collapseWhitespace(m.Text)
 	if !fullText && len(body) > 200 {
 		body = body[:200] + "..."
@@ -940,7 +942,30 @@ func searchResultLine(m goslack.SearchMessage, fullText bool) string {
 	if !t.IsZero() {
 		when = t.Format("2006-01-02 15:04")
 	}
-	return fmt.Sprintf("- #%s %s (%s) %s", m.Channel.Name, when, m.Username, body)
+	return fmt.Sprintf("- %s %s (%s) %s", SearchChannelLabel(m.Channel, names), when, m.Username, body)
+}
+
+// SearchChannelLabel names the conversation a hit came from. Slack
+// returns no channel name for a DM — it puts the counterpart's user ID
+// in the name field — so labelling every hit "#<name>" printed a fake
+// channel whose name was a raw user ID. DM ids start with "D", mpim
+// with "G": those get an "@" and, when `names` can resolve the ID, the
+// handle instead.
+func SearchChannelLabel(ch goslack.CtxChannel, names map[string]string) string {
+	name := strings.TrimSpace(ch.Name)
+	if !strings.HasPrefix(ch.ID, "D") && !ch.IsMPIM {
+		if name == "" {
+			name = ch.ID
+		}
+		return "#" + name
+	}
+	if name == "" {
+		name = ch.ID
+	}
+	if resolved := strings.TrimSpace(names[name]); resolved != "" {
+		name = resolved
+	}
+	return "@" + name
 }
 
 // ExtractThreadTS pulls thread_ts from a Slack permalink, falling

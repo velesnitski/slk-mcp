@@ -484,11 +484,11 @@ func TestSearchResultExt_truncation(t *testing.T) {
 	m.Username = "alice"
 	m.Text = long
 
-	short := SearchResultExt(m, false)
+	short := SearchResultExt(m, false, nil)
 	if !strings.Contains(short, "...") {
 		t.Fatalf("expected truncation marker in: %q", short)
 	}
-	full := SearchResultExt(m, true)
+	full := SearchResultExt(m, true, nil)
 	if strings.Contains(full, "...") {
 		t.Fatalf("expected no truncation in: %q", full)
 	}

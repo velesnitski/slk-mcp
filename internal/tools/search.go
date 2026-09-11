@@ -8,6 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
@@ -67,9 +68,10 @@ func (h *Hub) handleSearchMessages(ctx context.Context, req mcp.CallToolRequest)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d hits for: %s\n", len(matches), q)
+	dmNames := scoped.Users().NamesFor(ctx, dmCounterparts(matches))
 	shown := map[string]struct{}{}
 	for _, m := range matches {
-		b.WriteString(format.SearchResultExt(m, fullText))
+		b.WriteString(format.SearchResultExt(m, fullText, dmNames))
 		b.WriteByte('\n')
 		// Reuse the get_mentions context machinery: a search hit is one
 		// isolated message, and interpreting it (especially a from:@user
@@ -83,6 +85,28 @@ func (h *Hub) handleSearchMessages(ctx context.Context, req mcp.CallToolRequest)
 		}
 	}
 	return mcp.NewToolResultText(strings.TrimRight(b.String(), "\n")), nil
+}
+
+// dmCounterparts collects the user IDs Slack parks in channel.name for
+// DM hits, so they can be resolved to handles for the channel label.
+func dmCounterparts(matches []goslack.SearchMessage) []string {
+	seen := map[string]struct{}{}
+	var ids []string
+	for _, m := range matches {
+		if !strings.HasPrefix(m.Channel.ID, "D") && !m.Channel.IsMPIM {
+			continue
+		}
+		id := strings.TrimSpace(m.Channel.Name)
+		if !strings.HasPrefix(id, "U") {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func (h *Hub) handleFindDecisions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

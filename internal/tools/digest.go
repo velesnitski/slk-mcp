@@ -21,8 +21,8 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops or devops), a DM as @handle, a bare U… user id (as printed in unread-summary DM headers), or a canonical C/G/D conversation id")),
 				mcp.WithNumber("hours", mcp.Description("Lookback window in hours (default: SLACK_DIGEST_HOURS or 24). Ignored when after/before are set.")),
 				mcp.WithNumber("max_messages", mcp.Description("Max messages to inline (default: 50)")),
-				mcp.WithString("after", mcp.Description("Absolute lower bound, YYYY-MM-DD (UTC). Overrides hours when set.")),
-				mcp.WithString("before", mcp.Description("Absolute upper bound, YYYY-MM-DD (UTC, exclusive day end). Pair with after for date ranges.")),
+				mcp.WithString("after", mcp.Description("Absolute lower bound, YYYY-MM-DD (UTC). The named day is included. Overrides hours when set.")),
+				mcp.WithString("before", mcp.Description("Absolute upper bound, YYYY-MM-DD (UTC). The named day is INCLUDED — after=2026-04-30 before=2026-04-30 is that single day, and before=2026-05-01 still returns May 1st.")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 				mcp.WithBoolean("full_text", mcp.Description("Render message bodies in full instead of truncating long ones to a compact preview (default: false). Use when ingesting a channel verbatim — e.g. into a knowledge base.")),
 				mcp.WithBoolean("with_replies", mcp.Description("Also fetch and inline thread replies for every thread in the window. Defaults per conversation kind: ON for DMs (a thread reply there IS the conversation) and OFF for channels (one conversations.replies call per thread). Set explicitly to override — true to expand a channel whose real content lives in threads, false for a leaner DM read.")),
@@ -353,9 +353,10 @@ func flattenReplies(replies map[string][]goslack.Message) []goslack.Message {
 }
 
 // parseRange resolves the user's window into (oldest, latest). When
-// after/before are set, they override hours. before is exclusive at
-// end-of-day so "after=2026-04-30 before=2026-05-01" returns one full
-// UTC day.
+// after/before are set, they override hours. Both bounds name a day
+// that is INCLUDED: "after=2026-04-30 before=2026-04-30" is that one
+// full UTC day, and "before=2026-05-01" still returns May 1st's
+// messages. The +24h below is what makes the named day inclusive.
 func parseRange(after, before string, hours int) (time.Time, time.Time, error) {
 	if after == "" && before == "" {
 		return time.Now().Add(-time.Duration(hours) * time.Hour), time.Time{}, nil

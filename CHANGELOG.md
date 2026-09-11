@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.43.0] - 2026-09-11
+
+### Fixed
+
+- **A DM search hit no longer poses as a channel.** Slack returns no
+  channel name for a direct message — it parks the counterpart's user
+  ID in that field — so every DM hit came back labelled `#U…`: a
+  channel that does not exist, named after a raw ID, rendered with the
+  same glyph as a real channel. `search_messages` now reads the
+  conversation ID, renders DMs and group DMs behind `@`, and resolves
+  the parked ID to a handle in one batched lookup. A sweep that spans
+  channels and DMs is now readable in a single pass. See ADR 097.
+
+- **`get_channel_digest` documents the window it actually returns.**
+  The `before` bound includes the day it names, but the tool
+  description called it an "exclusive day end" and the doc comment
+  claimed `after=2026-04-30 before=2026-05-01` was one day — it is
+  two. A caller trusting either description silently received a
+  different window than the one asked for, with no visible error.
+  Behaviour is unchanged; both descriptions now say that each named
+  day is included, and a test pins the single-day case. See ADR 098.
+
 ## [1.42.0] - 2026-09-07
 
 ### Added
