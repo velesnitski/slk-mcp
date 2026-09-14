@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.44.0] - 2026-09-14
+
+### Added
+
+- **`get_channel_digest` can hand back an addressable key.** A digest
+  line carried no `ts` and no permalink, so a message could be read but
+  not cited, re-fetched, or linked — and recovering it meant searching
+  its own text back out of the workspace, which fails precisely when
+  the body was truncated or the wording is not distinctive. The new
+  `with_ts` flag appends `ts=<timestamp>` to each top-level line, which
+  is exactly what `get_message` takes alongside the channel. Off by
+  default; default output is unchanged byte for byte. See ADR 099.
+
+### Fixed
+
+- **Digest headings no longer double their sigil.** The heading was
+  `"#"+ref`, which rendered `#devops` as `##devops` and the DM
+  `@person` as `#@person`; a bare conversation id got a sigil it has no
+  business carrying. A channel now gets exactly one `#`, a DM keeps its
+  `@`, and an id stands as written.
+
 ## [1.43.0] - 2026-09-11
 
 ### Fixed

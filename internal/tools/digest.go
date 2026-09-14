@@ -26,6 +26,7 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 				mcp.WithBoolean("full_text", mcp.Description("Render message bodies in full instead of truncating long ones to a compact preview (default: false). Use when ingesting a channel verbatim — e.g. into a knowledge base.")),
 				mcp.WithBoolean("with_replies", mcp.Description("Also fetch and inline thread replies for every thread in the window. Defaults per conversation kind: ON for DMs (a thread reply there IS the conversation) and OFF for channels (one conversations.replies call per thread). Set explicitly to override — true to expand a channel whose real content lives in threads, false for a leaner DM read.")),
+				mcp.WithBoolean("with_ts", mcp.Description("Append ' ts=<timestamp>' to each top-level line (default: false). A digest line otherwise carries no key, so a message can be read but not cited, re-fetched, or linked. The ts plus this channel is what get_message takes — turn this on whenever you may need to point at one of these messages rather than just summarise them.")),
 				mcp.WithNumber("thread_preview_replies", mcp.Description("Max replies inlined per thread when with_replies=true (default: 10; pass a big number for full threads)")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -52,12 +53,13 @@ func (h *Hub) registerDigestTools(s *server.MCPServer) {
 					withReplies = isDMRef(channel)
 				}
 				replyCap := int(req.GetFloat("thread_preview_replies", 10))
+				showTS := req.GetBool("with_ts", false)
 
 				oldest, latest, err := parseRange(after, before, hours)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				txt, err := scoped.channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText, withReplies, replyCap)
+				txt, err := scoped.channelDigestRange(ctx, channel, oldest, latest, maxShow, fullText, withReplies, replyCap, showTS)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -240,10 +242,10 @@ func (h *Hub) morningRecapBody(ctx context.Context, channels string, hours, maxS
 
 func (h *Hub) channelDigest(ctx context.Context, channel string, hours, maxShow int, fullText bool) (string, error) {
 	oldest := time.Now().Add(-time.Duration(hours) * time.Hour)
-	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow, fullText, false, 0)
+	return h.channelDigestRange(ctx, channel, oldest, time.Time{}, maxShow, fullText, false, 0, false)
 }
 
-func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int, fullText bool, withReplies bool, replyCap int) (string, error) {
+func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, latest time.Time, maxShow int, fullText bool, withReplies bool, replyCap int, showTS bool) (string, error) {
 	// resolveConversation (not bare ResolveID) so a DM works directly:
 	// `@handle` and a bare `U…` user id — the shape this tool's own DM
 	// headers print — both land on that person's DM without the caller
@@ -286,10 +288,39 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 	if fullText {
 		opts = append(opts, format.WithFullText())
 	}
+	if showTS {
+		opts = append(opts, format.WithMessageTimestamps())
+	}
 	if len(replies) > 0 {
 		opts = append(opts, format.WithThreadReplies(replies), format.WithThreadPreviewReplies(replyCap))
 	}
-	return format.ChannelDigest("#"+channel, msgs, users, maxShow, opts...), nil
+	return format.ChannelDigest(conversationLabel(channel), msgs, users, maxShow, opts...), nil
+}
+
+// conversationLabel renders the caller's conversation reference as a
+// heading. The old "#"+channel stuck a channel sigil on whatever it was
+// handed, so "#devops" came back "##devops" and the DM "@person" came
+// back "#@person" — a heading that names neither a channel nor a person
+// correctly. A DM keeps its "@", a channel gets exactly one "#", and a
+// bare id is left alone because it is neither.
+func conversationLabel(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ref
+	}
+	// A bare conversation id is neither a channel name nor a handle:
+	// decorating it with either sigil asserts something untrue about it,
+	// so it stands as written.
+	if slack.IsConversationID(ref) {
+		return ref
+	}
+	if isDMRef(ref) {
+		if strings.HasPrefix(ref, "@") {
+			return ref
+		}
+		return "@" + strings.TrimPrefix(ref, "#")
+	}
+	return "#" + strings.TrimPrefix(ref, "#")
 }
 
 // isDMRef reports whether a conversation reference points at a direct

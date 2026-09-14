@@ -308,6 +308,20 @@ type digestOpts struct {
 	aggregateHuddles bool // collapse content-less huddle pings into a count
 	fullText         bool // render bodies without the MessageLineLimit truncation
 	msgLimit         int  // per-call body truncation cap; 0 = MessageLineLimit default
+	showTS           bool // append the message ts so each line is addressable
+}
+
+// WithMessageTimestamps appends " ts=<ts>" to every top-level digest
+// line. A digest line otherwise carries no key at all: the reader can
+// see a message but cannot cite it, fetch it, or link to it without
+// searching the text back out of the workspace — and a body that is
+// truncated or duplicated elsewhere may not be findable that way. The
+// ts plus the channel is exactly what get_message takes, so this turns
+// every rendered line into something addressable. Off by default: the
+// suffix costs ~18 chars per line, which matters in a wide sweep and
+// not at all in a single-channel read.
+func WithMessageTimestamps() DigestOption {
+	return func(o *digestOpts) { o.showTS = true }
 }
 
 // WithMessageLimit overrides the per-message body truncation length for
@@ -787,6 +801,10 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 			b.WriteString(MentionMarker)
 		}
 		b.WriteString(messageLineImpl(m, users[m.User], users, cfg.fullText, cfg.msgLimit))
+		if cfg.showTS && strings.TrimSpace(m.Timestamp) != "" {
+			b.WriteString(" ts=")
+			b.WriteString(m.Timestamp)
+		}
 		b.WriteByte('\n')
 
 		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
