@@ -204,6 +204,20 @@ func renderFullMessage(msg goslack.Message, parent *goslack.Message, refs map[st
 	text := format.RenderText(msg.Text, refs)
 	fmt.Fprintf(&b, "chars: %d\n\n%s\n", len([]rune(text)), text)
 
+	// An empty `text` is not an empty message. Bot notices and forwarded
+	// messages put everything in attachments, and reporting "chars: 0"
+	// with nothing else told the reader the message was blank when the
+	// digest of the very same message showed its content. Same payload,
+	// two renderers, opposite answers — so this one reads it too.
+	if strings.TrimSpace(text) == "" {
+		if payload := format.HiddenPayload(msg); payload != "" {
+			fmt.Fprintf(&b, "payload: %s\n", payload)
+		}
+		if origin := format.ForwardedOrigin(msg); origin != "" {
+			fmt.Fprintf(&b, "forwarded from a message at ts=%s — any file it carried belongs to that original, not to this one\n", origin)
+		}
+	}
+
 	if len(msg.Files) > 0 {
 		b.WriteString("\nfiles:\n")
 		for _, f := range msg.Files {

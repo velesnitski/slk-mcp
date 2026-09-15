@@ -372,9 +372,39 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	}
 	tmsg, terr := scoped.Messages().LatestFileInThread(ctx, channelID, threadTS, accept)
 	if terr != nil {
+		// A forward is not an empty message. Slack renders it as an
+		// attachment carrying the original's ts, and slack-go's
+		// Attachment has no Files field at all — so the file genuinely
+		// cannot be reached from here, by this tool or any other. Saying
+		// "no matching attachment" is then true of this message and false
+		// of what the caller is looking at on screen, which sends them
+		// hunting for a bug in the download path instead of at the
+		// original. Name the original and the way out instead.
+		if origin := forwardedOriginTS(msg); origin != "" {
+			return nil, nil, "", mcp.NewToolResultError(fmt.Sprintf(
+				"this message is a forward of an earlier message (ts=%s); the file belongs to that original and is not reachable through the forward. Open the file in Slack, copy its link (…/files/…/F…/name) and pass it as permalink, or fetch the original message directly.",
+				origin))
+		}
 		return nil, nil, "", mcp.NewToolResultError("this message has no matching attachment, and neither does any reply in its thread")
 	}
 	return finishFetch(ctx, scoped, tmsg.Files, destDir, prefix, accept, wsName)
+}
+
+// forwardedOriginTS reports the timestamp of the message this one
+// forwards, or "" when it forwards nothing. Deliberately a local twin of
+// format.ForwardedOrigin: this layer fetches files and already imports
+// goslack, and reaching into the rendering package for an eight-line
+// predicate would couple the two for no gain.
+func forwardedOriginTS(msg *goslack.Message) string {
+	if msg == nil || len(msg.Files) > 0 {
+		return ""
+	}
+	for _, a := range msg.Attachments {
+		if ts := strings.TrimSpace(a.Ts.String()); ts != "" {
+			return ts
+		}
+	}
+	return ""
 }
 
 // hasMatchingFile reports whether any of files satisfies accept — the

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.45.0] - 2026-09-15
+
+### Fixed
+
+- **A forwarded message no longer reports itself as empty.** Slack
+  renders a forward as an attachment carrying the original's timestamp
+  and author, with no file of its own — and `goslack.Attachment` has no
+  `Files` field at all, so the forwarded file is unreachable from the
+  forwarding message. `view_image`, `read_document` and
+  `download_audio`/`transcribe_audio` answered "this message has no
+  matching attachment", which is true of the message and false of the
+  visible file preview the caller is looking at, sending them to debug
+  the download path instead of opening the original. They now detect
+  the forward, name the original's `ts`, and point at the direct file
+  URL — the one route that does resolve. See ADR 100.
+
+- **`get_message` reads attachment payloads.** A message with empty
+  `text` was reported as `chars: 0` and nothing more, while
+  `get_channel_digest` rendered the same message's content correctly.
+  Bot notices and forwards both land in that shape. `get_message` now
+  renders the payload when the text is empty and flags a forward
+  explicitly, so the two tools stop contradicting each other.
+
 ## [1.44.0] - 2026-09-14
 
 ### Added

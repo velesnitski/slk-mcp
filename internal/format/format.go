@@ -510,6 +510,39 @@ func anyNonEmpty(ss []string) bool {
 	return false
 }
 
+// HiddenPayload exposes the attachment/block prose of a message to
+// callers outside the digest. A message whose `text` is empty is not an
+// empty message: bot feeds and forwarded messages carry everything in
+// attachments, and a renderer that reports only `chars: 0` tells the
+// reader the opposite of the truth. Returns "" when there is genuinely
+// nothing but text.
+func HiddenPayload(msg goslack.Message) string {
+	return renderHiddenPayloadMarker(msg)
+}
+
+// ForwardedOrigin returns the timestamp of the message this one shares,
+// and "" when it shares nothing.
+//
+// Slack renders a forward as an attachment carrying the original's ts,
+// author and fallback text — but slack-go's Attachment has no Files
+// field at all, so a file that came in through a forward is not
+// reachable from the forwarding message by any amount of digging. That
+// is worth detecting precisely: the honest answer is "the file lives on
+// the original, here is its timestamp", not "there is no attachment",
+// which is what a file-list-only search reports and which reads as
+// "nothing was ever attached".
+func ForwardedOrigin(msg goslack.Message) string {
+	if len(msg.Files) > 0 {
+		return ""
+	}
+	for _, a := range msg.Attachments {
+		if ts := strings.TrimSpace(a.Ts.String()); ts != "" {
+			return ts
+		}
+	}
+	return ""
+}
+
 // renderHiddenPayloadMarker describes the non-text payload (legacy
 // Attachments or Block Kit Blocks) of a message whose body and file
 // list are both empty. Callers gate on that emptiness — otherwise this
