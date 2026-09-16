@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`get_thread` honours the permalink's workspace.** `get_message`
+  already routed a pasted link to the workspace its host belongs to;
+  `get_thread` resolved against the primary instead, so a link copied
+  out of a second workspace came back `channel_not_found` — an error
+  that names the channel and therefore reads as "this thread does not
+  exist" rather than "wrong workspace". Both tools now use the same
+  router, and the thread header reports when the workspace was
+  inferred. Its header also stopped doubling the sigil (`##name`,
+  `#@person`), the same defect ADR 099 closed for digests. See ADR 101.
+
+- **File lookups resolve DMs by handle.** `view_image`,
+  `read_document`, `download_audio` and `transcribe_audio` resolved a
+  `channel` + `timestamp` pair through the channel-only resolver, so
+  `@handle` and a bare `U…` id — the shapes this server's own DM
+  headers print — failed as `channel #@handle not found`, with a sigil
+  the caller never typed. They now use the same conversation resolver
+  the tools' own latest-mode already used a few lines above.
+
 - **A forwarded message no longer reports itself as empty.** Slack
   renders a forward as an attachment carrying the original's timestamp
   and author, with no file of its own — and `goslack.Attachment` has no

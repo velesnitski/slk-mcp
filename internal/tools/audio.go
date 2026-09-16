@@ -347,7 +347,13 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 		return nil, nil, "", errRes
 	}
 
-	channelID, err := scoped.Channels().ResolveID(ctx, channel)
+	// resolveConversation, not Channels().ResolveID: the same reference
+	// that latest-mode accepts a few lines up must work here too. ResolveID
+	// only knows channels, so `@handle` and a bare U… id — the shapes this
+	// server's own DM headers print — came back as "channel #@handle not
+	// found", with a sigil the caller never typed. One tool, two paths, two
+	// answers for one reference.
+	channelID, err := scoped.resolveConversation(ctx, channel)
 	if err != nil {
 		return nil, nil, "", h.scopeResult(wsName, err)
 	}

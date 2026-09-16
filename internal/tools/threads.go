@@ -89,7 +89,14 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				permalink := req.GetString("permalink", "")
 				fullText := req.GetBool("full_text", false)
 
-				scoped, _, errRes := h.scopedWorkspace(req.GetString("workspace", ""))
+				// routeWorkspace, not scopedWorkspace: get_message already
+				// picks the workspace from the permalink's host, and a tool
+				// that accepts the same permalink must not send it somewhere
+				// else. A link copied out of the second workspace was
+				// resolved against the primary and came back
+				// "channel_not_found" — which reads as "that thread does not
+				// exist" when the truth is "you looked in the wrong place".
+				scoped, _, note, errRes := h.routeWorkspace(ctx, req.GetString("workspace", ""), permalink)
 				if errRes != nil {
 					return errRes, nil
 				}
@@ -110,7 +117,11 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				users := scoped.resolveRefs(ctx, replies)
 
 				var b strings.Builder
-				fmt.Fprintf(&b, "thread #%s (%d msgs)\n", channel, len(replies))
+				fmt.Fprintf(&b, "thread %s (%d msgs)", conversationLabel(channel), len(replies))
+				if note != "" {
+					fmt.Fprintf(&b, " (%s)", note)
+				}
+				b.WriteByte('\n')
 				for _, m := range replies {
 					if fullText {
 						b.WriteString(format.MessageLineFull(m, users[m.User], users))
