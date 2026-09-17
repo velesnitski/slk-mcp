@@ -428,6 +428,26 @@ func filterBotSenders(matches []goslack.SearchMessage) []goslack.SearchMessage {
 	return out
 }
 
+// filterOwnMessages drops matches the operator wrote themselves. The
+// handle-based mention query matches their own messages too — their
+// handle is attached to everything they post — and a message of yours
+// is not a mention of you. An empty selfID leaves the set untouched:
+// without an id we cannot tell whose message is whose, and dropping
+// nothing is safer than dropping the wrong thing.
+func filterOwnMessages(matches []goslack.SearchMessage, selfID string) []goslack.SearchMessage {
+	if selfID == "" {
+		return matches
+	}
+	out := matches[:0]
+	for _, m := range matches {
+		if m.User == selfID {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // filterStrictMentions removes matches that don't literally tag the
 // operator via <@SELFID> in the body. Slack's `to:me` search
 // occasionally surfaces channel-wide messages where you're a member

@@ -582,14 +582,26 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 // header) or "" when there are no qualifying mentions.
 func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error) {
 	after := time.Now().Add(-time.Duration(p.hours) * time.Hour).Format("2006-01-02")
-	q := fmt.Sprintf("to:me after:%s", after)
-
-	matches, err := h.Search().Messages(ctx, q, p.limit)
-	if err != nil {
-		return "", err
-	}
 
 	selfID, _ := h.Unread().Self(ctx)
+	handle, _ := h.Unread().SelfHandle(ctx)
+
+	// `to:me` matches DMs only, so a channel message tagging the operator
+	// never reached this list — the tool answered "no mentions" while the
+	// mention sat in a channel. Both queries run and merge; see
+	// slack.MentionQueries for why neither one alone is enough.
+	var matches []goslack.SearchMessage
+	for _, q := range slack.MentionQueries(handle, after) {
+		hits, err := h.Search().Messages(ctx, q, p.limit)
+		if err != nil {
+			return "", err
+		}
+		matches = mergeSearchHits(matches, hits)
+	}
+
+	// The handle query also returns the operator's own messages; those
+	// are not mentions of them.
+	matches = filterOwnMessages(matches, selfID)
 
 	// DM history backstop: Slack's search index lags on DMs, so a message
 	// the other party sent minutes ago is often missing from `to:me`.
@@ -624,6 +636,13 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 			return "", errors.New("strict_mention requires auth.test to succeed; got an empty self id")
 		}
 		matches = filterStrictMentions(matches, selfID)
+	}
+
+	// `limit` caps the merged set, not each query — two searches feed it
+	// now, and the union is what the caller asked to be bounded. Ordering
+	// is newest-first (mergeSearchHits), so the cap drops the oldest.
+	if p.limit > 0 && len(matches) > p.limit {
+		matches = matches[:p.limit]
 	}
 
 	if len(matches) == 0 {

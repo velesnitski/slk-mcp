@@ -30,9 +30,10 @@ type UnreadService struct {
 	search   *SearchService
 	log      *slog.Logger
 
-	selfMu  sync.RWMutex
-	selfID  string
-	teamURL string
+	selfMu     sync.RWMutex
+	selfID     string
+	selfHandle string
+	teamURL    string
 }
 
 func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, search *SearchService, log *slog.Logger) *UnreadService {
@@ -69,6 +70,7 @@ func (s *UnreadService) Self(ctx context.Context) (string, error) {
 
 	s.selfMu.Lock()
 	s.selfID = resp.UserID
+	s.selfHandle = resp.User
 	s.teamURL = resp.URL
 	s.selfMu.Unlock()
 	return resp.UserID, nil
@@ -84,6 +86,40 @@ func (s *UnreadService) TeamURL(ctx context.Context) (string, error) {
 	s.selfMu.RLock()
 	defer s.selfMu.RUnlock()
 	return s.teamURL, nil
+}
+
+// SelfHandle returns the authenticated user's @handle from the same
+// cached auth.test response Self uses. Needed because Slack's search
+// index matches a channel mention by handle, not by user id — see
+// MentionQueries. Empty string when unavailable.
+func (s *UnreadService) SelfHandle(ctx context.Context) (string, error) {
+	if _, err := s.Self(ctx); err != nil {
+		return "", err
+	}
+	s.selfMu.RLock()
+	defer s.selfMu.RUnlock()
+	return s.selfHandle, nil
+}
+
+// MentionQueries returns the search queries that together find what was
+// addressed to the operator since afterDate.
+//
+// Two queries are required because `to:me` does not mean "mentions me".
+// Slack scopes `to:` to messages whose recipient is the operator, which
+// in practice is DMs: a channel message tagging the operator is not
+// matched by it at all. Searching the operator's @handle is what finds
+// those. Neither query contains the other — `to:me` returns DMs that
+// never spell the handle, the handle query returns the channel tags
+// `to:me` is blind to — so callers run both and merge the results.
+//
+// An empty handle yields the `to:me` query alone: degraded to the old
+// DM-only behaviour rather than returning nothing.
+func MentionQueries(handle, afterDate string) []string {
+	queries := []string{"to:me after:" + afterDate}
+	if h := strings.TrimPrefix(strings.TrimSpace(handle), "@"); h != "" {
+		queries = append(queries, "@"+h+" after:"+afterDate)
+	}
+	return queries
 }
 
 // Enabled reports whether a user token is available.
@@ -530,19 +566,40 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 
 	after := s.nowUnix() - int64(hours)*3600
 	afterDate := time.Unix(after, 0).Format("2006-01-02")
-	// Slack's `to:me` matches messages where the operator is the explicit
-	// recipient — DMs to them, plus `<@SELFID>` mentions. That's exactly
-	// the gap UnreadAll's reply-fetch can't see for old-thread replies.
-	query := "to:me after:" + afterDate
 
-	matches, err := s.search.Messages(ctx, query, 100)
-	if err != nil {
-		return nil, fmt.Errorf("search to:me: %w", err)
+	// `to:me` is DM-only (see MentionQueries), so on its own it never
+	// returned the case this method exists to catch: a reply tagging the
+	// operator in an already-read CHANNEL thread. The handle query is
+	// what surfaces those; both run and their hits are deduped here.
+	selfID, _ := s.Self(ctx)
+	handle, _ := s.SelfHandle(ctx)
+
+	var matches []goslack.SearchMessage
+	seen := make(map[string]struct{})
+	for _, query := range MentionQueries(handle, afterDate) {
+		hits, err := s.search.Messages(ctx, query, 100)
+		if err != nil {
+			return nil, fmt.Errorf("search mentions: %w", err)
+		}
+		for _, m := range hits {
+			key := m.Channel.ID + "|" + m.Timestamp
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			matches = append(matches, m)
+		}
 	}
 
 	byChannel := make(map[string]*ChannelUnread)
 	for _, m := range matches {
 		if m.Channel.ID == "" {
+			continue
+		}
+		// The handle query also matches the operator's own messages —
+		// their handle rides along on everything they post — and one of
+		// those is not a mention of them.
+		if selfID != "" && m.User == selfID {
 			continue
 		}
 		// Filter to the actual time window — Slack's `after:` is

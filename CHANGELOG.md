@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.46.0] - 2026-09-17
+
+### Fixed
+
+- **A mention in a channel is no longer invisible.** `get_mentions` and
+  the unread sweep's thread-mention backstop both searched `to:me`, on
+  the documented premise that it matches "DMs to you, plus `<@SELFID>`
+  mentions". It does not. Slack scopes `to:` to the message's
+  recipient, which in practice means DMs, so a channel message tagging
+  the operator was never returned by either path — the tool answered
+  "no mentions" while a direct ask sat unanswered in a channel, and the
+  more DM traffic an account carried the more complete that empty
+  answer looked. Both paths now also search the operator's `@handle`,
+  which is what Slack's index matches a channel tag by, and merge the
+  two result sets. Messages the operator wrote themselves are dropped,
+  since the handle query matches those too, and `limit` now bounds the
+  merged set rather than each query. See ADR 102.
+
 ## [1.45.0] - 2026-09-15
 
 ### Fixed

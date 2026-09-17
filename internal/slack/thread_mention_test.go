@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 
 	goslack "github.com/slack-go/slack"
@@ -20,6 +22,15 @@ func newTestUnreadServiceWithSearch(t *testing.T, f *fakeSlack) *UnreadService {
 	users := newUserService(api, log)
 	channels := newChannelService(api, users, log)
 	search := newSearchService(api, log)
+
+	// The mention sweep resolves the operator's id and @handle — the
+	// handle being what Slack's index matches a channel tag by (ADR
+	// 102) — so every search-backed test needs auth.test answered. A
+	// test wanting different identity re-registers the handler.
+	f.on("auth.test", func(*http.Request) any {
+		return map[string]any{"ok": true, "user_id": "U_SELF", "user": "tester"}
+	})
+
 	return newUnreadService(api, channels, users, search, log)
 }
 
@@ -175,6 +186,107 @@ func TestUnreadThreadMentions_filtersHourGranularLeakage(t *testing.T) {
 	}
 	if out[0].Messages[0].Text != "in window" {
 		t.Fatalf("wrong hit survived filter; got %q", out[0].Messages[0].Text)
+	}
+}
+
+// `to:me` is DM-only, so the backstop built on it alone never returned
+// the case it exists for: a reply tagging the operator in a channel
+// thread. Both queries must go out — the handle query is the one that
+// finds those. See ADR 102.
+func TestUnreadThreadMentions_searchesHandleAsWellAsToMe(t *testing.T) {
+	f := newFakeSlack(t)
+	prev := nowUnixFn
+	nowUnixFn = func() int64 { return 1700100000 }
+	t.Cleanup(func() { nowUnixFn = prev })
+
+	var mu sync.Mutex
+	var queries []string
+	f.on("search.messages", func(r *http.Request) any {
+		_ = r.ParseForm()
+		q := r.Form.Get("query")
+		if q == "" {
+			q = r.URL.Query().Get("query")
+		}
+		mu.Lock()
+		queries = append(queries, q)
+		mu.Unlock()
+		return map[string]any{
+			"ok":       true,
+			"messages": map[string]any{"total": 0, "matches": []map[string]any{}},
+		}
+	})
+
+	s := newTestUnreadServiceWithSearch(t, f)
+	if _, err := s.UnreadThreadMentions(context.Background(), 1); err != nil {
+		t.Fatalf("UnreadThreadMentions err: %v", err)
+	}
+
+	if len(queries) != 2 {
+		t.Fatalf("want 2 searches (to:me + handle), got %d: %v", len(queries), queries)
+	}
+	var sawToMe, sawHandle bool
+	for _, q := range queries {
+		if strings.Contains(q, "to:me") {
+			sawToMe = true
+		}
+		if strings.Contains(q, "@tester") {
+			sawHandle = true
+		}
+	}
+	if !sawToMe || !sawHandle {
+		t.Fatalf("want both a to:me and an @handle query; got %v", queries)
+	}
+}
+
+// The handle query matches the operator's own messages too — their
+// handle rides along on everything they post — and one of those is not
+// a mention of them.
+func TestUnreadThreadMentions_dropsOperatorsOwnMessages(t *testing.T) {
+	f := newFakeSlack(t)
+	prev := nowUnixFn
+	nowUnixFn = func() int64 { return 1700100000 }
+	t.Cleanup(func() { nowUnixFn = prev })
+
+	f.on("search.messages", func(*http.Request) any {
+		return map[string]any{
+			"ok": true,
+			"messages": map[string]any{
+				"total": 2,
+				"matches": []map[string]any{
+					{
+						"type":      "message",
+						"channel":   map[string]any{"id": "C1"},
+						"user":      "U_SELF",
+						"text":      "my own line",
+						"ts":        "1700099400.000000",
+						"permalink": "https://x.slack.com/archives/C1/p1700099400",
+					},
+					{
+						"type":      "message",
+						"channel":   map[string]any{"id": "C1"},
+						"user":      "U2",
+						"text":      "someone tagging me",
+						"ts":        "1700099500.000000",
+						"permalink": "https://x.slack.com/archives/C1/p1700099500",
+					},
+				},
+			},
+		}
+	})
+
+	s := newTestUnreadServiceWithSearch(t, f)
+	out, err := s.UnreadThreadMentions(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("UnreadThreadMentions err: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 channel; got %d", len(out))
+	}
+	if len(out[0].Messages) != 1 {
+		t.Fatalf("expected only the other party's message; got %d", len(out[0].Messages))
+	}
+	if out[0].Messages[0].Text != "someone tagging me" {
+		t.Fatalf("wrong message survived; got %q", out[0].Messages[0].Text)
 	}
 }
 
