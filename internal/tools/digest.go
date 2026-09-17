@@ -254,28 +254,43 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 	if err != nil {
 		return "", err
 	}
+	// Thread discovery reaches back past the window on purpose.
+	// conversations.history returns only top-level messages, so a reply
+	// posted inside the window to a thread started before it has no
+	// anchor on the fetched page — and the channel renders as nothing at
+	// all while it is plainly active. Slack returns one page newest
+	// first, so moving `oldest` back cannot push the window's own
+	// messages off it; it only adds older parents behind them.
 	p := slack.HistoryParams{
 		ChannelID: channelID,
-		OldestTS:  float64(oldest.Unix()),
+		OldestTS:  float64(oldest.Add(-threadDiscoveryLookback).Unix()),
 		Limit:     h.cfg.MaxMessagesPerChannel,
 	}
 	if !latest.IsZero() {
 		p.LatestTS = float64(latest.Unix())
 	}
-	msgs, err := h.Messages().History(ctx, p)
+	fetched, err := h.Messages().History(ctx, p)
 	if err != nil {
 		return "", err
 	}
 
-	// Thread drill-in: history returns only top-level messages, so a
-	// channel whose real content lives in threads (a huddle with its
-	// discussion, a request answered in replies) renders as bare
-	// "(N replies)" counters. with_replies fetches those threads and
-	// inlines them — closing the "digest said 2 replies but couldn't
+	// Only what actually falls in the window is rendered; the rest of the
+	// page exists to find threads.
+	msgs := make([]goslack.Message, 0, len(fetched))
+	for _, m := range fetched {
+		if tsWithin(m.Timestamp, oldest, latest) {
+			msgs = append(msgs, m)
+		}
+	}
+
+	// Thread drill-in: a channel whose real content lives in threads (a
+	// huddle with its discussion, a request answered in replies) renders
+	// as bare "(N replies)" counters. with_replies fetches those threads
+	// and inlines them — closing the "digest said 2 replies but couldn't
 	// show them" gap.
 	var replies map[string][]goslack.Message
 	if withReplies {
-		replies = collectThreadReplies(ctx, h.Messages(), channelID, msgs)
+		replies = collectThreadReplies(ctx, h.Messages(), channelID, fetched, oldest, latest)
 	}
 
 	nameSrc := msgs
@@ -294,7 +309,20 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 	if len(replies) > 0 {
 		opts = append(opts, format.WithThreadReplies(replies), format.WithThreadPreviewReplies(replyCap))
 	}
-	return format.ChannelDigest(conversationLabel(channel), msgs, users, maxShow, opts...), nil
+	out := format.ChannelDigest(conversationLabel(channel), msgs, users, maxShow, opts...)
+
+	// The window held no top-level message, and replies were not asked
+	// for — but threads in this channel did move inside it. Saying so
+	// costs nothing (latest_reply is already on the page just fetched)
+	// and is the difference between "quiet channel" and an answer that
+	// looks like the tool failed.
+	if len(msgs) == 0 && !withReplies {
+		if n := countThreadsMovedInWindow(fetched, oldest); n > 0 {
+			return fmt.Sprintf("## %s\n(no top-level messages in this window; %d thread(s) received replies here — pass with_replies=true to read them)",
+				conversationLabel(channel), n), nil
+		}
+	}
+	return out, nil
 }
 
 // conversationLabel renders the caller's conversation reference as a
@@ -345,10 +373,65 @@ func isDMRef(ref string) bool {
 // the parent itself stripped. Best-effort: a single unreadable thread is
 // skipped rather than failing the digest. Takes the narrow MessageClient
 // so tests drive it with a fake.
-func collectThreadReplies(ctx context.Context, msgs MessageClient, channelID string, window []goslack.Message) map[string][]goslack.Message {
+// threadDiscoveryLookback is how far before the window to look for
+// thread parents. A reply lands in the window; its parent may be hours
+// or days older, and without the parent the reply is unreachable —
+// conversations.replies needs a root timestamp. A week covers
+// "yesterday's thread" and "last Friday's thread", and the per-channel
+// message cap bounds the cost regardless of the range.
+const threadDiscoveryLookback = 7 * 24 * time.Hour
+
+// isThreadParent reports whether m roots a thread that has replies.
+func isThreadParent(m goslack.Message) bool {
+	return m.ThreadTimestamp != "" && m.ThreadTimestamp == m.Timestamp && m.ReplyCount > 0
+}
+
+// threadMovedInWindow reports whether a thread could have replies at or
+// after oldest, using the latest_reply Slack already put on the parent.
+// This is what keeps the widened discovery range from costing one
+// conversations.replies call per stale thread.
+//
+// A missing or unparseable latest_reply returns true: an absent field
+// must not silently drop a live thread, and the reply-side filter will
+// discard anything out of window anyway.
+func threadMovedInWindow(m goslack.Message, oldest time.Time) bool {
+	if strings.TrimSpace(m.LatestReply) == "" {
+		return true
+	}
+	t := format.ParseTS(m.LatestReply)
+	return t.IsZero() || !t.Before(oldest)
+}
+
+// countThreadsMovedInWindow counts threads on an already-fetched page
+// whose newest reply falls in the window. Free — no extra API call.
+func countThreadsMovedInWindow(page []goslack.Message, oldest time.Time) int {
+	n := 0
+	for _, m := range page {
+		if isThreadParent(m) && threadMovedInWindow(m, oldest) {
+			n++
+		}
+	}
+	return n
+}
+
+// tsWithin reports whether a Slack timestamp falls in [oldest, latest].
+// A zero latest means "no upper bound"; an unparseable ts is kept, since
+// dropping a message we failed to read is worse than showing it.
+func tsWithin(ts string, oldest, latest time.Time) bool {
+	t := format.ParseTS(ts)
+	if t.IsZero() {
+		return true
+	}
+	if t.Before(oldest) {
+		return false
+	}
+	return latest.IsZero() || !t.After(latest)
+}
+
+func collectThreadReplies(ctx context.Context, msgs MessageClient, channelID string, page []goslack.Message, oldest, latest time.Time) map[string][]goslack.Message {
 	var out map[string][]goslack.Message
-	for _, m := range window {
-		if m.ThreadTimestamp == "" || m.ThreadTimestamp != m.Timestamp || m.ReplyCount == 0 {
+	for _, m := range page {
+		if !isThreadParent(m) || !threadMovedInWindow(m, oldest) {
 			continue
 		}
 		thread, err := msgs.ThreadReplies(ctx, channelID, m.Timestamp)
@@ -359,6 +442,9 @@ func collectThreadReplies(ctx context.Context, msgs MessageClient, channelID str
 		for _, r := range thread {
 			if r.Timestamp == m.Timestamp {
 				continue // conversations.replies includes the parent
+			}
+			if !tsWithin(r.Timestamp, oldest, latest) {
+				continue // a reply from before this window, or after it
 			}
 			reps = append(reps, r)
 		}

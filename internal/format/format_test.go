@@ -53,9 +53,16 @@ func TestChannelDigest_HidesExtras(t *testing.T) {
 	}
 }
 
+// A direct digest of a quiet channel says so. It used to return "" for
+// token efficiency, but "" reaches the caller as a blank result, which
+// reads as a broken tool rather than a quiet channel — and the caller
+// named this channel on purpose. Token efficiency is now entirely
+// WithOmitEmpty's job (see TestChannelDigest_OmitEmptySuppressesTrulyEmpty),
+// which is what the multi-channel sweep passes.
 func TestChannelDigest_Empty(t *testing.T) {
-	if out := ChannelDigest("dev", nil, nil, 5); out != "" {
-		t.Fatalf("empty channel must return empty string for token efficiency, got: %s", out)
+	out := ChannelDigest("dev", nil, nil, 5)
+	if out != "## dev\n(no activity)" {
+		t.Fatalf("a quiet channel must say so on a direct call, got: %q", out)
 	}
 }
 

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.50.0] - 2026-09-17
+
+### Fixed
+
+- **A reply counts as activity even when its parent predates the
+  window.** `get_channel_digest` returned a blank result for a channel
+  that was active: `conversations.history` yields only top-level
+  messages, and thread expansion looked for parents *in the fetched
+  page*, so a reply posted inside the window to a thread started before
+  it had no anchor — `conversations.replies` needs a root timestamp.
+  The reply was invisible at any `hours` setting that did not happen to
+  reach back to the parent. Discovery now extends 7 days before the
+  window while only in-window messages render; `latest_reply` decides
+  which threads moved, so no extra API call is spent on stale ones, and
+  the call count and per-channel cap are unchanged.
+
+- **An empty digest says so.** With nothing to render the digest
+  returned `""`, which reaches the caller as a blank tool result and is
+  indistinguishable from a failed call. It now returns `(no activity)`.
+  Token efficiency is entirely `WithOmitEmpty`'s job, which the sweep
+  passes — sweeps still drop quiet channels unchanged.
+
+- **Without `with_replies`, a windowed digest with no top-level
+  messages now reports how many threads received replies** instead of
+  returning nothing. The count comes off the page already fetched, so
+  it costs nothing. See ADR 106.
+
 ## [1.49.0] - 2026-09-17
 
 ### Fixed

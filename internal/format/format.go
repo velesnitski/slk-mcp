@@ -817,13 +817,17 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 	}
 
 	if len(messages) == 0 && len(cfg.replies) == 0 {
-		// A huddle-only channel: drop it in sweeps (omitEmpty), but answer
-		// a direct get_channel_digest with the huddle count rather than
-		// nothing.
-		if huddleCount > 0 && !cfg.omitEmpty {
+		// A sweep drops a quiet channel; a direct call must not. An empty
+		// string reaches the caller as a blank result, which is
+		// indistinguishable from a failed call — the reader cannot tell
+		// "nothing happened here" from "the tool broke".
+		if cfg.omitEmpty {
+			return ""
+		}
+		if huddleCount > 0 {
 			return fmt.Sprintf("## %s\n%s", channelLabel, huddleNote(huddleCount))
 		}
-		return ""
+		return fmt.Sprintf("## %s\n(no activity)", channelLabel)
 	}
 	if len(messages) == 0 {
 		// Replies with no top-level message: the thread parent is older
