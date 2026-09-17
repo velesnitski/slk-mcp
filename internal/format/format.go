@@ -441,8 +441,30 @@ func HasContent(msg goslack.Message) bool {
 }
 
 // HiddenPayloadLimit caps the text lifted out of a non-text payload so
-// one verbose bot attachment cannot dominate a digest line.
+// one verbose bot attachment cannot dominate a digest line. It bounds
+// digest rendering only — get_message asks for the payload untruncated,
+// because it is the drill-in a truncated preview points at.
 const HiddenPayloadLimit = 220
+
+// truncateRunes cuts body to at most limit runes, returning the cut
+// text and how many runes were dropped. limit <= 0 means no limit.
+//
+// Slicing a Go string by byte index splits a multi-byte rune, so any
+// non-ASCII body — Cyrillic, emoji — truncated by byte index ends in a
+// broken character the reader sees as a replacement glyph. Counting in
+// runes also makes the "(+N chars)" suffix honest: measured in bytes it
+// roughly doubles for Cyrillic, so a line reported "+4086 chars" was
+// really about half that.
+func truncateRunes(body string, limit int) (string, int) {
+	if limit <= 0 {
+		return body, 0
+	}
+	r := []rune(body)
+	if len(r) <= limit {
+		return body, 0
+	}
+	return string(r[:limit]), len(r) - limit
+}
 
 // blocksText extracts the human-readable strings from a Block Kit
 // block set, in document order. Only the blocks bots actually use for
@@ -516,8 +538,13 @@ func anyNonEmpty(ss []string) bool {
 // attachments, and a renderer that reports only `chars: 0` tells the
 // reader the opposite of the truth. Returns "" when there is genuinely
 // nothing but text.
+// It renders the payload in full: get_message promises "full text, no
+// truncation" and is documented as the drill-in for any "(+N chars)"
+// preview, so truncating here made the one tool that exists to reveal
+// a clipped body clip it again — and for a message whose text field is
+// empty, the payload is the entire message.
 func HiddenPayload(msg goslack.Message) string {
-	return renderHiddenPayloadMarker(msg)
+	return renderHiddenPayloadMarker(msg, 0)
 }
 
 // ForwardedOrigin returns the timestamp of the message this one shares,
@@ -555,7 +582,8 @@ func ForwardedOrigin(msg goslack.Message) string {
 // "[attached: 1]" and had to open Slack. So the text is lifted out
 // when there is text, and the count remains only as the honest answer
 // when there genuinely isn't one. See ADR 092.
-func renderHiddenPayloadMarker(msg goslack.Message) string {
+// limit caps the lifted text in runes; limit <= 0 renders it whole.
+func renderHiddenPayloadMarker(msg goslack.Message, limit int) string {
 	// A huddle (audio room) arrives as a block-kit message with empty
 	// text — without this it would render as a meaningless "[blocks: 1]"
 	// and a real call would be invisible in the digest. slack-go's typed
@@ -589,9 +617,8 @@ func renderHiddenPayloadMarker(msg goslack.Message) string {
 
 	if len(parts) > 0 {
 		body := strings.Join(parts, " · ")
-		if len(body) > HiddenPayloadLimit {
-			over := len(body) - HiddenPayloadLimit
-			body = body[:HiddenPayloadLimit] + fmt.Sprintf(" (+%d chars)", over)
+		if cut, over := truncateRunes(body, limit); over > 0 {
+			body = cut + fmt.Sprintf(" (+%d chars)", over)
 		}
 		return body
 	}
@@ -693,10 +720,8 @@ func messageLineImpl(msg goslack.Message, userName string, users map[string]stri
 	if limit > 0 {
 		effLimit = limit
 	}
-	if !fullText && len(body) > effLimit {
-		over := len(body) - effLimit
-		body = body[:effLimit]
-		b.WriteString(body)
+	if cut, over := truncateRunes(body, effLimit); !fullText && over > 0 {
+		b.WriteString(cut)
 		fmt.Fprintf(&b, " (+%d chars)", over)
 	} else {
 		b.WriteString(body)
@@ -710,7 +735,7 @@ func messageLineImpl(msg goslack.Message, userName string, users map[string]stri
 		// non-text payload (Block Kit, legacy Attachments) so the
 		// line isn't silently empty. URL-preview messages with text
 		// stay clean because this branch only fires when body == "".
-		if marker := renderHiddenPayloadMarker(msg); marker != "" {
+		if marker := renderHiddenPayloadMarker(msg, HiddenPayloadLimit); marker != "" {
 			b.WriteString(marker)
 		}
 	}

@@ -23,7 +23,7 @@ func TestHiddenPayload_LiftsAttachmentTitle(t *testing.T) {
 		TitleLink: "https://example.invalid/run/1",
 		Fallback:  "Nightly job finished with 3 warnings",
 	})
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	if !strings.Contains(got, "Nightly job finished with 3 warnings") {
 		t.Fatalf("title must be surfaced; got %q", got)
 	}
@@ -35,7 +35,7 @@ func TestHiddenPayload_LiftsAttachmentTitle(t *testing.T) {
 func TestHiddenPayload_FallsBackToFallbackText(t *testing.T) {
 	// The common shape: no title, no text, prose only in `fallback`.
 	m := msgWith(goslack.Attachment{Fallback: "Queue depth above threshold"})
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	if got != "Queue depth above threshold" {
 		t.Fatalf("fallback should be the whole marker; got %q", got)
 	}
@@ -48,7 +48,7 @@ func TestHiddenPayload_ReadsBlocksNestedInAttachment(t *testing.T) {
 			goslack.NewSectionBlock(goslack.NewTextBlockObject("mrkdwn", "detail from the section block", false, false), nil, nil),
 		}},
 	}
-	got := renderHiddenPayloadMarker(msgWith(att))
+	got := renderHiddenPayloadMarker(msgWith(att), HiddenPayloadLimit)
 	if !strings.Contains(got, "detail from the section block") {
 		t.Fatalf("nested block text must be read; got %q", got)
 	}
@@ -65,7 +65,7 @@ func TestHiddenPayload_RendersAttachmentFields(t *testing.T) {
 			{Title: "Duration", Value: "4m"},
 		},
 	})
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	for _, want := range []string{"Status degraded", "Duration 4m"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing field %q in %q", want, got)
@@ -77,14 +77,14 @@ func TestHiddenPayload_DeduplicatesRepeatedText(t *testing.T) {
 	// Slack sets `fallback` to a copy of the title on most bot posts;
 	// printing both would double every alert line.
 	m := msgWith(goslack.Attachment{Title: "Same line", Fallback: "Same line", Text: "Same line"})
-	if got := renderHiddenPayloadMarker(m); got != "Same line" {
+	if got := renderHiddenPayloadMarker(m, HiddenPayloadLimit); got != "Same line" {
 		t.Fatalf("identical fields must collapse to one; got %q", got)
 	}
 }
 
 func TestHiddenPayload_TruncatesVerboseAttachments(t *testing.T) {
 	m := msgWith(goslack.Attachment{Text: strings.Repeat("x", HiddenPayloadLimit+120)})
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	if len(got) > HiddenPayloadLimit+40 {
 		t.Fatalf("marker must be capped; got %d chars", len(got))
 	}
@@ -98,7 +98,7 @@ func TestHiddenPayload_KeepsCounterWhenThereIsNoText(t *testing.T) {
 	// the line renders empty and the reader never learns to follow the
 	// permalink.
 	m := msgWith(goslack.Attachment{}, goslack.Attachment{})
-	if got := renderHiddenPayloadMarker(m); got != "[attached: 2]" {
+	if got := renderHiddenPayloadMarker(m, HiddenPayloadLimit); got != "[attached: 2]" {
 		t.Fatalf("textless attachments keep the count; got %q", got)
 	}
 }
@@ -106,7 +106,7 @@ func TestHiddenPayload_KeepsCounterWhenThereIsNoText(t *testing.T) {
 func TestHiddenPayload_HuddleStillWins(t *testing.T) {
 	m := msgWith(goslack.Attachment{Fallback: "should not be shown"})
 	m.SubType = HuddleSubtype
-	if got := renderHiddenPayloadMarker(m); got != "[huddle]" {
+	if got := renderHiddenPayloadMarker(m, HiddenPayloadLimit); got != "[huddle]" {
 		t.Fatalf("huddle detection must precede text lifting; got %q", got)
 	}
 }

@@ -9,7 +9,7 @@ import (
 
 func TestRenderHiddenPayloadMarker_emptyMessageReturnsEmpty(t *testing.T) {
 	m := goslack.Message{}
-	if got := renderHiddenPayloadMarker(m); got != "" {
+	if got := renderHiddenPayloadMarker(m, HiddenPayloadLimit); got != "" {
 		t.Fatalf("expected empty marker for empty message; got %q", got)
 	}
 }
@@ -17,7 +17,7 @@ func TestRenderHiddenPayloadMarker_emptyMessageReturnsEmpty(t *testing.T) {
 func TestRenderHiddenPayloadMarker_attachmentsOnly(t *testing.T) {
 	m := goslack.Message{}
 	m.Attachments = []goslack.Attachment{{}, {}, {}}
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	if !strings.Contains(got, "[attached: 3]") {
 		t.Fatalf("expected attachment count marker; got %q", got)
 	}
@@ -26,7 +26,7 @@ func TestRenderHiddenPayloadMarker_attachmentsOnly(t *testing.T) {
 func TestRenderHiddenPayloadMarker_blocksOnly(t *testing.T) {
 	m := goslack.Message{}
 	m.Blocks.BlockSet = []goslack.Block{nil, nil}
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	if !strings.Contains(got, "[blocks: 2]") {
 		t.Fatalf("expected blocks count marker; got %q", got)
 	}
@@ -36,7 +36,7 @@ func TestRenderHiddenPayloadMarker_both(t *testing.T) {
 	m := goslack.Message{}
 	m.Attachments = []goslack.Attachment{{}}
 	m.Blocks.BlockSet = []goslack.Block{nil}
-	got := renderHiddenPayloadMarker(m)
+	got := renderHiddenPayloadMarker(m, HiddenPayloadLimit)
 	if !strings.Contains(got, "[attached: 1]") || !strings.Contains(got, "[blocks: 1]") {
 		t.Fatalf("expected both markers; got %q", got)
 	}
@@ -75,7 +75,7 @@ func TestRenderHiddenPayloadMarker_huddleBeatsBlocks(t *testing.T) {
 	m := goslack.Message{}
 	m.SubType = HuddleSubtype
 	m.Blocks.BlockSet = []goslack.Block{nil}
-	if got := renderHiddenPayloadMarker(m); got != "[huddle]" {
+	if got := renderHiddenPayloadMarker(m, HiddenPayloadLimit); got != "[huddle]" {
 		t.Fatalf("huddle should render as [huddle], not blocks; got %q", got)
 	}
 }

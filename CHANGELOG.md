@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.47.0] - 2026-09-17
+
+### Fixed
+
+- **The drill-in stopped clipping.** `get_message` promises full text
+  and is documented as the drill-in for any `(+N chars)` preview, but
+  for a message with an empty `text` field it rendered the lifted
+  payload through the digest's renderer and so capped it — the one
+  tool that exists to reveal a clipped body clipped it again, with
+  nothing deeper to point at. It now renders the payload whole; the
+  digest keeps its cap. This matters most for a forwarded message,
+  which carries its entire body in an attachment: when the original
+  sits in a conversation the reader cannot open, the payload on the
+  forward is the only reachable copy of that text.
+
+- **Truncation no longer splits a character.** Both truncation sites
+  cut with a byte-index slice, which splits the final multi-byte rune
+  and leaves a replacement glyph at the end of any non-ASCII line, and
+  counted the remainder in bytes while labelling it `chars`. A single
+  rune-safe helper now does both, so every rendered line is valid
+  UTF-8 and every `(+N chars)` counts characters. See ADR 103.
+
 ## [1.46.0] - 2026-09-17
 
 ### Fixed
