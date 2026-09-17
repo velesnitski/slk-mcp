@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.49.0] - 2026-09-17
+
+### Fixed
+
+- **PDF extraction picks the reading that produced words.** 1.48.0
+  tried the /ToUnicode mapping first and fell back only if it missed a
+  quality bar. A document whose body text uses simple fonts still ships
+  a small CMap — a bullet, a trademark sign — so that first reading
+  cleared the bar with a page of symbols while several hundred thousand
+  characters sat in the reading never tried. Both readings now run and
+  the one with more word-shaped runs wins, which is correct for both
+  document classes rather than for one of them.
+
+- **A wrong reading is no longer reported as success.** The quality
+  check asked whether output was mostly printable with a few dozen
+  letters; a wrong reading passes both, because it produces characters
+  and not words. It now counts runs of letters, and control bytes are
+  stripped from the output rather than counted against it.
+
+- **Embedded fonts and images no longer leak into the text.** They
+  inflate exactly like page content and contain `(` and `<` bytes by
+  chance, appending a tail of noise. Streams are now classified by
+  their own dictionary, parsed backwards from the `stream` keyword by
+  matching brackets — a fixed byte window reaches into the preceding
+  object and discarded whole pages whose content stream followed a font
+  descriptor. See ADR 105.
+
 ## [1.48.0] - 2026-09-17
 
 ### Added

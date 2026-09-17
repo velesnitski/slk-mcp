@@ -52,10 +52,20 @@ type pdfCMap struct {
 // reproduces characters, not layout, and a number lifted out of a table
 // is only as trustworthy as the column it came from.
 func extractPDFText(raw []byte) (string, bool) {
-	var decoded [][]byte
+	type decodedStream struct {
+		header []byte
+		data   []byte
+	}
+	var decoded []decodedStream
+	var cmapBodies [][]byte
 	for _, s := range pdfStreams(raw) {
-		if d, ok := pdfDecodeStream(s); ok {
-			decoded = append(decoded, d)
+		d, ok := pdfDecodeStream(s.Body)
+		if !ok {
+			continue
+		}
+		decoded = append(decoded, decodedStream{header: s.Header, data: d})
+		if pdfIsCMapStream(d) {
+			cmapBodies = append(cmapBodies, d)
 		}
 	}
 	if len(decoded) == 0 {
@@ -63,32 +73,147 @@ func extractPDFText(raw []byte) (string, bool) {
 	}
 
 	modes := make([]*pdfCMap, 0, 2)
-	if cm := pdfBuildToUnicode(decoded); cm != nil {
+	if cm := pdfBuildToUnicode(cmapBodies); cm != nil {
 		modes = append(modes, cm)
 	}
 	modes = append(modes, nil)
 
+	// Run both readings and keep whichever produced more real words,
+	// rather than taking the first that clears a threshold.
+	//
+	// Which one wins is a property of the document, not a fallback
+	// order. A word-processor PDF embeds subset fonts and is unreadable
+	// without its CMap. A PDF whose text uses simple fonts encodes
+	// characters directly and ships a CMap covering only a handful of
+	// symbols — taking that CMap yields a page of bullets and trademark
+	// signs while the actual document, several hundred thousand
+	// characters of it, sits in the reading that was never tried.
+	best, bestScore := "", -1
 	for _, cm := range modes {
 		var b strings.Builder
 		for _, d := range decoded {
-			if pdfIsCMapStream(d) {
+			// An embedded font program or image inflates just as well as
+			// page content, and a binary payload contains "(" and "<"
+			// bytes by chance — scanned as a content stream it appends a
+			// tail of noise to the real text.
+			if pdfIsCMapStream(d.data) || pdfIsBinaryResource(d.header) {
 				continue
 			}
-			b.WriteString(pdfContentText(d, cm))
+			b.WriteString(pdfContentText(d.data, cm))
 		}
-		if text := pdfTidy(b.String()); pdfTextLooksUsable(text) {
-			return text, true
+		text := pdfTidy(b.String())
+		if score := pdfWordScore(text); score > bestScore {
+			best, bestScore = text, score
 		}
 	}
-	return "", false
+	if !pdfTextLooksUsable(best) {
+		return "", false
+	}
+	return best, true
+}
+
+// pdfMinWordRuns is the least number of word-shaped runs a reading must
+// contain to count as text. A wrong reading still yields characters —
+// punctuation, symbols, stray letters — but very few runs of letters.
+const pdfMinWordRuns = 10
+
+// pdfWordScore counts runs of three or more consecutive letters. It is
+// the measure that separates a correct reading from a wrong one: both
+// produce output, only one produces words.
+func pdfWordScore(text string) int {
+	runs, run := 0, 0
+	for _, r := range text {
+		if unicode.IsLetter(r) {
+			run++
+			if run == 3 {
+				runs++
+			}
+			continue
+		}
+		run = 0
+	}
+	return runs
+}
+
+// pdfStream is a stream body together with the bytes that preceded it,
+// which hold the stream's dictionary. The dictionary is the only
+// reliable way to tell page content from an embedded font or image: the
+// payloads are all just deflated bytes.
+type pdfStream struct {
+	Header []byte
+	Body   []byte
+}
+
+// pdfStreamDict returns the stream's own dictionary: the `<< … >>` that
+// ends immediately before the `stream` keyword at streamAt.
+//
+// It has to be the actual dictionary, delimited by matching brackets,
+// not a fixed window of preceding bytes. A window reaches back into
+// whatever object happens to sit before this one — a font descriptor
+// carrying /FontFile2, say — and that misreads a page's content stream
+// as an embedded font, discarding the entire page. Returns nil when no
+// dictionary is found, which callers treat as "not a binary resource",
+// so a malformed file loses no text.
+func pdfStreamDict(data []byte, streamAt int) []byte {
+	j := streamAt
+	for j > 0 && isPDFWhitespace(data[j-1]) {
+		j--
+	}
+	if j < 2 || data[j-1] != '>' || data[j-2] != '>' {
+		return nil
+	}
+	end := j
+	depth := 0
+	for k := end - 1; k >= 1; {
+		switch {
+		case data[k] == '>' && data[k-1] == '>':
+			depth++
+			k -= 2
+		case data[k] == '<' && data[k-1] == '<':
+			depth--
+			if depth == 0 {
+				return data[k-1 : end]
+			}
+			k -= 2
+		default:
+			k--
+		}
+	}
+	return nil
+}
+
+func isPDFWhitespace(c byte) bool {
+	switch c {
+	case ' ', '\t', '\r', '\n', '\f', 0:
+		return true
+	}
+	return false
+}
+
+// pdfBinaryResourceMarkers appear in the dictionary of a stream that is
+// not page content: /Length1 accompanies an embedded font program, and
+// the image filters and subtypes speak for themselves.
+var pdfBinaryResourceMarkers = []string{
+	"/Length1", "/FontFile", "/Subtype/Image", "/Subtype /Image",
+	"/Type1C", "/DCTDecode", "/JPXDecode", "/CCITTFaxDecode", "/JBIG2Decode",
+}
+
+func pdfIsBinaryResource(header []byte) bool {
+	h := string(header)
+	for _, marker := range pdfBinaryResourceMarkers {
+		if strings.Contains(h, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // pdfStreams returns the bytes between each `stream` / `endstream` pair.
 // Matches preceded by "end" are skipped so the closing keyword cannot be
 // mistaken for an opening one, which would desynchronise every stream
 // after it.
-func pdfStreams(raw []byte) [][]byte {
-	var out [][]byte
+func pdfStreams(raw []byte) []pdfStream {
+	var out []pdfStream
 	rest := raw
 	for len(out) < pdfMaxStreams {
 		i := bytes.Index(rest, []byte("stream"))
@@ -99,12 +224,13 @@ func pdfStreams(raw []byte) [][]byte {
 			rest = rest[i+len("stream"):]
 			continue
 		}
+		header := pdfStreamDict(rest, i)
 		body := bytes.TrimLeft(rest[i+len("stream"):], "\r\n")
 		j := bytes.Index(body, []byte("endstream"))
 		if j < 0 {
 			break
 		}
-		out = append(out, body[:j])
+		out = append(out, pdfStream{Header: header, Body: body[:j]})
 		rest = body[j+len("endstream"):]
 	}
 	return out
@@ -476,6 +602,18 @@ func pdfUTF16BEString(h string) string { return string(pdfUTF16BERunes(h)) }
 // become one, trailing space goes, and a run of blank lines becomes a
 // single blank line.
 func pdfTidy(s string) string {
+	// Strip control bytes first. A content stream read without a CMap
+	// carries plenty of them, and they are never part of the document:
+	// keeping them would force the quality check to judge text by how
+	// much binary noise came along with it, rather than by whether it
+	// reads as words.
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, s)
+
 	var out []string
 	blank := 0
 	for _, line := range strings.Split(s, "\n") {
@@ -498,18 +636,11 @@ func pdfTidy(s string) string {
 // layer. Reading glyph indices as characters yields plenty of bytes and
 // almost no letters; handing back the file is the honest answer there.
 func pdfTextLooksUsable(text string) bool {
-	var letters, printable, total int
+	letters := 0
 	for _, r := range text {
-		total++
 		if unicode.IsLetter(r) {
 			letters++
 		}
-		if r == '\n' || r == '\t' || unicode.IsPrint(r) {
-			printable++
-		}
 	}
-	if total == 0 || letters < pdfMinLetters {
-		return false
-	}
-	return float64(printable)/float64(total) >= 0.9
+	return letters >= pdfMinLetters && pdfWordScore(text) >= pdfMinWordRuns
 }

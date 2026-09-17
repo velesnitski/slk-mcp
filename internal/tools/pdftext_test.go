@@ -82,8 +82,8 @@ func TestExtractPDFText_cidFontUsesToUnicode(t *testing.T) {
 
 	var content strings.Builder
 	content.WriteString("BT\n<")
-	for rep := 0; rep < 3; rep++ {
-		for i := 0; i < 20; i++ { // 0x24+i maps to 'A'+i
+	for word := 0; word < 15; word++ {
+		for i := 0; i < 5; i++ { // 0x24+i maps to 'A'+i
 			fmt.Fprintf(&content, "%04X", 0x24+i)
 		}
 		fmt.Fprintf(&content, "%04X", 0x0003) // space
@@ -94,7 +94,7 @@ func TestExtractPDFText_cidFontUsesToUnicode(t *testing.T) {
 	if !ok {
 		t.Fatal("a CID font with a ToUnicode table must extract")
 	}
-	if !strings.Contains(text, "ABCDEFGHIJKLMNOPQRST") {
+	if !strings.Contains(text, "ABCDE ABCDE") {
 		t.Errorf("glyph indices were not mapped through the CMap: %q", text)
 	}
 	// The CMap stream itself is not page content and must not be echoed.
@@ -190,8 +190,50 @@ func TestPDFStreams_skipsTheClosingKeyword(t *testing.T) {
 	if len(streams) != 1 {
 		t.Fatalf("want exactly 1 stream, got %d", len(streams))
 	}
-	if !bytes.Contains(streams[0], []byte("quick brown fox")) {
-		t.Errorf("wrong stream body: %q", streams[0])
+	if !bytes.Contains(streams[0].Body, []byte("quick brown fox")) {
+		t.Errorf("wrong stream body: %q", streams[0].Body)
+	}
+}
+
+// An embedded font program inflates exactly like page content and
+// contains "(" and "<" bytes by chance, so scanning it as a content
+// stream appends a tail of noise to the real text — mapped through the
+// CMap into something that almost looks like words. Only the stream
+// dictionary distinguishes them.
+func TestExtractPDFText_skipsEmbeddedFontStreams(t *testing.T) {
+	var out bytes.Buffer
+	out.WriteString("%PDF-1.4\n1 0 obj\n<< /Length 100 >>\nstream\n")
+	out.WriteString(sampleContent)
+	out.WriteString("\nendstream\nendobj\n")
+	out.WriteString("2 0 obj\n<< /Length1 4096 >>\nstream\n")
+	out.WriteString("(NOISEFROMFONTPROGRAM) Tj (MOREGLYPHNAMES) Tj\n")
+	out.WriteString("\nendstream\nendobj\n%%EOF\n")
+
+	text, ok := extractPDFText(out.Bytes())
+	if !ok {
+		t.Fatal("page content must still extract")
+	}
+	if strings.Contains(text, "NOISEFROMFONTPROGRAM") {
+		t.Errorf("font program leaked into the text: %q", text)
+	}
+	if !strings.Contains(text, "quick brown fox") {
+		t.Errorf("real content missing: %q", text)
+	}
+}
+
+func TestPDFIsBinaryResource(t *testing.T) {
+	for _, dict := range []string{
+		"<< /Length1 4096 /Filter /FlateDecode >>",
+		"<< /Subtype /Image /Width 100 >>",
+		"<< /Filter /DCTDecode >>",
+		"<< /FontFile2 9 0 R >>",
+	} {
+		if !pdfIsBinaryResource([]byte(dict)) {
+			t.Errorf("%q must be recognised as a binary resource", dict)
+		}
+	}
+	if pdfIsBinaryResource([]byte("<< /Length 2048 /Filter /FlateDecode >>")) {
+		t.Error("a plain content-stream dict must not be skipped")
 	}
 }
 
