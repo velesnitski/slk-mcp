@@ -232,18 +232,46 @@ func renderDocumentList(candidates []docCandidate, wsLabel string) string {
 }
 
 // renderDocuments turns downloaded files into the inline text body
-// shared by both resolution paths. Text files are read, rendered and
-// then deleted — nothing needs to outlive the call. A PDF is left on
-// disk and reported by path instead: parsing PDF in Go would mean a
-// dependency and a lossy text extraction, when the caller already has a
-// reader that renders PDFs properly.
+// shared by both resolution paths. Everything that yields text is read,
+// rendered and then deleted — nothing needs to outlive the call.
+//
+// A PDF is flattened by extractPDFText first. Leaving it unflattened
+// cost more than the missing text: a PDF was the only document type
+// that outlived its call, so every contract and report ever opened
+// accumulated in the temp dir, and it was the only type that never
+// reached export.Redact below — a PDF carrying key material handed back
+// a path to a file that still contained it. A PDF with no extractable
+// text layer still falls back to the saved path, because for those the
+// file genuinely is the only way to read the content.
 func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d document(s)%s:\n", len(saved), wsLabel)
 	for _, f := range saved {
 		if isPDFMimetype(f.Mimetype) {
-			fmt.Fprintf(&b, "\n--- %s (%s, %d bytes) ---\nsaved to: %s\nBinary document, not flattened to text. Open this path with a PDF-capable reader.\n",
-				displayName(f.Path), f.Mimetype, f.Size, f.Path)
+			raw, rerr := os.ReadFile(f.Path)
+			if rerr != nil {
+				fmt.Fprintf(&b, "\n--- %s: read failed: %v\n", f.Path, rerr)
+				continue
+			}
+			pdfText, extracted := extractPDFText(raw)
+			if !extracted {
+				fmt.Fprintf(&b, "\n--- %s (%s, %d bytes) ---\nsaved to: %s\nNo extractable text layer — a scan, or fonts this extractor cannot map. Open this path with a PDF-capable reader.\n",
+					displayName(f.Path), f.Mimetype, f.Size, f.Path)
+				continue
+			}
+			os.Remove(f.Path)
+			pdfText, secrets := export.Redact(pdfText)
+			pdfText, truncated := truncateText(pdfText, maxChars)
+			fmt.Fprintf(&b, "\n--- %s (%s, %d bytes)", displayName(f.Path), f.Mimetype, f.Size)
+			if secrets > 0 {
+				fmt.Fprintf(&b, " — %d secret(s) redacted", secrets)
+			}
+			if truncated {
+				fmt.Fprintf(&b, " — TRUNCATED to %d chars", maxChars)
+			}
+			b.WriteString(" — text extracted, check exact figures against the document ---\n")
+			b.WriteString(pdfText)
+			b.WriteString("\n")
 			continue
 		}
 		raw, rerr := os.ReadFile(f.Path)

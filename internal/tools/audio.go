@@ -258,7 +258,11 @@ func downloadFiles(ctx context.Context, msgs MessageClient, files []goslack.File
 		if perr != nil {
 			return nil, skipped, perr
 		}
-		out, cerr := os.Create(path)
+		// 0600, not os.Create's 0666&umask: these are other people's
+		// attachments — contracts, reports, recordings — and the
+		// containing temp dir is the only thing that was keeping them
+		// to this user. export.go already writes at 0600.
+		out, cerr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if cerr != nil {
 			return nil, skipped, fmt.Errorf("create %s: %w", path, cerr)
 		}

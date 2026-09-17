@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.48.0] - 2026-09-17
+
+### Added
+
+- **`read_document` reads PDFs.** It was the one accepted type that was
+  never flattened: the file was downloaded, left on disk and reported
+  by path. PDFs are now extracted inline through the document's own
+  `/ToUnicode` table, which is what makes a subset-embedded font
+  readable — those put glyph indices in the content stream rather than
+  characters, so reading the bytes directly yields plausible English
+  and mangled everything else. Line breaks follow the text baseline,
+  since a generator may position every glyph individually or wrap each
+  word in its own text object. No new dependency. See ADR 104.
+
+### Fixed
+
+- **PDFs stopped accumulating, and stopped bypassing redaction.** Being
+  the only type left on disk, a PDF was also the only one that never
+  reached `export.Redact` — one carrying key material was handed back
+  as a path to a file that still contained it. Extracted text now goes
+  through redaction and truncation like every other document, and the
+  file is deleted once read. A PDF with no text layer still falls back
+  to the saved path, because then the file is the only way to read it.
+
+- **Downloaded attachments are created 0600**, matching the mode this
+  codebase already uses for written exports, rather than `os.Create`'s
+  0666-and-umask.
+
 ## [1.47.0] - 2026-09-17
 
 ### Fixed
