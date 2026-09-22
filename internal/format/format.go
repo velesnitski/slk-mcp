@@ -198,6 +198,15 @@ type LogPattern struct {
 	Signature string
 }
 
+// Body limits for the one-line renderers, in RUNES rather than bytes.
+// A byte cap splits a multi-byte character when the cut lands mid-rune,
+// and the reader sees U+FFFD instead of the text — which for non-Latin
+// channels is most messages that reach the cap.
+const (
+	decisionBodyLimit = 160
+	searchBodyLimit   = 200
+)
+
 // LogBand is one severity slice rendered by LogChannelDigest. Two
 // modes:
 //
@@ -248,7 +257,10 @@ func LogChannelDigest(channelLabel string, total int, bands []LogBand, users map
 	for _, band := range bands {
 		switch {
 		case len(band.Patterns) > 0:
-			nonEmpty := band.Patterns[:0]
+			// Filter into a fresh slice, not `band.Patterns[:0]`: that
+			// idiom shares the caller's backing array, so rendering —
+			// a read — would overwrite the bands it was handed.
+			nonEmpty := make([]LogPattern, 0, len(band.Patterns))
 			for _, p := range band.Patterns {
 				if HasContent(p.Sample) {
 					nonEmpty = append(nonEmpty, p)
@@ -956,8 +968,8 @@ func writeReplies(b *strings.Builder, replies []goslack.Message, users map[strin
 //   - #dev 2026-04-14 14:30 (alex) [approved] body preview
 func DecisionLine(msg goslack.Message, channel, user, reason string) string {
 	body := collapseWhitespace(msg.Text)
-	if len(body) > 160 {
-		body = body[:160] + "..."
+	if cut, dropped := truncateRunes(body, decisionBodyLimit); dropped > 0 {
+		body = cut + "..."
 	}
 	t := ParseTS(msg.Timestamp)
 	when := ""
@@ -1014,8 +1026,10 @@ func ThreadContextLine(marker string, m goslack.Message, displayName string) str
 
 func searchResultLine(m goslack.SearchMessage, fullText bool, names map[string]string) string {
 	body := collapseWhitespace(m.Text)
-	if !fullText && len(body) > 200 {
-		body = body[:200] + "..."
+	if !fullText {
+		if cut, dropped := truncateRunes(body, searchBodyLimit); dropped > 0 {
+			body = cut + "..."
+		}
 	}
 	t := ParseTS(m.Timestamp)
 	when := ""

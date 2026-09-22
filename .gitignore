@@ -32,3 +32,6 @@ slk-mcp
 
 # Local-only sensitive-pattern deny-list for scripts/sweep.sh
 .sweep-patterns.local
+
+# Agent worktrees (transient, created by tooling)
+.claude/
