@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 )
@@ -44,15 +45,15 @@ func TestParseLevel_UnknownFallsBackToInfo(t *testing.T) {
 
 func TestNew_HonoursLevel(t *testing.T) {
 	debug := New("debug")
-	if !debug.Enabled(t.Context(), slog.LevelDebug) {
+	if !debug.Enabled(context.Background(), slog.LevelDebug) {
 		t.Error("debug logger should have debug enabled")
 	}
 
 	warn := New("warn")
-	if warn.Enabled(t.Context(), slog.LevelInfo) {
+	if warn.Enabled(context.Background(), slog.LevelInfo) {
 		t.Error("warn logger should not have info enabled")
 	}
-	if !warn.Enabled(t.Context(), slog.LevelError) {
+	if !warn.Enabled(context.Background(), slog.LevelError) {
 		t.Error("warn logger should have error enabled")
 	}
 }
@@ -67,10 +68,10 @@ func TestSetup_InstallsDefaultAndReturnsSameLevel(t *testing.T) {
 	if l == nil {
 		t.Fatal("Setup returned nil")
 	}
-	if slog.Default().Enabled(t.Context(), slog.LevelWarn) {
+	if slog.Default().Enabled(context.Background(), slog.LevelWarn) {
 		t.Error("default logger should be at error level after Setup(\"error\")")
 	}
-	if !slog.Default().Enabled(t.Context(), slog.LevelError) {
+	if !slog.Default().Enabled(context.Background(), slog.LevelError) {
 		t.Error("default logger should still log errors")
 	}
 }
