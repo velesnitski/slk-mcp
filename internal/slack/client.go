@@ -45,14 +45,22 @@ type Client struct {
 //
 // The caller must have run cfg.Validate() first.
 func New(cfg *config.Config, log *slog.Logger) *Client {
-	primary := goslack.New(cfg.PrimaryToken())
+	// apiOpts is empty in production — cfg.APIURL has no environment
+	// binding, so only an in-process caller (a test) can redirect the
+	// Web API. See the field's doc comment.
+	var apiOpts []goslack.Option
+	if cfg.APIURL != "" {
+		apiOpts = append(apiOpts, goslack.OptionAPIURL(cfg.APIURL))
+	}
+
+	primary := goslack.New(cfg.PrimaryToken(), apiOpts...)
 
 	// Reuse the primary client when the user token IS the primary token,
 	// so we don't open two HTTP connection pools for the same credential.
 	var user *goslack.Client
 	switch {
 	case cfg.HasBotToken() && cfg.HasUserToken():
-		user = goslack.New(cfg.UserToken)
+		user = goslack.New(cfg.UserToken, apiOpts...)
 	case cfg.HasUserToken():
 		user = primary
 	}
@@ -74,6 +82,14 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.DND = newDNDService(user, log)
 	c.Scheduled = newScheduledService(user, log)
 	c.Canvas = newCanvasService(primary, user, cfg.UserToken, log)
+
+	// Lists and Canvas call Slack over raw HTTP rather than through
+	// slack-go, so OptionAPIURL does not reach them; point their own
+	// pre-existing overrides at the same base.
+	if cfg.APIURL != "" {
+		c.Lists.BaseURL = cfg.APIURL
+		c.Canvas.BaseURL = cfg.APIURL
+	}
 
 	return c
 }

@@ -50,6 +50,19 @@ type Config struct {
 	WhisperBin   string
 	WhisperModel string
 
+	// APIURL redirects the Slack Web API to another base URL (must end
+	// in "/"). It exists so handler tests can drive the whole stack —
+	// tool handler down through the service layer and slack-go — against
+	// an httptest server instead of a hand-built fake.
+	//
+	// Deliberately NOT bound to any environment variable and never set by
+	// Load: a redirect here sends bearer tokens somewhere else, so the
+	// only way to set it is to construct a Config in-process. A deployed
+	// server therefore cannot be pointed at another host by its
+	// environment. Mirrors the existing BaseURL overrides on the Lists
+	// and Canvas services, which predate this field.
+	APIURL string
+
 	// Workspaces is the ordered list of Slack workspaces this server
 	// serves. Workspaces[0] is the primary — its tokens mirror the
 	// legacy BotToken/UserToken/Channels fields so every existing
