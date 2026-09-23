@@ -304,10 +304,21 @@ func downloadFiles(ctx context.Context, msgs MessageClient, files []goslack.File
 // failure the returned *mcp.CallToolResult is non-nil and ready to
 // hand back.
 func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, permalink, from, destDir, prefix string, accept func(goslack.File) bool) (saved []savedFile, skipped []string, wsName string, errRes *mcp.CallToolResult) {
-	scoped, wsName, errRes := h.scopedWorkspace(workspace)
+	// Route by the permalink's host, as get_message does: a link copied
+	// from the second workspace names a channel the primary has never
+	// seen, and scoping to the primary regardless turned every such link
+	// into "channel_not_found" — for all five file tools at once. An
+	// explicit `workspace` still wins. See ADR 110.
+	scoped, wsName, note, errRes := h.routeWorkspace(ctx, workspace, permalink)
 	if errRes != nil {
 		return nil, nil, "", errRes
 	}
+	saved, skipped, wsName, errRes = h.fetchFilesIn(ctx, scoped, wsName, channel, timestamp, permalink, from, destDir, prefix, accept)
+	return saved, skipped, wsName, withRouteNote(errRes, note)
+}
+
+// fetchFilesIn is fetchFiles against an already-routed workspace.
+func (h *Hub) fetchFilesIn(ctx context.Context, scoped *Hub, wsName, channel, timestamp, permalink, from, destDir, prefix string, accept func(goslack.File) bool) (saved []savedFile, skipped []string, _ string, errRes *mcp.CallToolResult) {
 
 	if destDir == "" {
 		destDir = os.TempDir()

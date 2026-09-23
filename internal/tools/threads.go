@@ -305,7 +305,10 @@ func (h *Hub) runDeleteMessage(ctx context.Context, workspace, channel, timestam
 		return mcp.NewToolResultError("provide a permalink, or channel + timestamp")
 	}
 
-	scoped, wsName, errRes := h.scopedWorkspace(workspace)
+	// A permalink names its own workspace by host; honour it, or a link
+	// from the second workspace is sent to the primary, which has no such
+	// channel. The explicit `workspace` argument still wins. ADR 110.
+	scoped, wsName, note, errRes := h.routeWorkspace(ctx, workspace, permalink)
 	if errRes != nil {
 		return errRes
 	}
@@ -314,13 +317,13 @@ func (h *Hub) runDeleteMessage(ctx context.Context, workspace, channel, timestam
 	if channelID == "" {
 		id, err := scoped.Channels().ResolveID(ctx, channel)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error())
+			return withRouteNote(mcp.NewToolResultError(err.Error()), note)
 		}
 		channelID = id
 	}
 
 	if err := scoped.Messages().Delete(ctx, channelID, timestamp); err != nil {
-		return mcp.NewToolResultError(deleteErrorHint(err))
+		return withRouteNote(mcp.NewToolResultError(deleteErrorHint(err)), note)
 	}
 
 	where := strings.TrimPrefix(channel, "#")

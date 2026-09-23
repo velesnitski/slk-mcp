@@ -120,6 +120,25 @@ func (h *Hub) routeWorkspace(ctx context.Context, wsArg, permalink string) (scop
 	return s, n, fmt.Sprintf("no configured workspace matches host %q — tried the primary", host), nil
 }
 
+// withRouteNote appends routeWorkspace's note to an error result, so a
+// failure says which workspace was actually tried — in particular when no
+// configured workspace owns the permalink's host and the call fell back to
+// the primary. Success results are left alone: they already carry the
+// workspace label, and the note there is noise.
+func withRouteNote(res *mcp.CallToolResult, note string) *mcp.CallToolResult {
+	if res == nil || !res.IsError || note == "" {
+		return res
+	}
+	for i, c := range res.Content {
+		if tc, ok := c.(mcp.TextContent); ok {
+			tc.Text += " (" + note + ")"
+			res.Content[i] = tc
+			return res
+		}
+	}
+	return res
+}
+
 // fetchMessageWithParent fetches the target message and, when it is a
 // thread reply, its parent for context. The permalink's thread_ts makes
 // the reply case explicit, so the reply is looked up inside its own

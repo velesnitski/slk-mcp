@@ -193,10 +193,11 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 	if !h.cfg.ReadOnly && !h.cfg.IsDisabled("mark_read") {
 		s.AddTool(
 			mcp.NewTool("mark_read",
-				mcp.WithDescription("Mark a channel as read up to a given message timestamp. Pass either (channel + timestamp) or a Slack permalink. Operates on the primary workspace."),
+				mcp.WithDescription("Mark a channel as read up to a given message timestamp. Pass either (channel + timestamp) or a Slack permalink. A permalink routes to the workspace it came from."),
 				mcp.WithString("channel", mcp.Description("Channel name (optional if permalink is provided)")),
 				mcp.WithString("timestamp", mcp.Description("Message ts to mark read through (optional if permalink is provided)")),
 				mcp.WithString("permalink", mcp.Description("Slack permalink to the message to mark read through — fills channel and timestamp in one go")),
+				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel := req.GetString("channel", "")
@@ -212,14 +213,22 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					return errRes, nil
 				}
 
-				channelID, err := h.Channels().ResolveID(ctx, channel)
+				// Route by the permalink's host (or the explicit
+				// workspace). This tool used to be primary-only, so a
+				// permalink from the second workspace resolved a channel
+				// the primary does not have. ADR 110.
+				scoped, wsName, note, errRes := h.routeWorkspace(ctx, req.GetString("workspace", ""), permalink)
+				if errRes != nil {
+					return errRes, nil
+				}
+				channelID, err := scoped.Channels().ResolveID(ctx, channel)
 				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
+					return withRouteNote(mcp.NewToolResultError(err.Error()), note), nil
 				}
-				if err := h.Unread().MarkRead(ctx, channelID, ts); err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
+				if err := scoped.Unread().MarkRead(ctx, channelID, ts); err != nil {
+					return withRouteNote(mcp.NewToolResultError(err.Error()), note), nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("marked #%s read up to %s", channel, ts)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("marked %s read up to %s%s", conversationLabel(channel), ts, h.wsLabel(wsName))), nil
 			},
 		)
 	}
