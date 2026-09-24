@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.51.0] - 2026-09-24
+
+### Fixed
+
+- **Busy conversations show their newest messages.** With `oldest` set
+  and `latest` unset, `conversations.history` returns the page adjacent
+  to `oldest` — the oldest messages of the range, not the newest. Any
+  window holding more than one page therefore lost its recent end
+  silently: `get_channel_digest` reported "(no activity)" for the last
+  hours of a busy DM. Windows are now fetched from their upper edge and
+  trimmed locally, in the channel digest, the multi-channel digest,
+  `find_decisions`, `export_conversations` and the `post_message`
+  duplicate guard (which could miss the operator's own post from a
+  minute earlier). Thread discovery for pre-window threads is a second
+  page fetched downward from the window edge. ADR 111.
+- **Replies to threads started before the window are shown** alongside
+  the window's messages; previously they rendered only when the window
+  had no top-level message.
+- **A permalink routes to the workspace it came from** in every tool
+  that accepts one: `view_image`, `read_document`, `transcribe_audio`,
+  `download_audio`, `analyze_audio_tone`, `delete_message` and
+  `mark_read`. They previously sent every link to the primary
+  workspace and failed with `channel_not_found`. A fallback to the
+  primary for an unknown host is now stated in the error. ADR 110.
+- **Truncation budgets count characters, not bytes** in search results
+  and decision lines; a byte cut split multi-byte characters and
+  rendered U+FFFD. `LogChannelDigest` no longer mutates its input.
+  ADR 108.
+
+### Added
+
+- `mark_read` accepts `workspace`, and reports its target without a
+  doubled `#`.
+- `config.APIURL`, a test-only seam for pointing the Web API at an
+  `httptest` server; it has no environment binding. ADR 107.
+
+### Tests
+
+- Coverage 56.1% → 93.5%. A history fake that pages like the live API
+  (`pgHistory`); earlier fakes ignored `oldest`, `latest` and `limit`,
+  which is why the paging defect passed every test. ADR 109, 111.
+
 ## [1.50.0] - 2026-09-17
 
 ### Fixed
