@@ -391,7 +391,7 @@ func TestPostMessage_SkipIfRecentSuppressesTheDuplicate(t *testing.T) {
 	tmChannelList(f, map[string]string{"alpha": "C1"})
 	tmAuthTest(f, "U1", tmHost+"/")
 	f.On("conversations.history", tmHistoryBody(
-		`{"type":"message","user":"U1","text":"status update","ts":"1700000500.000600"}`,
+		`{"type":"message","user":"U1","text":"status update","ts":"`+uaTS(-300, 600)+`"}`,
 	))
 	f.On("chat.postMessage", `{"ok":true,"channel":"C1","ts":"1700000600.000700"}`)
 	s := tmThreadServer(t, newFakeHub(t, f))
@@ -469,7 +469,10 @@ func TestRecentSelfDuplicate_FailsOpenOnLookupErrors(t *testing.T) {
 	})
 }
 
-func TestRecentSelfDuplicate_BoundsHistoryByTheWindow(t *testing.T) {
+// ADR 111: the guard wants the operator's MOST RECENT posts, so it reads
+// the page adjacent to now and trims to the window locally. A page
+// anchored at `oldest` holds the window's oldest messages instead.
+func TestRecentSelfDuplicate_FetchesTheNewestPage(t *testing.T) {
 	f := newFakeSlack(t)
 	tmAuthTest(f, "U1", tmHost+"/")
 	var oldest, limit string
@@ -480,8 +483,8 @@ func TestRecentSelfDuplicate_BoundsHistoryByTheWindow(t *testing.T) {
 
 	newFakeHub(t, f).recentSelfDuplicate(context.Background(), "C1", "x", 30)
 
-	if oldest == "" || oldest == "0" {
-		t.Fatalf("the window must become an oldest bound, got %q", oldest)
+	if oldest != "" {
+		t.Fatalf("the guard must not anchor its page at a lower bound, got oldest=%q", oldest)
 	}
 	if limit != "100" {
 		t.Fatalf("limit should be 100, got %q", limit)

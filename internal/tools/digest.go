@@ -212,11 +212,7 @@ func (h *Hub) morningRecapBody(ctx context.Context, channels string, hours, maxS
 			digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 			continue
 		}
-		msgs, err := h.Messages().History(ctx, slack.HistoryParams{
-			ChannelID: channelID,
-			OldestTS:  float64(oldest.Unix()),
-			Limit:     h.cfg.MaxMessagesPerChannel,
-		})
+		msgs, err := recentHistory(ctx, h.Messages(), channelID, oldest, time.Time{}, h.cfg.MaxMessagesPerChannel)
 		if err != nil {
 			digests = append(digests, fmt.Sprintf("## #%s\nerror: %v", ch, err))
 			continue
@@ -254,32 +250,30 @@ func (h *Hub) channelDigestRange(ctx context.Context, channel string, oldest, la
 	if err != nil {
 		return "", err
 	}
-	// Thread discovery reaches back past the window on purpose.
-	// conversations.history returns only top-level messages, so a reply
-	// posted inside the window to a thread started before it has no
-	// anchor on the fetched page — and the channel renders as nothing at
-	// all while it is plainly active. Slack returns one page newest
-	// first, so moving `oldest` back cannot push the window's own
-	// messages off it; it only adds older parents behind them.
-	p := slack.HistoryParams{
-		ChannelID: channelID,
-		OldestTS:  float64(oldest.Add(-threadDiscoveryLookback).Unix()),
-		Limit:     h.cfg.MaxMessagesPerChannel,
-	}
-	if !latest.IsZero() {
-		p.LatestTS = float64(latest.Unix())
-	}
-	fetched, err := h.Messages().History(ctx, p)
+	// The window is fetched from its upper edge: Slack pages from whichever
+	// bound it is given, so a lower bound returns the stale end of a busy
+	// window and drops today's messages entirely. See history.go, ADR 111.
+	limit := h.cfg.MaxMessagesPerChannel
+	msgs, err := recentHistory(ctx, h.Messages(), channelID, oldest, latest, limit)
 	if err != nil {
 		return "", err
 	}
 
-	// Only what actually falls in the window is rendered; the rest of the
-	// page exists to find threads.
-	msgs := make([]goslack.Message, 0, len(fetched))
-	for _, m := range fetched {
-		if tsWithin(m.Timestamp, oldest, latest) {
-			msgs = append(msgs, m)
+	// Thread discovery (ADR 106) still reaches back past the window — a
+	// reply inside it may belong to a thread started days earlier — but
+	// as a second page fetched downward from the window's lower edge,
+	// never by moving `oldest` back on the first. Only needed when replies
+	// were asked for or the window has no top-level message; otherwise
+	// the call is skipped. Best-effort: a failure here costs older thread
+	// replies, not the digest.
+	fetched := msgs
+	if withReplies || len(msgs) == 0 {
+		parents, perr := threadParentsBefore(ctx, h.Messages(), channelID, oldest, threadDiscoveryLookback, limit, msgs)
+		if perr != nil {
+			h.log.Warn("digest: thread discovery failed", "channel", channelID, "err", perr)
+		}
+		if len(parents) > 0 {
+			fetched = append(append([]goslack.Message{}, msgs...), parents...)
 		}
 	}
 

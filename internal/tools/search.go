@@ -10,7 +10,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/format"
-	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
 // registerSearchTools is the pilot for the table-driven registration
@@ -127,11 +126,7 @@ func (h *Hub) handleFindDecisions(ctx context.Context, req mcp.CallToolRequest) 
 			decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
 			continue
 		}
-		msgs, err := h.Messages().History(ctx, slack.HistoryParams{
-			ChannelID: channelID,
-			OldestTS:  float64(oldest.Unix()),
-			Limit:     h.cfg.MaxMessagesPerChannel,
-		})
+		msgs, err := recentHistory(ctx, h.Messages(), channelID, oldest, time.Time{}, h.cfg.MaxMessagesPerChannel)
 		if err != nil {
 			decisions = append(decisions, fmt.Sprintf("- #%s error: %v", ch, err))
 			continue

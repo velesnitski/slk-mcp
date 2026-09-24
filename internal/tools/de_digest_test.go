@@ -71,16 +71,11 @@ func TestChannelDigest_RendersOnlyTheWindow_Behaviour(t *testing.T) {
 		t.Fatalf("a message fetched only for thread discovery must not be rendered:\n%s", out)
 	}
 
-	// The fetch reaches a week further back than the window so replies to
-	// older threads still have a parent on the page (ADR 106).
-	got, err := strconv.ParseFloat(oldest, 64)
-	if err != nil {
-		t.Fatalf("history oldest %q: %v", oldest, err)
-	}
-	want := float64(time.Now().Add(-24*time.Hour - threadDiscoveryLookback).Unix())
-	if diff := got - want; diff < -60 || diff > 60 {
-		t.Fatalf("history oldest should be window start minus the %v lookback; got %v want ~%v",
-			threadDiscoveryLookback, got, want)
+	// ADR 111: the window page is anchored at its upper edge. A lower
+	// bound makes Slack return the page adjacent to it — the oldest end —
+	// and a busy conversation loses its newest messages entirely.
+	if oldest != "" {
+		t.Fatalf("the window fetch must not send a lower bound, got oldest=%q", oldest)
 	}
 }
 
@@ -360,9 +355,15 @@ func TestChannelDigest_AbsoluteRangeIsDayInclusive_Behaviour(t *testing.T) {
 	f := deNewFake(t)
 	f.on("conversations.list", deAlphaList())
 	deAnyUser(f)
+	// Record the FIRST history call: that is the window page. A second call
+	// (thread discovery, when the window is empty) is anchored at the
+	// window's lower edge and would overwrite the capture.
 	var oldest, latest string
+	var seen bool
 	f.onFunc("conversations.history", func(r *http.Request) string {
-		oldest, latest = r.Form.Get("oldest"), r.Form.Get("latest")
+		if !seen {
+			oldest, latest, seen = r.Form.Get("oldest"), r.Form.Get("latest"), true
+		}
 		return deHistory()
 	})
 	hub := deHub(t, f)
@@ -372,10 +373,11 @@ func TestChannelDigest_AbsoluteRangeIsDayInclusive_Behaviour(t *testing.T) {
 	})
 
 	day, _ := time.Parse("2006-01-02", "2026-04-30")
-	wantOldest := float64(day.Add(-threadDiscoveryLookback).Unix())
 	wantLatest := float64(day.Add(24 * time.Hour).Unix())
-	if got, _ := strconv.ParseFloat(oldest, 64); got != wantOldest {
-		t.Fatalf("oldest = %v, want %v (after minus the thread lookback)", got, wantOldest)
+	// The window is trimmed to `after` locally; the page itself is
+	// anchored at the upper edge only (ADR 111).
+	if oldest != "" {
+		t.Fatalf("the window page must not send a lower bound, got oldest=%q", oldest)
 	}
 	// Naming one day as both bounds must mean that whole day.
 	if got, _ := strconv.ParseFloat(latest, 64); got != wantLatest {

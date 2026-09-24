@@ -203,10 +203,10 @@ func TestFindDecisions_ReportsKeywordAndReactionMatches(t *testing.T) {
 	tmChannelList(f, map[string]string{"alpha": "C1"})
 	tmUsers(f, map[string]string{"U1": "alex", "U2": "sam"})
 	f.On("conversations.history", tmHistoryBody(
-		`{"type":"message","user":"U1","text":"we decided to ship","ts":"`+tmRootTS+`"}`,
-		`{"type":"message","user":"U2","text":"proposal","ts":"`+tmReplyTS+`",
+		`{"type":"message","user":"U1","text":"we decided to ship","ts":"`+uaTS(-3600, 100)+`"}`,
+		`{"type":"message","user":"U2","text":"proposal","ts":"`+uaTS(-3500, 200)+`",
 		  "reactions":[{"name":"white_check_mark","count":1,"users":["U1"]}]}`,
-		`{"type":"message","user":"U2","text":"unrelated chatter","ts":"1700000200.000300"}`,
+		`{"type":"message","user":"U2","text":"unrelated chatter","ts":"`+uaTS(-3400, 300)+`"}`,
 	))
 	h := tmDecisionHub(t, f)
 
@@ -225,7 +225,7 @@ func TestFindDecisions_NoMatchesSaysSoWithTheWindow(t *testing.T) {
 	f := newFakeSlack(t)
 	tmChannelList(f, map[string]string{"alpha": "C1"})
 	f.On("conversations.history", tmHistoryBody(
-		`{"type":"message","user":"U1","text":"just chatting","ts":"`+tmRootTS+`"}`,
+		`{"type":"message","user":"U1","text":"just chatting","ts":"`+uaTS(-3600, 100)+`"}`,
 	))
 	h := tmDecisionHub(t, f)
 
@@ -241,7 +241,7 @@ func TestFindDecisions_ChannelResolutionErrorIsInlinedNotFatal(t *testing.T) {
 	tmChannelList(f, map[string]string{"alpha": "C1"})
 	tmUsers(f, map[string]string{"U1": "alex"})
 	f.On("conversations.history", tmHistoryBody(
-		`{"type":"message","user":"U1","text":"we decided to ship","ts":"`+tmRootTS+`"}`,
+		`{"type":"message","user":"U1","text":"we decided to ship","ts":"`+uaTS(-3600, 100)+`"}`,
 	))
 	h := tmDecisionHub(t, f)
 
@@ -293,7 +293,7 @@ func TestFindDecisions_ConfiguredChannelsAreUsedWhenNoneArePassed(t *testing.T) 
 	tmChannelList(f, map[string]string{"alpha": "C1"})
 	tmUsers(f, map[string]string{"U1": "alex"})
 	f.On("conversations.history", tmHistoryBody(
-		`{"type":"message","user":"U1","text":"we decided to ship","ts":"`+tmRootTS+`"}`,
+		`{"type":"message","user":"U1","text":"we decided to ship","ts":"`+uaTS(-3600, 100)+`"}`,
 	))
 	h := newFakeHub(t, f, func(c *config.Config) {
 		c.Channels = []string{"alpha"}

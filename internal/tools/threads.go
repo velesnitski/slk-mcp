@@ -393,11 +393,10 @@ func (h *Hub) recentSelfDuplicate(ctx context.Context, channelID, text string, w
 		return false
 	}
 	oldest := time.Now().Add(-time.Duration(withinMin) * time.Minute)
-	msgs, err := h.Messages().History(ctx, slack.HistoryParams{
-		ChannelID: channelID,
-		OldestTS:  float64(oldest.Unix()),
-		Limit:     100,
-	})
+	// Newest-first from now: in a busy channel a page anchored at `oldest`
+	// holds the oldest 100 messages of the window and can miss the
+	// operator's post from a minute ago — the exact duplicate this guards.
+	msgs, err := recentHistory(ctx, h.Messages(), channelID, oldest, time.Time{}, 100)
 	if err != nil {
 		return false
 	}

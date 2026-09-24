@@ -888,11 +888,50 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 	if hidden > 0 {
 		fmt.Fprintf(&b, "... +%d more messages\n", hidden)
 	}
+	// Replies whose parent is not in this window. The empty-window branch
+	// above already renders them; here the window also has top-level
+	// messages, and the replies used to be dropped — fetched, counted,
+	// never shown. A reply to an older thread is often the message that
+	// matters (an answer to a question filed yesterday), so it gets its
+	// own block after the window. ADR 111.
+	orphans := orphanReplies(messages, cfg.replies)
+	if n := countReplies(orphans); n > 0 {
+		noun := "replies"
+		if n == 1 {
+			noun = "reply"
+		}
+		fmt.Fprintf(&b, "+ %d %s in earlier threads:\n", n, noun)
+		writeThreadsByParent(&b, orphans, cfg, users)
+	}
 	if huddleCount > 0 {
 		b.WriteString(huddleNote(huddleCount))
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// orphanReplies returns the reply chains whose parent is not among
+// messages — threads started before the window that moved inside it.
+// Pure.
+func orphanReplies(messages []goslack.Message, replies map[string][]goslack.Message) map[string][]goslack.Message {
+	if len(replies) == 0 {
+		return nil
+	}
+	inWindow := make(map[string]struct{}, len(messages))
+	for _, m := range messages {
+		inWindow[m.Timestamp] = struct{}{}
+	}
+	var out map[string][]goslack.Message
+	for ts, rs := range replies {
+		if _, ok := inWindow[ts]; ok || len(rs) == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string][]goslack.Message{}
+		}
+		out[ts] = rs
+	}
+	return out
 }
 
 // countReplies totals the replies across every thread. Pure.
@@ -910,31 +949,37 @@ func countReplies(replies map[string][]goslack.Message) int {
 // time — the one handle the reader has for finding the thread, since
 // the parent message itself is not in this result. Pure.
 func renderOrphanReplies(channelLabel string, cfg digestOpts, users map[string]string, total int) string {
-	parents := make([]string, 0, len(cfg.replies))
-	for ts := range cfg.replies {
-		parents = append(parents, ts)
-	}
-	sort.Slice(parents, func(i, j int) bool { return parents[i] < parents[j] })
-
 	var b strings.Builder
 	noun := "replies"
 	if total == 1 {
 		noun = "reply"
 	}
 	fmt.Fprintf(&b, "## %s (%d %s in earlier threads)\n", channelLabel, total, noun)
+	writeThreadsByParent(&b, cfg.replies, cfg, users)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeThreadsByParent writes reply chains in parent-timestamp order, each
+// labelled with its parent's time — the one handle the reader has for
+// finding a thread whose parent is not in the output.
+func writeThreadsByParent(b *strings.Builder, threads map[string][]goslack.Message, cfg digestOpts, users map[string]string) {
+	parents := make([]string, 0, len(threads))
+	for ts := range threads {
+		parents = append(parents, ts)
+	}
+	sort.Slice(parents, func(i, j int) bool { return parents[i] < parents[j] })
 	for _, ts := range parents {
-		replies := cfg.replies[ts]
+		replies := threads[ts]
 		if len(replies) == 0 {
 			continue
 		}
 		if when := ParseTS(ts); !when.IsZero() {
-			fmt.Fprintf(&b, "thread from %s:\n", when.Format("15:04"))
+			fmt.Fprintf(b, "thread from %s:\n", when.Format("15:04"))
 		} else {
 			b.WriteString("thread:\n")
 		}
-		writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)
+		writeReplies(b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)
 	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // writeReplies renders replies indented under the thread parent, up

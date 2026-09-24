@@ -482,13 +482,11 @@ func TestExport_NonPositiveArgumentsFallBackToDefaults_Behaviour(t *testing.T) {
 	if limit != fmt.Sprint(exportMaxPerChan) {
 		t.Fatalf("max_per_channel=0 should fall back to %d, got %q", exportMaxPerChan, limit)
 	}
-	var got float64
-	if _, err := fmt.Sscanf(oldest, "%f", &got); err != nil {
-		t.Fatalf("oldest %q: %v", oldest, err)
-	}
-	want := float64(time.Now().Unix() - int64(exportDefaultHours)*3600)
-	if diff := got - want; diff < -60 || diff > 60 {
-		t.Fatalf("hours=0 should fall back to the one-week default; got %v want ~%v", got, want)
+	// The window (hours=0 -> the one-week default) is applied locally now,
+	// not as a lower bound on the page: that bound made Slack return the
+	// window's oldest messages and drop the newest (ADR 111).
+	if oldest != "" {
+		t.Fatalf("export must not anchor its page at a lower bound, got oldest=%q", oldest)
 	}
 }
 

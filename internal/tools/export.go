@@ -121,9 +121,10 @@ func (h *Hub) exportWorkspace(ctx context.Context, p exportParams, wsName, path 
 		if !p.includeDMs && (slack.IsDirectMessage(ch) || ch.IsMpIM) {
 			continue
 		}
-		msgs, herr := h.Messages().History(ctx, slack.HistoryParams{
-			ChannelID: ch.ID, OldestTS: oldest, Limit: p.maxPer,
-		})
+		// Newest-first: a capped export keeps the recent end of the
+		// window; earlier runs already hold the older part (corpus keys
+		// dedupe). ADR 111.
+		msgs, herr := recentHistory(ctx, h.Messages(), ch.ID, time.Unix(int64(oldest), 0), time.Time{}, p.maxPer)
 		if herr != nil {
 			h.log.Warn("export: history failed", "channel", ch.ID, "err", herr)
 			continue
