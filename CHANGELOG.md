@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.52.0] - 2026-09-25
+
+### Added
+
+- **Priority channels.** `SLACK_PRIORITY_CHANNELS` (and
+  `priority_channels` per `SLACK_WORKSPACES` entry) name channels that
+  `get_unread_summary` always shows for its window, even when already
+  read — first in the output, marked `★`, with `· read` when nothing in
+  them is new. Window: `priority_hours` (default 24) or everything after
+  the `after` cursor. A listed channel that cannot be found is named in
+  the output. ADR 112.
+
+### Fixed
+
+- **`dm_window_hours` shows the newest messages of a busy DM.** It
+  fetched history anchored at `oldest`, which returns the oldest page of
+  the window (the ADR 111 defect in another path).
+
 ## [1.51.0] - 2026-09-24
 
 ### Fixed
