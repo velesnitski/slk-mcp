@@ -331,6 +331,7 @@ func TestRecentDMActivity_HistoryFailureDropsOnlyThatConversation(t *testing.T) 
 		}
 		return svJSON{"ok": true, "messages": []svJSON{
 			svMsg("1700099500.000000", "U2", "hi", nil),
+			svMsg("1700090000.000000", "U2", "older than the window", nil),
 		}}
 	})
 
@@ -341,8 +342,14 @@ func TestRecentDMActivity_HistoryFailureDropsOnlyThatConversation(t *testing.T) 
 	if len(got) != 1 || got[0].Channel.ID != "D1" {
 		t.Fatalf("got = %+v, want only D1", got)
 	}
-	if oldest := f.form(t, "conversations.history", 0).Get("oldest"); oldest != "1700092800.000000" {
-		t.Fatalf("oldest = %q, want now-2h", oldest)
+	// ADR 111: the page is anchored at now, not at `oldest` — a page
+	// anchored at the lower bound holds the window's oldest messages.
+	if oldest := f.form(t, "conversations.history", 0).Get("oldest"); oldest != "" {
+		t.Fatalf("oldest = %q, want no lower bound on the request", oldest)
+	}
+	// The window is applied locally instead.
+	if n := len(got[0].Messages); n != 1 || got[0].Messages[0].Text != "hi" {
+		t.Fatalf("messages = %+v, want only the in-window one", got[0].Messages)
 	}
 }
 

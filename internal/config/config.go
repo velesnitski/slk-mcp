@@ -25,10 +25,19 @@ type Config struct {
 	BotToken  string
 	UserToken string
 
-	Channels      []string
-	ReadOnly      bool
-	DisabledTools map[string]struct{}
-	DigestHours   int
+	Channels []string
+	ReadOnly bool
+
+	// PriorityChannels are conversations get_unread_summary always shows
+	// for its window, whether or not the operator has already read them.
+	// The sweep is last_read-based by design, so a channel the operator
+	// keeps up with in the Slack client never appears in it — including
+	// the ones where decisions get made. Names or IDs; a leading "#" is
+	// ignored. Per workspace: SLACK_PRIORITY_CHANNELS for the primary,
+	// "priority_channels" in each SLACK_WORKSPACES entry. ADR 112.
+	PriorityChannels []string
+	DisabledTools    map[string]struct{}
+	DigestHours      int
 
 	DecisionKeywords  []string
 	DecisionReactions []string
@@ -89,9 +98,10 @@ type WorkspaceConfig struct {
 	// It is cosmetic and never used as a lookup key for credentials.
 	Name string
 
-	BotToken  string
-	UserToken string
-	Channels  []string
+	BotToken         string
+	UserToken        string
+	Channels         []string
+	PriorityChannels []string
 }
 
 // WorkspaceView pairs a workspace label with a fully-derived *Config
@@ -115,6 +125,7 @@ func Load() *Config {
 		BotToken:              os.Getenv("SLACK_TOKEN"),
 		UserToken:             os.Getenv("SLACK_USER_TOKEN"),
 		Channels:              parseCSV(os.Getenv("SLACK_CHANNELS")),
+		PriorityChannels:      parseCSV(os.Getenv("SLACK_PRIORITY_CHANNELS")),
 		ReadOnly:              parseBool(os.Getenv("SLACK_READ_ONLY")),
 		DisabledTools:         parseSet(os.Getenv("DISABLED_TOOLS")),
 		DigestHours:           parseIntDefault(os.Getenv("SLACK_DIGEST_HOURS"), 24),
@@ -138,7 +149,7 @@ func Load() *Config {
 	c.workspacesErr = err
 	c.Workspaces = buildWorkspaces(
 		os.Getenv("SLACK_WORKSPACE_NAME"),
-		c.BotToken, c.UserToken, c.Channels, extra,
+		c.BotToken, c.UserToken, c.Channels, c.PriorityChannels, extra,
 	)
 
 	// Mirror the primary workspace back onto the legacy scalar fields so
@@ -150,6 +161,7 @@ func Load() *Config {
 		c.BotToken = c.Workspaces[0].BotToken
 		c.UserToken = c.Workspaces[0].UserToken
 		c.Channels = c.Workspaces[0].Channels
+		c.PriorityChannels = c.Workspaces[0].PriorityChannels
 	}
 
 	return c
@@ -163,6 +175,9 @@ type wsJSON struct {
 	BotToken  string `json:"bot_token"`
 	UserToken string `json:"user_token"`
 	Channels  string `json:"channels"`
+	// PriorityChannels is an optional comma-separated list, same shape as
+	// channels — see Config.PriorityChannels.
+	PriorityChannels string `json:"priority_channels"`
 }
 
 // ParseWorkspaces parses the SLACK_WORKSPACES JSON array. A blank value
@@ -180,10 +195,11 @@ func ParseWorkspaces(s string) ([]WorkspaceConfig, error) {
 	out := make([]WorkspaceConfig, 0, len(raw))
 	for _, r := range raw {
 		out = append(out, WorkspaceConfig{
-			Name:      strings.TrimSpace(r.Name),
-			BotToken:  strings.TrimSpace(r.BotToken),
-			UserToken: strings.TrimSpace(r.UserToken),
-			Channels:  parseCSV(r.Channels),
+			Name:             strings.TrimSpace(r.Name),
+			BotToken:         strings.TrimSpace(r.BotToken),
+			UserToken:        strings.TrimSpace(r.UserToken),
+			Channels:         parseCSV(r.Channels),
+			PriorityChannels: parseCSV(r.PriorityChannels),
 		})
 	}
 	return out, nil
@@ -193,14 +209,15 @@ func ParseWorkspaces(s string) ([]WorkspaceConfig, error) {
 // SLACK_TOKEN/SLACK_USER_TOKEN pair becomes workspace[0] (when either is
 // set), followed by the SLACK_WORKSPACES entries. Empty names are filled
 // deterministically so a label is always available for digest prefixes.
-func buildWorkspaces(primaryName, botToken, userToken string, channels []string, extra []WorkspaceConfig) []WorkspaceConfig {
+func buildWorkspaces(primaryName, botToken, userToken string, channels, priority []string, extra []WorkspaceConfig) []WorkspaceConfig {
 	var ws []WorkspaceConfig
 	if botToken != "" || userToken != "" {
 		ws = append(ws, WorkspaceConfig{
-			Name:      strings.TrimSpace(primaryName),
-			BotToken:  botToken,
-			UserToken: userToken,
-			Channels:  channels,
+			Name:             strings.TrimSpace(primaryName),
+			BotToken:         botToken,
+			UserToken:        userToken,
+			Channels:         channels,
+			PriorityChannels: priority,
 		})
 	}
 	ws = append(ws, extra...)
@@ -231,6 +248,7 @@ func (c *Config) WorkspaceViews() []WorkspaceView {
 		wc.BotToken = ws.BotToken
 		wc.UserToken = ws.UserToken
 		wc.Channels = ws.Channels
+		wc.PriorityChannels = ws.PriorityChannels
 		wc.Workspaces = nil
 		wc.workspacesErr = nil
 		views = append(views, WorkspaceView{Name: ws.Name, Cfg: &wc})

@@ -216,8 +216,9 @@ chain from a single message permalink.
 | `SLACK_TOKEN` | one of | Bot User OAuth Token (`xoxb-...`). |
 | `SLACK_USER_TOKEN` | one of | User OAuth Token (`xoxp-...`). Required for unread/mentions. At least one of `SLACK_TOKEN` / `SLACK_USER_TOKEN` must be set. |
 | `SLACK_WORKSPACE_NAME` | No | Cosmetic label for the primary workspace, shown in merged digests (default: `primary`). |
-| `SLACK_WORKSPACES` | No | JSON array of *additional* workspaces. Each entry: `{"name","bot_token","user_token","channels"}` (all but at least one token optional). Tokens are workspace-scoped, so each extra Slack space needs its own token pair. Labels live in the JSON values — no per-workspace env keys. See [Multiple workspaces](#multiple-workspaces). |
+| `SLACK_WORKSPACES` | No | JSON array of *additional* workspaces. Each entry: `{"name","bot_token","user_token","channels","priority_channels"}` (all but at least one token optional). Tokens are workspace-scoped, so each extra Slack space needs its own token pair. Labels live in the JSON values — no per-workspace env keys. See [Multiple workspaces](#multiple-workspaces). |
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
+| `SLACK_PRIORITY_CHANNELS` | No | Channels (names or IDs, comma-separated) that `get_unread_summary` always shows for its window, even when you have already read them — first in the output, marked `★`, with `· read` when nothing in them is new to you. Window: `priority_hours` (default 24) or everything after the `after` cursor. Channels it cannot find are named in the output. Per extra workspace: `priority_channels`. ADR 112. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
 | `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read` |
 | `SLACK_FFMPEG_BIN` | No | ffmpeg binary for `transcribe_audio` (default: `ffmpeg` from PATH) |
@@ -246,7 +247,8 @@ SLACK_WORKSPACES=[
   JSON **values**, so adding a workspace never introduces a new env var.
 - Each entry needs at least one token (`user_token` for unread/mentions).
   `channels` is an optional comma-separated allow-list, same as
-  `SLACK_CHANNELS`.
+  `SLACK_CHANNELS`; `priority_channels` is the per-workspace
+  `SLACK_PRIORITY_CHANNELS`.
 
 With more than one workspace configured, `get_unread_summary` and
 `get_mentions` merge every workspace automatically, each under its own

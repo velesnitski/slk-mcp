@@ -135,6 +135,10 @@ type ChannelUnread struct {
 	LastRead string
 	Messages []goslack.Message
 	Replies  map[string][]goslack.Message
+
+	// Priority marks a conversation fetched because the operator listed it
+	// as a priority channel, not because it is unread (ADR 112).
+	Priority bool
 }
 
 // JoinedChannels returns channels the user is a member of, useful for
@@ -426,9 +430,7 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 	// Slack timestamps are unix-seconds with usec fraction. Compose
 	// the oldest cutoff as `<sec>.000000` so the API treats it
 	// canonically.
-	oldestSec := s.nowUnix() - int64(hours)*3600
-	oldest := fmt.Sprintf("%d.000000", oldestSec)
-	oldestFloat := float64(oldestSec)
+	oldestFloat := float64(s.nowUnix() - int64(hours)*3600)
 
 	// Workers cap stays at 4 to match UnreadAll — same politeness budget.
 	const workers = 4
@@ -447,7 +449,7 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 				if !isDirectMessage(ch) {
 					continue // non-DM channels handled by UnreadAll
 				}
-				cu, err := s.dmHistorySince(ctx, ch, oldest, oldestFloat, maxPerChannel)
+				cu, err := s.recentActivity(ctx, ch, oldestFloat, maxPerChannel)
 				results <- result{cu, err}
 			}
 		}()
@@ -475,12 +477,14 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 // dmHistorySince is the per-channel worker for RecentDMActivity. It
 // pulls history newer than `oldest` and reuses fetchReplies so the
 // thread-reply contract matches UnreadAll's output shape exactly.
-func (s *UnreadService) dmHistorySince(ctx context.Context, ch goslack.Channel, oldest string, oldestFloat float64, maxMessages int) (*ChannelUnread, error) {
+func (s *UnreadService) recentActivity(ctx context.Context, ch goslack.Channel, oldestFloat float64, maxMessages int) (*ChannelUnread, error) {
+	// Anchored at now, trimmed to the window locally. A page requested
+	// with `oldest` is the one adjacent to `oldest` — the stale end of the
+	// window — so a busy DM returned its oldest messages and dropped the
+	// newest (ADR 111; this path carried the same defect).
 	params := &goslack.GetConversationHistoryParameters{
 		ChannelID: ch.ID,
-		Oldest:    oldest,
 		Limit:     maxMessages,
-		Inclusive: false,
 	}
 	var resp *goslack.GetConversationHistoryResponse
 	err := ratelimit.Do(ctx, s.log, 0, func() error {
@@ -492,17 +496,82 @@ func (s *UnreadService) dmHistorySince(ctx context.Context, ch goslack.Channel, 
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("conversations.history (dm window): %w", err)
+		return nil, fmt.Errorf("conversations.history (recent activity): %w", err)
 	}
 
 	cu := &ChannelUnread{Channel: ch, LastRead: ch.LastRead}
 	for _, msg := range resp.Messages {
+		if ts, perr := strconv.ParseFloat(msg.Timestamp, 64); perr == nil && ts <= oldestFloat {
+			continue
+		}
 		cu.Messages = append(cu.Messages, msg)
 	}
 	if err := s.fetchReplies(ctx, ch.ID, oldestFloat, cu.Messages, cu); err != nil {
 		s.log.Warn("fetch thread replies failed", "channel", ch.ID, "err", err)
 	}
 	return cu, nil
+}
+
+// PriorityActivity returns the recent activity of the operator's priority
+// channels since oldestFloat, regardless of last_read, each marked
+// Priority. refs are channel names or IDs ("#" optional). A ref that
+// matches no joined conversation is returned in missing rather than
+// dropped, so a typo or a lost membership is reported instead of making a
+// priority channel silently vanish from the sweep (ADR 112).
+func (s *UnreadService) PriorityActivity(ctx context.Context, refs []string, oldestFloat float64, maxPerChannel int) (out []*ChannelUnread, missing []string, err error) {
+	if !s.Enabled() {
+		return nil, nil, ErrNoUserToken
+	}
+	if len(refs) == 0 {
+		return nil, nil, nil
+	}
+	if maxPerChannel <= 0 {
+		maxPerChannel = 20
+	}
+	channels, err := s.JoinedChannels(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	byKey := make(map[string]goslack.Channel, len(channels)*2)
+	for _, ch := range channels {
+		byKey[strings.ToLower(ch.ID)] = ch
+		if ch.Name != "" {
+			byKey[strings.ToLower(ch.Name)] = ch
+		}
+	}
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		key := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ref), "#"))
+		if key == "" {
+			continue
+		}
+		ch, ok := byKey[key]
+		if !ok {
+			missing = append(missing, ref)
+			continue
+		}
+		if seen[ch.ID] {
+			continue
+		}
+		seen[ch.ID] = true
+		// last_read is not on the users.conversations listing; it is what
+		// lets the renderer say "read" for a channel the operator has
+		// already opened. Best-effort — without it the entry still shows.
+		if ch.LastRead == "" && s.channels != nil {
+			if info, ierr := s.channels.Info(ctx, ch.ID); ierr == nil && info != nil {
+				ch.LastRead = info.LastRead
+			}
+		}
+		cu, herr := s.recentActivity(ctx, ch, oldestFloat, maxPerChannel)
+		if herr != nil {
+			s.log.Warn("priority channel fetch failed", "channel", ch.ID, "err", herr)
+			missing = append(missing, ref+" (fetch failed)")
+			continue
+		}
+		cu.Priority = true
+		out = append(out, cu)
+	}
+	return out, missing, nil
 }
 
 // nowUnix is a seam for tests — overridden via a package-level var

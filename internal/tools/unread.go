@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ type unreadParams struct {
 	skipGit            bool
 	maxChars           int
 	dmWindowHours      int
+	priorityHours      int
 	threadMentionHours int
 	ownThreadHours     int
 	canvasHours        int
@@ -120,6 +122,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("skip_log_mode", mcp.Description("If true, omit log-mode channels (alert/error feeds) entirely. Cheap way to shrink the output when bot channels dominate (default: false)")),
 				mcp.WithBoolean("skip_git_mode", mcp.Description("If true, omit git-mode channels (CI / git-bot feeds) entirely. Cheap way to shrink the output when git activity dominates (default: false)")),
 				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters), per workspace. Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. Omit (default) to auto-cap to a total budget split across workspaces so a large backlog can't overflow the result. Pass 0 for unlimited, or a positive N for a hard per-workspace cap.")),
+				mcp.WithNumber("priority_hours", mcp.Description("Window for the configured priority channels (SLACK_PRIORITY_CHANNELS / priority_channels per workspace): they are shown for this many hours whether or not you have read them, first in the output and marked ★. With `after`, everything newer than the cursor is shown instead. Default: 24; 0 = off.")),
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
 				mcp.WithNumber("own_thread_hours", mcp.Description("If > 0, additionally surface NEW replies in threads the operator STARTED or already replied in, even when nobody @-mentioned them (Slack auto-follows those threads but never marks the channel unread). Catches a colleague answering your own request. Default: 24 (recommended).")),
@@ -141,6 +144,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					skipGit:            req.GetBool("skip_git_mode", false),
 					maxChars:           int(req.GetFloat("max_chars", maxCharsAuto)),
 					dmWindowHours:      int(req.GetFloat("dm_window_hours", 0)),
+					priorityHours:      int(req.GetFloat("priority_hours", 24)),
 					threadMentionHours: int(req.GetFloat("thread_mention_hours", 24)),
 					ownThreadHours:     int(req.GetFloat("own_thread_hours", 24)),
 					canvasHours:        int(req.GetFloat("canvas_hours", 24)),
@@ -379,6 +383,29 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 		}
 	}
 
+	// Priority channels (ADR 112): shown for their window whether or not
+	// they have been read. The sweep above is last_read-based, so a channel
+	// the operator keeps up with in the client never appears in it — even
+	// when that is where decisions are made. With a delta cursor the window
+	// starts at the cursor, so a re-pull shows only what is new there.
+	var priorityNote string
+	if refs := h.client.Config().PriorityChannels; len(refs) > 0 && p.priorityHours > 0 {
+		oldest := float64(time.Now().Add(-time.Duration(p.priorityHours) * time.Hour).Unix())
+		if ts, perr := strconv.ParseFloat(p.afterTS, 64); perr == nil && ts > 0 {
+			oldest = ts
+		}
+		pr, missing, prErr := h.Unread().PriorityActivity(ctx, refs, oldest, p.maxPer)
+		if prErr != nil {
+			h.log.Warn("priority channels fetch failed", "err", prErr)
+			priorityNote = "priority channels could not be read: " + prErr.Error() + "\n"
+		} else {
+			results = mergePriority(results, pr)
+		}
+		if len(missing) > 0 {
+			priorityNote += "priority channel(s) not found or not joined: " + strings.Join(missing, ", ") + "\n"
+		}
+	}
+
 	// Thread-mention backstop: UnreadAll's fetchReplies only covers replies
 	// to NEW top-level messages. Search-based `to:me` catches replies to
 	// already-read parents; merge their channels into results.
@@ -465,7 +492,7 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	if len(results) == 0 {
 		// No unread messages, but a canvas may still have changed — report
 		// it rather than claiming "all caught up".
-		tail := strings.TrimRight(answeredNote+canvasBlock, "\n")
+		tail := strings.TrimRight(priorityNote+answeredNote+canvasBlock, "\n")
 		if tail != "" {
 			return tail, p.afterTS, nil
 		}
@@ -475,7 +502,12 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	}
 
 	now := time.Now()
-	sort.Slice(results, func(i, j int) bool {
+	sort.SliceStable(results, func(i, j int) bool {
+		// Priority channels lead regardless of score: the operator named
+		// them, and under max_chars the tail is what gets dropped.
+		if results[i].Priority != results[j].Priority {
+			return results[i].Priority
+		}
 		return digest.RankUnread(results[i], selfID, now, p.urg) > digest.RankUnread(results[j], selfID, now, p.urg)
 	})
 
@@ -490,6 +522,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d channels, %d top-level + %d thread replies\n",
 		len(results), totalMsgs, totalReplies)
+	if priorityNote != "" {
+		b.WriteString(priorityNote)
+	}
 	if answeredNote != "" {
 		b.WriteString(answeredNote)
 	}
@@ -512,6 +547,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	for _, r := range results {
 		users := h.resolveRefsWithReplies(ctx, r)
 		label := channelDisplayLabel(ctx, r.Channel, h.Users())
+		if r.Priority {
+			label = priorityLabel(label, r)
+		}
 		isGit := p.logMode != "off" && digest.DetectGitChannel(r)
 		isLog := !isGit && p.logMode != "off" && digest.DetectLogChannel(r)
 		if p.skipGit && isGit {
@@ -533,7 +571,7 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 			logChannels++
 			bands := digest.BuildLogBands(r.Messages, p.logSamples)
 			rendered = format.LogChannelDigest(label, len(r.Messages), bands, users)
-		case digest.DetectLowSignalChannel(r):
+		case !r.Priority && digest.DetectLowSignalChannel(r):
 			rendered = digest.RenderLowSignalChannel(label, r)
 		default:
 			chOpts := []format.DigestOption{

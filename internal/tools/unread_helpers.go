@@ -884,3 +884,72 @@ func collectUserIDsWithReplies(cu *slack.ChannelUnread) []string {
 	}
 	return ids
 }
+
+// mergePriority folds priority-channel activity into the unread results.
+// A channel present in both keeps every message from either side
+// (deduplicated by ts) and is marked Priority; the rest are appended.
+// Pure — ADR 112.
+func mergePriority(base, prio []*slack.ChannelUnread) []*slack.ChannelUnread {
+	if len(prio) == 0 {
+		return base
+	}
+	idx := make(map[string]int, len(base))
+	for i, cu := range base {
+		idx[cu.Channel.ID] = i
+	}
+	for _, p := range prio {
+		i, ok := idx[p.Channel.ID]
+		if !ok {
+			base = append(base, p)
+			idx[p.Channel.ID] = len(base) - 1
+			continue
+		}
+		cur := base[i]
+		seen := make(map[string]struct{}, len(cur.Messages))
+		for _, m := range cur.Messages {
+			seen[m.Timestamp] = struct{}{}
+		}
+		for _, m := range p.Messages {
+			if _, dup := seen[m.Timestamp]; !dup {
+				cur.Messages = append(cur.Messages, m)
+			}
+		}
+		sort.SliceStable(cur.Messages, func(a, b int) bool {
+			return tsLessStr(cur.Messages[b].Timestamp, cur.Messages[a].Timestamp)
+		})
+		for ts, rs := range p.Replies {
+			if cur.Replies == nil {
+				cur.Replies = map[string][]goslack.Message{}
+			}
+			if _, has := cur.Replies[ts]; !has {
+				cur.Replies[ts] = rs
+			}
+		}
+		if cur.LastRead == "" {
+			cur.LastRead = p.LastRead
+		}
+		cur.Priority = true
+	}
+	return base
+}
+
+// priorityLabel marks a priority channel's heading, and says "read" when
+// every message shown is at or before the operator's last_read — the case
+// this feature exists for: a channel already opened in the client, whose
+// content the sweep would otherwise never show. Pure.
+func priorityLabel(label string, cu *slack.ChannelUnread) string {
+	out := "★ " + label
+	if cu.LastRead != "" && len(cu.Messages) > 0 {
+		read := true
+		for _, m := range cu.Messages {
+			if tsLessStr(cu.LastRead, m.Timestamp) {
+				read = false
+				break
+			}
+		}
+		if read {
+			out += " · read"
+		}
+	}
+	return out
+}

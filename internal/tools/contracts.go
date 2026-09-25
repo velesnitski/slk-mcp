@@ -81,6 +81,7 @@ type UnreadClient interface {
 	TeamURL(ctx context.Context) (string, error)
 	ParticipationChannels(ctx context.Context, hours int) ([]goslack.Channel, error)
 	MarkRead(ctx context.Context, channelID, ts string) error
+	PriorityActivity(ctx context.Context, refs []string, oldestFloat float64, maxPerChannel int) ([]*slack.ChannelUnread, []string, error)
 }
 
 // ListClient wraps the Slack Lists surface (the "Lists" feature with
