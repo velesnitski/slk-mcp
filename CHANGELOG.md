@@ -22,6 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`dm_window_hours` shows the newest messages of a busy DM.** It
   fetched history anchored at `oldest`, which returns the oldest page of
   the window (the ADR 111 defect in another path).
+- **The unread sweep no longer drops busy channels.** The per-channel
+  unread fetch requested history bounded by `oldest` (last_read, pushed
+  12h back for thread parents); Slack returns the page adjacent to that
+  bound, so in a busy channel the page held only already-read messages
+  and the channel disappeared from `get_unread_summary`. It now fetches
+  the newest page and applies last_read locally. ADR 113.
+- **Long threads show their newest replies.** Thread replies were read
+  as a single page (100 in the unread sweep, 200 in digests and
+  `get_thread`); `conversations.replies` is oldest-first, so later
+  replies were never fetched. Replies now follow the cursor. ADR 113.
+
+### Tests
+
+- History and replies fakes that page like the live API (`svPager`,
+  `pgHistory`); earlier fakes ignored `oldest`, `latest`, `limit` and
+  `cursor`, and tests that asserted the `oldest` parameter now assert
+  the returned messages instead.
 
 ## [1.51.0] - 2026-09-24
 
