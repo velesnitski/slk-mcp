@@ -210,10 +210,11 @@ func TestUnread_ReachesBehindLastReadForActiveThreadParents(t *testing.T) {
 		t.Fatalf("Replies = %+v", cu.Replies)
 	}
 
-	// The widened window is what makes the old parent reachable.
-	oldest := f.form(t, "conversations.history", 0).Get("oldest")
-	if oldest != "1700056800.000000" {
-		t.Fatalf("oldest = %q, want the 12h lookback", oldest)
+	// ADR 113: the page is anchored at now, never at a lower bound — a
+	// page bounded by `oldest` is the one adjacent to it. The old parent
+	// is reachable because it is on the newest page, within the lookback.
+	if oldest := f.form(t, "conversations.history", 0).Get("oldest"); oldest != "" {
+		t.Fatalf("oldest = %q, want no lower bound on the request", oldest)
 	}
 	if lim := f.form(t, "conversations.history", 0).Get("limit"); lim != "40" {
 		t.Fatalf("limit = %q, want 10 + the 30 parent headroom", lim)

@@ -232,8 +232,10 @@ func TestUnread_FetchesMessagesNewerThanLastRead(t *testing.T) {
 	if gotChannel != "C1" {
 		t.Fatalf("channel param = %q; want C1", gotChannel)
 	}
-	if gotOldest != "1700000000.000000" {
-		t.Fatalf("oldest param = %q; want 1700000000.000000", gotOldest)
+	// ADR 113: no lower bound on the request — last_read is applied to
+	// the page locally (the boundary message above is dropped by it).
+	if gotOldest != "" {
+		t.Fatalf("oldest param = %q; want none", gotOldest)
 	}
 	// The page is deliberately larger than max: the extra room is what
 	// lets already-read thread parents ride along (see threadLookbackHours).

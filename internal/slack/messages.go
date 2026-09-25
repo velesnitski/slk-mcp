@@ -66,19 +66,57 @@ func (s *MessageService) History(ctx context.Context, p HistoryParams) ([]goslac
 
 // ThreadReplies returns all messages in a thread rooted at threadTS.
 func (s *MessageService) ThreadReplies(ctx context.Context, channelID, threadTS string) ([]goslack.Message, error) {
-	params := &goslack.GetConversationRepliesParameters{
-		ChannelID: channelID,
-		Timestamp: threadTS,
-		Limit:     200,
+	return allThreadReplies(ctx, s.api, s.log, channelID, threadTS)
+}
+
+// maxReplyPages bounds a thread walk: 10 pages of 200 is 2,000 replies,
+// far past any thread a digest can usefully render, while keeping a
+// runaway thread from turning one call into an unbounded crawl.
+const maxReplyPages = 10
+
+// allThreadReplies walks conversations.replies with its cursor.
+// conversations.replies returns a thread oldest-first, one page at a time;
+// taking only the first page — as both callers used to — silently dropped
+// the NEWEST replies of any long thread, which are the ones a digest
+// exists to show. A thread longer than the page bound keeps its first
+// pages and says so in the log. ADR 113.
+func allThreadReplies(ctx context.Context, api *goslack.Client, log *slog.Logger, channelID, threadTS string) ([]goslack.Message, error) {
+	var out []goslack.Message
+	cursor := ""
+	for page := 0; page < maxReplyPages; page++ {
+		params := &goslack.GetConversationRepliesParameters{
+			ChannelID: channelID,
+			Timestamp: threadTS,
+			Limit:     200,
+			Cursor:    cursor,
+		}
+		var (
+			msgs    []goslack.Message
+			hasMore bool
+			next    string
+		)
+		err := ratelimit.Do(ctx, log, 0, func() error {
+			m, more, nc, err := api.GetConversationRepliesContext(ctx, params)
+			if err != nil {
+				return err
+			}
+			msgs, hasMore, next = m, more, nc
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("conversations.replies: %w", err)
+		}
+		out = append(out, msgs...)
+		if !hasMore || next == "" {
+			return out, nil
+		}
+		cursor = next
 	}
-	msgs, err := ratelimit.DoR(ctx, s.log, func() ([]goslack.Message, error) {
-		m, _, _, err := s.api.GetConversationRepliesContext(ctx, params)
-		return m, err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("conversations.replies: %w", err)
+	if log != nil {
+		log.Warn("thread longer than the reply page bound; newest replies may be missing",
+			"channel", channelID, "thread", threadTS, "pages", maxReplyPages)
 	}
-	return msgs, nil
+	return out, nil
 }
 
 // Post sends a message to channelID. Pass threadTS to reply in a thread.

@@ -217,21 +217,22 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 
 	oldest, _ := strconv.ParseFloat(info.LastRead, 64)
 
-	// Reach BEHIND last_read. A thread whose parent is already read stays
-	// invisible otherwise: history starts at last_read, so the parent is
-	// never returned, and fetchReplies has nothing to walk — the thread
-	// can run for hours without ever entering the sweep. Only parents
-	// with a reply newer than last_read survive the filter downstream, so
-	// the widened window costs one bigger page, not more calls.
-	histOldest := info.LastRead
-	if lookback := float64(s.nowUnix() - threadLookbackHours*3600); lookback < oldest {
-		histOldest = strconv.FormatFloat(lookback, 'f', 6, 64)
+	// The page is anchored at now and trimmed locally (ADR 111). It used
+	// to be requested with `oldest` = last_read, reached a further 12h
+	// back to catch already-read thread parents — but a request bounded
+	// by `oldest` returns the page ADJACENT to it. In any busy channel
+	// that page was filled with messages from before last_read, the
+	// unread filter below emptied it, and the channel dropped out of the
+	// sweep while it had unread messages. The headroom now buys the same
+	// thing from the other end: the newest page, of which the part behind
+	// last_read (within the lookback) supplies thread parents.
+	lookbackFloor := oldest
+	if lookback := float64(s.nowUnix() - threadLookbackHours*3600); lookback < lookbackFloor {
+		lookbackFloor = lookback
 	}
 	params := &goslack.GetConversationHistoryParameters{
 		ChannelID: channelID,
-		Oldest:    histOldest,
 		Limit:     maxMessages + threadParentHeadroom,
-		Inclusive: false,
 	}
 
 	var resp *goslack.GetConversationHistoryResponse
@@ -255,9 +256,16 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 		cu.Messages = append(cu.Messages, msg)
 	}
 
-	// Parents come from the FULL page (including the pre-last_read
-	// lookback); cu.Messages stays strictly "new since last_read".
-	if err := s.fetchReplies(ctx, channelID, oldest, resp.Messages, cu); err != nil {
+	// Parents come from the page back to the lookback floor (including
+	// already-read messages); cu.Messages stays strictly "new since
+	// last_read".
+	parents := make([]goslack.Message, 0, len(resp.Messages))
+	for _, msg := range resp.Messages {
+		if ts, perr := strconv.ParseFloat(msg.Timestamp, 64); perr != nil || ts >= lookbackFloor {
+			parents = append(parents, msg)
+		}
+	}
+	if err := s.fetchReplies(ctx, channelID, oldest, parents, cu); err != nil {
 		// Replies are best-effort context; a failure here should not
 		// block the rest of the digest. Log and continue.
 		s.log.Warn("fetch thread replies failed", "channel", channelID, "err", err)
@@ -309,22 +317,7 @@ func activeThreadParents(msgs []goslack.Message, oldest float64) []goslack.Messa
 // newer than oldest (the channel's last_read) are kept.
 func (s *UnreadService) fetchReplies(ctx context.Context, channelID string, oldest float64, parents []goslack.Message, cu *ChannelUnread) error {
 	for _, m := range activeThreadParents(parents, oldest) {
-		var replies []goslack.Message
-		err := ratelimit.Do(ctx, s.log, 0, func() error {
-			params := &goslack.GetConversationRepliesParameters{
-				ChannelID: channelID,
-				Timestamp: m.Timestamp,
-				Oldest:    m.Timestamp,
-				Inclusive: false,
-				Limit:     100,
-			}
-			r, _, _, err := s.api.GetConversationRepliesContext(ctx, params)
-			if err != nil {
-				return err
-			}
-			replies = r
-			return nil
-		})
+		replies, err := allThreadReplies(ctx, s.api, s.log, channelID, m.Timestamp)
 		if err != nil {
 			return fmt.Errorf("conversations.replies %s: %w", m.Timestamp, err)
 		}
