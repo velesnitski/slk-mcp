@@ -313,7 +313,29 @@ func (h *Hub) fetchFiles(ctx context.Context, workspace, channel, timestamp, per
 	if errRes != nil {
 		return nil, nil, "", errRes
 	}
+	tried := wsName
 	saved, skipped, wsName, errRes = h.fetchFilesIn(ctx, scoped, wsName, channel, timestamp, permalink, from, destDir, prefix, accept)
+	if isNotFoundResult(errRes) {
+		// Slack Connect: a file shared from another organisation keeps
+		// that organisation's host, so no workspace matched and the
+		// primary could not see it. Try the rest (ADR 114).
+		if rest := h.hostFallbacks(ctx, workspace, permalink, tried); len(rest) > 0 {
+			names := []string{tried}
+			for _, ws := range rest {
+				s2, sk2, n2, e2 := h.fetchFilesIn(ctx, h.withClient(ws.Client), ws.Name, channel, timestamp, permalink, from, destDir, prefix, accept)
+				if e2 == nil {
+					return s2, sk2, n2, nil
+				}
+				if !isNotFoundResult(e2) {
+					// This workspace can see the object; its error is the
+					// real one, not the primary's not-found.
+					return nil, nil, n2, e2
+				}
+				names = append(names, ws.Name)
+			}
+			note = fmt.Sprintf("no configured workspace matches host %q — tried %s", permalinkHost(permalink), strings.Join(names, ", "))
+		}
+	}
 	return saved, skipped, wsName, withRouteNote(errRes, note)
 }
 

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.53.0] - 2026-10-01
+
+### Added
+
+- **`read_document keep_file`.** Saves the attachment unchanged to a
+  local temp file and returns the path, for formats the text converter
+  gets wrong. Not redacted; stays on local disk. ADR 114.
+
+### Fixed
+
+- **Links shared from another organisation (Slack Connect) resolve.** A
+  shared file or channel keeps the other organisation's host, so ADR 110
+  routing matched no workspace and only the primary was asked. When the
+  host is unmatched and the primary cannot see the object, the other
+  workspaces are now tried; a failure names every workspace tried.
+  `get_message` and all file tools. ADR 114.
+- **HTML: script source no longer leaks into the text.** Scripts and
+  styles were removed with one expression whose closer was not tied to
+  its opener, so a script containing `</style>` ended early and the rest
+  of the bundle came out as text.
+- **HTML: embedded content is kept.** Non-executable `<script>` blocks
+  (JSON, Markdown) and long `data-*` attributes (base64-decoded when
+  valid) are returned as content. A page that renders everything with
+  JavaScript says so instead of returning a blank.
+
 ## [1.52.0] - 2026-09-25
 
 ### Added

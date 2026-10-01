@@ -2,11 +2,14 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -40,6 +43,7 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 			mcp.WithNumber("limit", mcp.Description("How many recent documents to return (default: 1). Raise it to read several attachments from one conversation in a single call.")),
 			mcp.WithBoolean("list_only", mcp.Description("List the recent documents (name, type, size, timestamp) without downloading them, so you can choose which to read.")),
 			mcp.WithNumber("max_chars", mcp.Description("Per-document inline cap (default: 40000). Truncation is reported explicitly, never silent.")),
+			mcp.WithBoolean("keep_file", mcp.Description("Save the attachment unchanged to a local temp file and return its path instead of converting it to text. Use when the converted text is empty or wrong — e.g. a self-contained HTML page whose content is built by JavaScript. The file is NOT redacted; it stays on local disk.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -52,7 +56,8 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 				req.GetString("match", ""),
 				req.GetInt("limit", 1),
 				req.GetBool("list_only", false),
-				req.GetInt("max_chars", docMaxChars)), nil
+				req.GetInt("max_chars", docMaxChars),
+				req.GetBool("keep_file", false)), nil
 		},
 	)
 }
@@ -61,9 +66,19 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 // dir, renders each as plain text, and removes the files before
 // returning — unlike download_audio, nothing here needs to outlive the
 // call, so no artifact is left on disk.
-func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp, permalink, from, match string, limit int, listOnly bool, maxChars int) *mcp.CallToolResult {
+func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp, permalink, from, match string, limit int, listOnly bool, maxChars int, keepFile bool) *mcp.CallToolResult {
 	if maxChars <= 0 {
 		maxChars = docMaxChars
+	}
+	// keep_file: hand back the bytes, not an interpretation of them. A
+	// converter can only guess at formats it does not know; the raw file
+	// lets the caller open it with the right tool (ADR 114).
+	if keepFile {
+		saved, skipped, wsName, errRes := h.fetchFiles(ctx, workspace, channel, timestamp, permalink, from, os.TempDir(), "slk-doc", isReadableDocument)
+		if errRes != nil {
+			return errRes
+		}
+		return mcp.NewToolResultText(renderKeptFiles(saved, skipped, h.wsLabel(wsName)))
 	}
 	// Selector mode. "The newest attachment" is the wrong answer when two
 	// documents were posted seconds apart and the caller wants the
@@ -88,6 +103,21 @@ func (h *Hub) runReadDocument(ctx context.Context, workspace, channel, timestamp
 		body += fmt.Sprintf("\nnot a document, skipped: %s\n", strings.Join(skipped, ", "))
 	}
 	return mcp.NewToolResultText(body)
+}
+
+// renderKeptFiles lists files saved by keep_file: where each one is and
+// what it is. Nothing is read or removed. Pure.
+func renderKeptFiles(saved []savedFile, skipped []string, wsLabel string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d file(s) kept%s:\n", len(saved), wsLabel)
+	for _, f := range saved {
+		fmt.Fprintf(&b, "- %s (%s, %d bytes)\n  saved to: %s\n", displayName(f.Path), f.Mimetype, f.Size, f.Path)
+	}
+	if len(skipped) > 0 {
+		fmt.Fprintf(&b, "not a document, skipped: %s\n", strings.Join(skipped, ", "))
+	}
+	b.WriteString("Raw bytes, not redacted — delete the file when done.\n")
+	return b.String()
 }
 
 // docScanLimit caps how many document-bearing messages the selector
@@ -519,12 +549,19 @@ func expectsTextBody(f goslack.File) bool {
 }
 
 var (
-	htmlCommentRe     = regexp.MustCompile(`(?s)<!--.*?-->`)
-	htmlScriptStyleRe = regexp.MustCompile(`(?is)<(script|style)\b[^>]*>.*?</\s*(script|style)\s*>`)
-	htmlBreakRe       = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/li|/tr|/h[1-6]|/section|/article|/table|/ul|/ol)\b[^>]*>`)
-	htmlTagRe         = regexp.MustCompile(`(?s)<[^>]*>`)
-	spaceRunRe        = regexp.MustCompile(`[ \t]{2,}`)
-	blankRunRe        = regexp.MustCompile(`\n{3,}`)
+	htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
+	// One expression per element: a combined (script|style) pattern let a
+	// <script> close at the first </style> inside its own source, and the
+	// rest of the bundle leaked into the "text" (ADR 114).
+	htmlScriptRe  = regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script\s*>`)
+	htmlStyleRe   = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style\s*>`)
+	htmlTypeRe    = regexp.MustCompile(`(?i)\btype\s*=\s*["']?([^"'\s>]+)`)
+	htmlDataRe    = regexp.MustCompile(`(?is)\sdata-[a-z0-9_-]+\s*=\s*"([^"]{` + strconv.Itoa(minEmbeddedData) + `,})"`)
+	base64ShapeRe = regexp.MustCompile(`^[A-Za-z0-9+/=\s]+$`)
+	htmlBreakRe   = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/li|/tr|/h[1-6]|/section|/article|/table|/ul|/ol)\b[^>]*>`)
+	htmlTagRe     = regexp.MustCompile(`(?s)<[^>]*>`)
+	spaceRunRe    = regexp.MustCompile(`[ \t]{2,}`)
+	blankRunRe    = regexp.MustCompile(`\n{3,}`)
 )
 
 // documentToText renders a downloaded document as plain text: HTML is
@@ -551,9 +588,37 @@ func documentToText(body, mimetype string) string {
 // scripts and styles are dropped whole (their contents are not prose),
 // block-level closers become newlines so structure survives, remaining
 // tags are removed, and entities are decoded. Pure.
+//
+// A self-contained page (an exported viewer, a report bundle) often keeps
+// its real content out of the markup: in a non-executable <script> block
+// (application/json, text/markdown) or a long data-* attribute, rendered
+// by JavaScript at view time. Those are content, not code, so they are
+// kept — the executable scripts around them are not.
 func htmlToText(s string) string {
 	s = htmlCommentRe.ReplaceAllString(s, "")
-	s = htmlScriptStyleRe.ReplaceAllString(s, "")
+	s = htmlStyleRe.ReplaceAllString(s, "")
+
+	var embedded []string
+	scriptBytes := 0
+	s = htmlScriptRe.ReplaceAllStringFunc(s, func(block string) string {
+		m := htmlScriptRe.FindStringSubmatch(block)
+		typ := ""
+		if t := htmlTypeRe.FindStringSubmatch(m[1]); t != nil {
+			typ = strings.ToLower(t[1])
+		}
+		if isExecutableScript(typ) {
+			scriptBytes += len(m[2])
+			return ""
+		}
+		if body := strings.TrimSpace(m[2]); body != "" {
+			embedded = append(embedded, fmt.Sprintf("[embedded %s]\n%s", typ, body))
+		}
+		return ""
+	})
+	for _, m := range htmlDataRe.FindAllStringSubmatch(s, -1) {
+		embedded = append(embedded, "[embedded data attribute]\n"+decodeEmbedded(html.UnescapeString(m[1])))
+	}
+
 	s = htmlBreakRe.ReplaceAllString(s, "\n")
 	s = htmlTagRe.ReplaceAllString(s, "")
 	s = html.UnescapeString(s)
@@ -567,7 +632,57 @@ func htmlToText(s string) string {
 	}
 	s = strings.Join(lines, "\n")
 	s = blankRunRe.ReplaceAllString(s, "\n\n")
-	return strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
+
+	if len(embedded) > 0 {
+		if s != "" {
+			s += "\n\n"
+		}
+		s += strings.Join(embedded, "\n\n")
+	}
+	// Nothing static to read but a lot of code: the page builds its
+	// content in the browser. Say so instead of returning a blank.
+	if len([]rune(s)) < shellPageTextLimit && scriptBytes > shellPageScriptMin {
+		note := fmt.Sprintf("[this page renders its content with JavaScript at view time (%d KB of script, no static text) — re-run with keep_file to get the raw file]", scriptBytes/1024)
+		if s == "" {
+			return note
+		}
+		s += "\n\n" + note
+	}
+	return s
+}
+
+// Thresholds for the embedded-content heuristics. A data-* attribute
+// shorter than minEmbeddedData is styling or an ID, not a payload; a page
+// with less than shellPageTextLimit characters of static text but more
+// than shellPageScriptMin bytes of script is a JavaScript shell.
+const (
+	minEmbeddedData    = 200
+	shellPageTextLimit = 200
+	shellPageScriptMin = 20 * 1024
+)
+
+// isExecutableScript reports whether a <script> type attribute marks code
+// rather than data. No type, and every JavaScript dialect, is code. Pure.
+func isExecutableScript(typ string) bool {
+	switch typ {
+	case "", "module", "text/javascript", "application/javascript", "text/ecmascript",
+		"application/ecmascript", "text/jsx", "text/babel", "text/typescript":
+		return true
+	}
+	return false
+}
+
+// decodeEmbedded returns a data payload as text: base64 that decodes to
+// valid UTF-8 is decoded, anything else is returned as is. Pure.
+func decodeEmbedded(v string) string {
+	v = strings.TrimSpace(v)
+	if base64ShapeRe.MatchString(v) {
+		if b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(v), "")); err == nil && utf8.Valid(b) {
+			return string(b)
+		}
+	}
+	return v
 }
 
 // truncateText caps s at max characters (not bytes, so multi-byte text

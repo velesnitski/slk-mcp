@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	goslack "github.com/slack-go/slack"
 )
 
 // ADR 110: every tool that accepts a permalink routes by the link's host.
@@ -170,4 +171,85 @@ func TestWithRouteNote(t *testing.T) {
 	if got := resultText(withRouteNote(failed, "tried the primary")); got != "channel_not_found (tried the primary)" {
 		t.Fatalf("an error must carry the note, got %q", got)
 	}
+}
+
+// ADR 114: Slack Connect. A file or channel shared from another
+// organisation keeps that organisation's host, so no configured workspace
+// matches it — yet one of them can read it. The primary is tried first,
+// then the rest.
+
+const (
+	scForeignHost = "https://other-org.example.com"
+	scFileLink    = scForeignHost + "/files/U0OWNER01/F0SHARED01/notes.md"
+	scMsgLink     = scForeignHost + "/archives/C0SHARED01/p1700000000000100"
+)
+
+func TestFetchFiles_SlackConnectFileFoundInSecondWorkspace(t *testing.T) {
+	h, alpha, beta := prTwoHub(t)
+	alpha.OnError("files.info", "file_not_found")
+	beta.On("files.info", `{"ok":true,"file":{"id":"F0SHARED01","name":"notes.md","mimetype":"image/png"}}`)
+
+	_, _, wsName, errRes := h.fetchFiles(context.Background(), "", "", "", scFileLink, "",
+		os.TempDir(), "slk-test", func(goslack.File) bool { return false })
+
+	if !alpha.Called("files.info") || !beta.Called("files.info") {
+		t.Fatalf("primary first, then the other workspace; alpha=%v beta=%v", alpha.Calls(), beta.Calls())
+	}
+	if errRes != nil && strings.Contains(resultText(errRes), "file_not_found") {
+		t.Fatalf("the file beta can see must not end as not-found: %q", resultText(errRes))
+	}
+	_ = wsName
+}
+
+func TestFetchFiles_SlackConnectFailureNamesEveryWorkspaceTried(t *testing.T) {
+	h, alpha, beta := prTwoHub(t)
+	alpha.OnError("files.info", "file_not_found")
+	beta.OnError("files.info", "file_not_found")
+
+	_, _, _, errRes := h.fetchFiles(context.Background(), "", "", "", scFileLink, "",
+		os.TempDir(), "slk-test", isImageFile)
+
+	if errRes == nil || !errRes.IsError {
+		t.Fatal("a file nobody can see is an error")
+	}
+	tmWant(t, resultText(errRes), "other-org.example.com", "tried alpha, beta")
+}
+
+func TestFetchFiles_MatchedHostIsNotRetriedElsewhere(t *testing.T) {
+	// A host that belongs to beta is beta's answer — a not-found there
+	// must not leak the lookup into alpha.
+	h, alpha, beta := prTwoHub(t)
+	beta.OnError("files.info", "file_not_found")
+
+	_, _, _, _ = h.fetchFiles(context.Background(), "", "", "",
+		prBetaHost+"/files/U0OWNER01/F0BETAFILE/x.png", "", os.TempDir(), "slk-test", isImageFile)
+
+	if alpha.Called("files.info") {
+		t.Fatal("a routed host must not fall back to other workspaces")
+	}
+}
+
+func TestFetchFiles_ExplicitWorkspaceIsNotRetriedElsewhere(t *testing.T) {
+	h, alpha, beta := prTwoHub(t)
+	alpha.OnError("files.info", "file_not_found")
+
+	_, _, _, _ = h.fetchFiles(context.Background(), "alpha", "", "", scFileLink, "",
+		os.TempDir(), "slk-test", isImageFile)
+
+	if beta.Called("files.info") {
+		t.Fatal("an explicit workspace is the caller's answer — no fallback")
+	}
+}
+
+func TestGetMessage_SlackConnectChannelFoundInSecondWorkspace(t *testing.T) {
+	h, alpha, beta := prTwoHub(t)
+	alpha.OnError("conversations.history", "channel_not_found")
+	alpha.OnError("conversations.replies", "channel_not_found")
+	beta.On("conversations.history", `{"ok":true,"messages":[{"type":"message","user":"U2","ts":"1700000000.000100","text":"shared hello"}]}`)
+	beta.On("conversations.replies", `{"ok":true,"messages":[{"type":"message","user":"U2","ts":"1700000000.000100","text":"shared hello"}]}`)
+	s := tmServer(t, h.registerMessageTools)
+
+	out := resultText(tmCall(t, s, "get_message", map[string]any{"permalink": scMsgLink}))
+
+	tmWant(t, out, "shared hello", "found via beta")
 }

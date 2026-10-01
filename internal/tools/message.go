@@ -69,7 +69,28 @@ func (h *Hub) registerMessageTools(s *server.MCPServer) {
 
 			msg, parent, err := scoped.fetchMessageWithParent(ctx, channelID, ts, threadTS)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				failed := mcp.NewToolResultError(err.Error())
+				if !isNotFoundResult(failed) {
+					return failed, nil
+				}
+				// Slack Connect: the link's host belongs to another
+				// organisation, so try the other workspaces (ADR 114).
+				found := false
+				for _, ws := range h.hostFallbacks(ctx, wsArg, permalink, wsName) {
+					cand := h.withClient(ws.Client)
+					m, p, ferr := cand.fetchMessageWithParent(ctx, channelID, ts, threadTS)
+					if ferr == nil {
+						msg, parent, scoped, wsName, note = m, p, cand, ws.Name, "found via "+ws.Name+" — shared from another organisation"
+						found = true
+						break
+					}
+					if e := mcp.NewToolResultError(ferr.Error()); !isNotFoundResult(e) {
+						return e, nil // this workspace sees it; its error is the real one
+					}
+				}
+				if !found {
+					return withRouteNote(failed, note), nil
+				}
 			}
 
 			refs := scoped.resolveRefs(ctx, gatherForRefs(msg, parent))
@@ -118,6 +139,57 @@ func (h *Hub) routeWorkspace(ctx context.Context, wsArg, permalink string) (scop
 		return nil, "", "", e
 	}
 	return s, n, fmt.Sprintf("no configured workspace matches host %q — tried the primary", host), nil
+}
+
+// hostFallbacks lists the workspaces still worth trying after the primary
+// failed to find what a permalink points at. ADR 110 routes by host, which
+// assumes the link's host is the workspace that can read it. Slack Connect
+// breaks that: a file or channel shared from another organisation keeps
+// that organisation's host (other-org.slack.com) while only the member
+// workspace's token can read it, so no host ever matches. When — and only
+// when — routing fell back for want of a match, every other configured
+// workspace is a candidate. An explicit workspace or a matched host
+// returns nil: the caller already knows where to look. See ADR 114.
+func (h *Hub) hostFallbacks(ctx context.Context, wsArg, permalink, tried string) []slack.Workspace {
+	if wsArg != "" || permalink == "" || len(h.Workspaces()) < 2 {
+		return nil
+	}
+	host := permalinkHost(permalink)
+	if host == "" {
+		return nil
+	}
+	for _, ws := range h.Workspaces() {
+		turl, err := h.withClient(ws.Client).Unread().TeamURL(ctx)
+		if err == nil && turl != "" && hostsEqual(host, turl) {
+			return nil
+		}
+	}
+	var out []slack.Workspace
+	for _, ws := range h.Workspaces() {
+		if ws.Name != tried {
+			out = append(out, ws)
+		}
+	}
+	return out
+}
+
+// isNotFoundResult reports whether a tool error means "this workspace
+// cannot see the object" — the only failure worth retrying elsewhere. A
+// rate limit or an auth error would fail the same way in every workspace.
+func isNotFoundResult(res *mcp.CallToolResult) bool {
+	if res == nil || !res.IsError {
+		return false
+	}
+	for _, c := range res.Content {
+		if tc, ok := c.(mcp.TextContent); ok {
+			t := tc.Text
+			if strings.Contains(t, "not_found") || strings.Contains(t, "not_in_channel") ||
+				strings.Contains(t, "not found") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // withRouteNote appends routeWorkspace's note to an error result, so a
