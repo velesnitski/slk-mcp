@@ -262,6 +262,14 @@ func renderFullMessage(msg goslack.Message, parent *goslack.Message, refs map[st
 	if author == "" && msg.Username != "" {
 		author = msg.Username // bot messages carry a username, not a user id
 	}
+	// Block-only app and workflow posts carry neither: the name lives in
+	// bot_profile. Without this the header read "from:  at …".
+	if author == "" && msg.BotProfile != nil && msg.BotProfile.Name != "" {
+		author = msg.BotProfile.Name + " (bot)"
+	}
+	if author == "" && msg.BotID != "" {
+		author = "bot " + msg.BotID
+	}
 
 	fmt.Fprintf(&b, "message in %s [%s]", channelLabel, wsName)
 	if note != "" {

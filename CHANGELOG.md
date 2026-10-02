@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.53.1] - 2026-10-02
+
+### Fixed
+
+- **DMs built from search hits are labelled `@handle`, not `#U0…`.**
+- **`get_message` names the author of block-only bot and workflow
+  posts** from `bot_profile` instead of printing an empty `from:`.
+- **`drop_closing_acks` drops more closers:** short Russian/English
+  confirmations ("Да", "Принял", "yes"), emoji-only replies, and Slack's
+  "has joined Slack" notice. Asks after a confirmation still surface.
+  ADR 115.
+
 ## [1.53.0] - 2026-10-01
 
 ### Added

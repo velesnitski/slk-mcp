@@ -347,7 +347,16 @@ func filterEmptyMentions(matches []goslack.SearchMessage) []goslack.SearchMessag
 // closingAckRe matches short conversation-closing acknowledgements
 // in en + ru. Anchored to whole-trimmed-body so partial matches in
 // longer messages are not affected.
-var closingAckRe = regexp.MustCompile(`(?i)^(?:thanks|thank you|thx|ok|okay|got it|spasibo|spasiba|спасибо|спасиб|пасиб|ок|окей|\+1|👍|:thumbsup:|:\+1:|np|nice|great|ack|done)[!.)\s]*$`)
+var closingAckRe = regexp.MustCompile(`(?i)^(?:thanks|thank you|thx|ok|okay|got it|yes|yep|sure|spasibo|spasiba|спасибо|спасиб|пасиб|ок|окей|да|ага|понял|поняла|принял|приняла|ладно|хорошо|\+1|👍|:thumbsup:|:\+1:|np|nice|great|ack|done)[!.)\s]*$`)
+
+// reactionOnlyRe matches a body that is nothing but emoji shortcodes —
+// a reaction typed as a message (":flushed:"), never an ask.
+var reactionOnlyRe = regexp.MustCompile(`^(?::[a-z0-9_+'-]+:\s*)+$`)
+
+// slackJoinNoticeRe matches Slack's own "X has joined Slack – take a
+// second to say hello" DM notice. Search attributes it to the new member,
+// so it surfaced as a pending mention addressed to the operator.
+var slackJoinNoticeRe = regexp.MustCompile(`(?i)has joined slack\s*[–—-]\s*take a second to say hello\.?$`)
 
 // isClosingAckText reports whether a message body is a conversation-
 // closing acknowledgement. Two tiers: the exact-match regex ("спасибо",
@@ -358,7 +367,7 @@ var closingAckRe = regexp.MustCompile(`(?i)^(?:thanks|thank you|thx|ok|okay|got 
 // followed by a promise of action is a live message, not a closer.
 func isClosingAckText(s string) bool {
 	s = strings.TrimSpace(s)
-	if closingAckRe.MatchString(s) {
+	if closingAckRe.MatchString(s) || reactionOnlyRe.MatchString(s) || slackJoinNoticeRe.MatchString(s) {
 		return true
 	}
 	if strings.ContainsAny(s, "?？") {
@@ -696,12 +705,21 @@ func channelDisplayLabel(ctx context.Context, ch goslack.Channel, users UserClie
 		}
 		return "mpdm-?"
 	default:
+		// Some paths build a DM from a search hit, where the flags are
+		// absent and the "name" is the peer's user ID. Rendered as a
+		// channel it read "#U0…" — a label nobody can act on.
+		if ch.Name != "" && userIDRe.MatchString(ch.Name) {
+			return "@" + users.Name(ctx, ch.Name)
+		}
 		if ch.Name != "" {
 			return "#" + ch.Name
 		}
 		return "#?"
 	}
 }
+
+// userIDRe matches a bare Slack user ID (U… or W… for Enterprise Grid).
+var userIDRe = regexp.MustCompile(`^[UW][A-Z0-9]{8,}$`)
 
 // rankUnread / channelMentions moved to internal/digest (rank.go).
 
