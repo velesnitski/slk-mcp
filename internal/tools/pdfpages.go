@@ -175,10 +175,8 @@ func (o *pdfObjects) pageContent(page int) (content []byte, drawsXObject bool) {
 	d := o.dict[page]
 	var b bytes.Buffer
 	for _, n := range o.contentRefs(d) {
-		if s, ok := pdfDecodeStream(o.stream[n]); ok {
-			b.Write(s)
-			b.WriteByte('\n')
-		}
+		b.Write(pdfDecodeContent(o.stream[n]))
+		b.WriteByte('\n')
 	}
 	main := b.Bytes()
 	drawsXObject = pdfDoOpRe.Match(main)
@@ -188,13 +186,24 @@ func (o *pdfObjects) pageContent(page int) (content []byte, drawsXObject bool) {
 			if !bytes.Contains(xd, []byte("/Form")) {
 				continue
 			}
-			if s, ok := pdfDecodeStream(o.stream[n]); ok {
-				b.Write(s)
-				b.WriteByte('\n')
-			}
+			b.Write(pdfDecodeContent(o.stream[n]))
+			b.WriteByte('\n')
 		}
 	}
 	return b.Bytes(), drawsXObject
+}
+
+// pdfDecodeContent inflates a stream the page tree names as content.
+// pdfDecodeStream only accepts an uncompressed body that shows text, to
+// keep font and image payloads out of the text scan — but here the
+// structure already says this is content, and an uncompressed picture
+// page ("q /Im1 Do Q") has no text operator to show. Rejecting it hid
+// exactly the pages this check exists to find.
+func pdfDecodeContent(body []byte) []byte {
+	if d, ok := pdfDecodeStream(body); ok {
+		return d
+	}
+	return bytes.TrimSpace(body)
 }
 
 func (o *pdfObjects) contentRefs(page []byte) []int {

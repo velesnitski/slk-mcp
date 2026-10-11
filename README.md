@@ -335,6 +335,10 @@ The `/mcp` listing shows each server by its **config key** in `~/.claude.json`
 keeps that key current so the dialog never displays a stale version. After
 `make install`, **restart** Claude Code (a `/mcp` reconnect isn't enough). ADR 024.
 
+Beyond `go test`: `make fuzz` (FUZZTIME per target, default 30s) explores the
+fuzz targets for every parser of untrusted input, and `make mutate` runs
+mutation testing with gremlins and fails if any mutant survives. ADR 118.
+
 ## Compatibility (1.0)
 
 SemVer applies to the **machine surface**: tool names, argument

@@ -27,7 +27,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "1.54.0"
+var version = "1.55.0"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -58,7 +58,7 @@ func run() error {
 		return err
 	}
 
-	registry := slack.NewRegistry(cfg, log)
+	mcpServer, registry := buildServer(cfg, log)
 	client := registry[0].Client // primary workspace
 	switch {
 	case cfg.PostsAsUser():
@@ -75,18 +75,6 @@ func run() error {
 		// keep those out of shared logs.
 		log.Info("multi-workspace mode", "workspaces", len(registry))
 	}
-
-	// Self-reported server name embeds the version so MCP hosts that
-	// only render the name (Claude Code's /mcp listing, error banners,
-	// tool-call prefixes in some IDEs) surface what's actually running
-	// without forcing a separate version probe.
-	mcpServer := server.NewMCPServer(
-		"slack v"+version,
-		version,
-		server.WithToolCapabilities(true),
-		server.WithRecovery(),
-	)
-	tools.NewHubWithRegistry(registry, cfg, log).RegisterAll(mcpServer)
 
 	log.Info("slk-mcp ready",
 		"version", version,
@@ -111,6 +99,25 @@ func run() error {
 	default:
 		return fmt.Errorf("unknown transport: %s", *transport)
 	}
+}
+
+// buildServer wires the workspace registry and every tool into an MCP
+// server. It is the whole of startup minus flags and transport, so the
+// integration test drives exactly what the binary serves. See ADR 118.
+func buildServer(cfg *config.Config, log *slog.Logger) (*server.MCPServer, []slack.Workspace) {
+	registry := slack.NewRegistry(cfg, log)
+	// Self-reported server name embeds the version so MCP hosts that
+	// only render the name (Claude Code's /mcp listing, error banners,
+	// tool-call prefixes in some IDEs) surface what's actually running
+	// without forcing a separate version probe.
+	mcpServer := server.NewMCPServer(
+		"slack v"+version,
+		version,
+		server.WithToolCapabilities(true),
+		server.WithRecovery(),
+	)
+	tools.NewHubWithRegistry(registry, cfg, log).RegisterAll(mcpServer)
+	return mcpServer, registry
 }
 
 // runStdio runs the stdio transport. ServeStdio is blocking and the
