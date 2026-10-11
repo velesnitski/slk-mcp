@@ -283,23 +283,39 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 				fmt.Fprintf(&b, "\n--- %s: read failed: %v\n", f.Path, rerr)
 				continue
 			}
-			pdfText, extracted := extractPDFText(raw)
+			pdfText, extracted, cm := extractPDFTextMode(raw)
 			if !extracted {
 				fmt.Fprintf(&b, "\n--- %s (%s, %d bytes) ---\nsaved to: %s\nNo extractable text layer — a scan, or fonts this extractor cannot map. Open this path with a PDF-capable reader.\n",
 					displayName(f.Path), f.Mimetype, f.Size, f.Path)
 				continue
 			}
-			os.Remove(f.Path)
+			// Slides that are pictures of content leave no trace in the
+			// extracted text. Name them, and keep the file so they can
+			// be opened — deleting it would leave the reader with a gap
+			// and no way to close it. See ADR 117.
+			imagePages, pageCount := pdfImageOnlyPages(raw, cm)
+			if len(imagePages) == 0 {
+				os.Remove(f.Path)
+			}
 			pdfText, secrets := export.Redact(pdfText)
+			fullLen := len([]rune(pdfText))
 			pdfText, truncated := truncateText(pdfText, maxChars)
-			fmt.Fprintf(&b, "\n--- %s (%s, %d bytes)", displayName(f.Path), f.Mimetype, f.Size)
+			fmt.Fprintf(&b, "\n--- %s (%s, %d bytes", displayName(f.Path), f.Mimetype, f.Size)
+			if pageCount > 0 {
+				fmt.Fprintf(&b, ", %d pages", pageCount)
+			}
+			b.WriteString(")")
 			if secrets > 0 {
 				fmt.Fprintf(&b, " — %d secret(s) redacted", secrets)
 			}
 			if truncated {
-				fmt.Fprintf(&b, " — TRUNCATED to %d chars", maxChars)
+				b.WriteString(truncationNote(maxChars, fullLen))
 			}
 			b.WriteString(" — text extracted, check exact figures against the document ---\n")
+			if len(imagePages) > 0 {
+				fmt.Fprintf(&b, "NOT IN THE TEXT: %d page(s) with little or no text that draw images — likely pictures of tables or charts (some may be title slides): %s. Read them visually; file kept at: %s\n",
+					len(imagePages), pdfPageRanges(imagePages), f.Path)
+			}
 			b.WriteString(pdfText)
 			b.WriteString("\n")
 			continue
@@ -332,6 +348,7 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 		// is now in scope, so the key material in them must not reach the
 		// transcript verbatim.
 		text, secrets := export.Redact(text)
+		fullLen := len([]rune(text))
 		text, truncated := truncateText(text, maxChars)
 		fmt.Fprintf(&b, "\n--- %s (%s, %d bytes)", displayName(f.Path), f.Mimetype, f.Size)
 		if secrets > 0 {
@@ -341,7 +358,7 @@ func renderDocuments(saved []savedFile, wsLabel string, maxChars int) string {
 			b.WriteString(" — TRUNCATED at the workbook cell cap")
 		}
 		if truncated {
-			fmt.Fprintf(&b, " — TRUNCATED to %d chars", maxChars)
+			b.WriteString(truncationNote(maxChars, fullLen))
 		}
 		b.WriteString(" ---\n")
 		b.WriteString(text)
@@ -683,6 +700,13 @@ func decodeEmbedded(v string) string {
 		}
 	}
 	return v
+}
+
+// truncationNote says how much was cut and how to get the rest. A bare
+// "TRUNCATED to 40000 chars" left the reader unable to tell a trimmed
+// tail from a document twice as long. See ADR 117.
+func truncationNote(maxChars, fullLen int) string {
+	return fmt.Sprintf(" — TRUNCATED to %d of %d chars (pass max_chars=%d for all of it)", maxChars, fullLen, fullLen)
 }
 
 // truncateText caps s at max characters (not bytes, so multi-byte text

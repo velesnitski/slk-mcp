@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.54.0] - 2026-10-11
+
+### Added
+
+- **`read_document` names PDF pages missing from the text.** Pages with
+  little or no text that draw images — slides that are pictures of
+  tables or charts — are listed as page ranges, and the file is kept so
+  they can be read visually. The header shows the page count. ADR 117.
+
+### Changed
+
+- **Truncation notes give the full size:** `TRUNCATED to N of M chars
+  (pass max_chars=M for all of it)`, for every document type.
+
 ## [1.53.2] - 2026-10-11
 
 ### Fixed

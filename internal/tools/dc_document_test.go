@@ -263,7 +263,7 @@ func TestReadDocument_TruncationIsReportedNotSilent(t *testing.T) {
 		"channel": "alpha", "max_chars": float64(10),
 	}).Text()
 
-	if !strings.Contains(got, "TRUNCATED to 10 chars") {
+	if !strings.Contains(got, "TRUNCATED to 10 of 100 chars (pass max_chars=100 for all of it)") {
 		t.Errorf("truncation must be announced:\n%s", got)
 	}
 	if strings.Contains(got, strings.Repeat("ab", 50)) {
@@ -566,7 +566,7 @@ func TestReadDocument_PDFTruncationIsAnnounced(t *testing.T) {
 		"channel": "alpha", "max_chars": float64(12),
 	}).Text()
 
-	if !strings.Contains(got, "TRUNCATED to 12 chars") {
+	if !strings.Contains(got, "TRUNCATED to 12 of ") {
 		t.Errorf("a truncated PDF must say so:\n%s", got)
 	}
 	if strings.Contains(got, "Second line of the report body") {

@@ -52,6 +52,14 @@ type pdfCMap struct {
 // reproduces characters, not layout, and a number lifted out of a table
 // is only as trustworthy as the column it came from.
 func extractPDFText(raw []byte) (string, bool) {
+	text, ok, _ := extractPDFTextMode(raw)
+	return text, ok
+}
+
+// extractPDFTextMode is extractPDFText that also reports which reading
+// won: the CMap it used, or nil for the raw-bytes reading. The per-page
+// coverage check reads each page the same way. See ADR 117.
+func extractPDFTextMode(raw []byte) (string, bool, *pdfCMap) {
 	type decodedStream struct {
 		header []byte
 		data   []byte
@@ -69,7 +77,7 @@ func extractPDFText(raw []byte) (string, bool) {
 		}
 	}
 	if len(decoded) == 0 {
-		return "", false
+		return "", false, nil
 	}
 
 	modes := make([]*pdfCMap, 0, 2)
@@ -89,6 +97,7 @@ func extractPDFText(raw []byte) (string, bool) {
 	// signs while the actual document, several hundred thousand
 	// characters of it, sits in the reading that was never tried.
 	best, bestScore := "", -1
+	var bestCM *pdfCMap
 	for _, cm := range modes {
 		var b strings.Builder
 		for _, d := range decoded {
@@ -103,13 +112,13 @@ func extractPDFText(raw []byte) (string, bool) {
 		}
 		text := pdfTidy(b.String())
 		if score := pdfWordScore(text); score > bestScore {
-			best, bestScore = text, score
+			best, bestScore, bestCM = text, score, cm
 		}
 	}
 	if !pdfTextLooksUsable(best) {
-		return "", false
+		return "", false, bestCM
 	}
-	return best, true
+	return best, true, bestCM
 }
 
 // pdfMinWordRuns is the least number of word-shaped runs a reading must
