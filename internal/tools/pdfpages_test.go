@@ -44,8 +44,8 @@ func buildPDF(objs []pdfObj, root int, objStm bool) []byte {
 		raw := head.String() + body.String()
 		var z bytes.Buffer
 		zw := zlib.NewWriter(&z)
-		zw.Write([]byte(raw))
-		zw.Close()
+		_, _ = zw.Write([]byte(raw))
+		_ = zw.Close()
 		fmt.Fprintf(&b, "99 0 obj\n<< /Type /ObjStm /N %d /First %d /Filter /FlateDecode /Length %d >>\nstream\n",
 			len(packed), len(head.String()), z.Len())
 		b.Write(z.Bytes())
