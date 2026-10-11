@@ -509,9 +509,78 @@ func blocksText(bs goslack.Blocks) []string {
 					out = append(out, t.Text)
 				}
 			}
+		case *goslack.RichTextBlock:
+			// Slackbot reminders, workflow posts and most app messages
+			// carry their whole body here. Unhandled, they rendered as
+			// "[blocks: 1]" — the line said a message existed and nothing
+			// about what it said.
+			for _, el := range v.Elements {
+				if s := richTextElementText(el); s != "" {
+					out = append(out, s)
+				}
+			}
 		}
 	}
 	return out
+}
+
+// richTextElementText flattens one rich_text element (section, list,
+// quote, preformatted) to plain text. Mentions are emitted in Slack's
+// own markup (<@U…>, <#C…>) so the caller's user/channel resolution
+// renders them like any other message body. Pure.
+func richTextElementText(el goslack.RichTextElement) string {
+	switch v := el.(type) {
+	case *goslack.RichTextSection:
+		return richTextSectionText(v.Elements)
+	case *goslack.RichTextQuote:
+		return richTextSectionText(v.Elements)
+	case *goslack.RichTextPreformatted:
+		return richTextSectionText(v.Elements)
+	case *goslack.RichTextList:
+		var items []string
+		for _, item := range v.Elements {
+			if s := richTextElementText(item); s != "" {
+				items = append(items, "• "+s)
+			}
+		}
+		return strings.Join(items, " ")
+	}
+	return ""
+}
+
+// richTextSectionText joins the inline elements of one rich_text
+// section. Pure.
+func richTextSectionText(els []goslack.RichTextSectionElement) string {
+	var b strings.Builder
+	for _, e := range els {
+		switch v := e.(type) {
+		case *goslack.RichTextSectionTextElement:
+			b.WriteString(v.Text)
+		case *goslack.RichTextSectionLinkElement:
+			if v.Text != "" {
+				b.WriteString(v.Text)
+			} else {
+				b.WriteString(v.URL)
+			}
+		case *goslack.RichTextSectionUserElement:
+			b.WriteString("<@" + v.UserID + ">")
+		case *goslack.RichTextSectionChannelElement:
+			b.WriteString("<#" + v.ChannelID + ">")
+		case *goslack.RichTextSectionUserGroupElement:
+			b.WriteString("<!subteam^" + v.UsergroupID + ">")
+		case *goslack.RichTextSectionBroadcastElement:
+			b.WriteString("@" + v.Range)
+		case *goslack.RichTextSectionEmojiElement:
+			b.WriteString(":" + v.Name + ":")
+		case *goslack.RichTextSectionDateElement:
+			if v.Fallback != nil && *v.Fallback != "" {
+				b.WriteString(*v.Fallback)
+			} else {
+				b.WriteString(time.Unix(int64(v.Timestamp), 0).Format("2006-01-02 15:04"))
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // attachmentText returns the readable prose carried by one legacy
@@ -676,6 +745,28 @@ func TimeZoneNote() string {
 	return fmt.Sprintf("times: %s (UTC%s%02d:%02d)", name, sign, offset/3600, (offset%3600)/60)
 }
 
+// clockNow is the reference "now" for ClockLabel; a var so tests pin it.
+var clockNow = time.Now
+
+// ClockLabel renders a message time for a digest line: "15:04" for
+// today, "02.01 15:04" for any other day. A multi-day window rendered
+// bare clock times, so a message from last week and one from this
+// morning looked alike and a stale item read as fresh. Today keeps the
+// short form, so the common same-day sweep costs nothing extra. Pure
+// apart from the clock.
+func ClockLabel(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	now := clockNow()
+	ty, tm, td := t.Date()
+	ny, nm, nd := now.In(t.Location()).Date()
+	if ty == ny && tm == nm && td == nd {
+		return t.Format("15:04")
+	}
+	return t.Format("02.01 15:04")
+}
+
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.
 func ParseTS(ts string) time.Time {
 	if ts == "" {
@@ -721,7 +812,7 @@ func messageLineImpl(msg goslack.Message, userName string, users map[string]stri
 	t := ParseTS(msg.Timestamp)
 	b.WriteByte('[')
 	if !t.IsZero() {
-		b.WriteString(t.Format("15:04"))
+		b.WriteString(ClockLabel(t))
 		b.WriteByte(' ')
 	}
 	b.WriteString(displayName(userName, msg.User))
@@ -974,7 +1065,7 @@ func writeThreadsByParent(b *strings.Builder, threads map[string][]goslack.Messa
 			continue
 		}
 		if when := ParseTS(ts); !when.IsZero() {
-			fmt.Fprintf(b, "thread from %s:\n", when.Format("15:04"))
+			fmt.Fprintf(b, "thread from %s:\n", ClockLabel(when))
 		} else {
 			b.WriteString("thread:\n")
 		}
@@ -1064,7 +1155,7 @@ func ThreadContextLine(marker string, m goslack.Message, displayName string) str
 	t := ParseTS(m.Timestamp)
 	when := ""
 	if !t.IsZero() {
-		when = t.Format("15:04")
+		when = ClockLabel(t)
 	}
 	return "\t" + marker + " [" + when + " " + name + "] " + body
 }

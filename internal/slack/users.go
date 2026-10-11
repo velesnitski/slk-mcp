@@ -134,7 +134,50 @@ func (s *UserService) IDForHandle(ctx context.Context, handle string) (string, e
 	if id, ok := matchHandle(users, handle); ok {
 		return id, nil
 	}
+	// Slack Connect: a person from another organisation is not in
+	// users.list, so their handle never matched — yet the operator has a
+	// DM with them. Look among DM peers missing from the roster.
+	if id, ok := s.matchExternalDMPeer(ctx, users, handle); ok {
+		return id, nil
+	}
 	return "", fmt.Errorf("no user matches handle %q", handle)
+}
+
+// maxExternalPeerLookups bounds the users.info calls the external-peer
+// fallback makes, so a typo in a large workspace cannot fan out.
+const maxExternalPeerLookups = 50
+
+// matchExternalDMPeer resolves a handle against DM peers that are not in
+// the workspace roster (Slack Connect members). One conversations.list
+// page of IMs plus a users.info per unknown peer, bounded.
+func (s *UserService) matchExternalDMPeer(ctx context.Context, roster []goslack.User, handle string) (string, bool) {
+	known := make(map[string]bool, len(roster))
+	for _, u := range roster {
+		known[u.ID] = true
+	}
+	ims, err := ratelimit.DoR(ctx, s.log, func() ([]goslack.Channel, error) {
+		chs, _, err := s.api.GetConversationsContext(ctx, &goslack.GetConversationsParameters{
+			Types: []string{"im"}, Limit: 200, ExcludeArchived: true,
+		})
+		return chs, err
+	})
+	if err != nil {
+		return "", false
+	}
+	var external []goslack.User
+	for _, ch := range ims {
+		if ch.User == "" || known[ch.User] || len(external) >= maxExternalPeerLookups {
+			continue
+		}
+		u, err := ratelimit.DoR(ctx, s.log, func() (*goslack.User, error) {
+			return s.api.GetUserInfoContext(ctx, ch.User)
+		})
+		if err != nil || u == nil || u.Deleted {
+			continue
+		}
+		external = append(external, *u)
+	}
+	return matchHandle(external, handle)
 }
 
 // matchHandle finds the user whose handle matches want (leading '@'

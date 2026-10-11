@@ -353,10 +353,12 @@ var closingAckRe = regexp.MustCompile(`(?i)^(?:thanks|thank you|thx|ok|okay|got 
 // a reaction typed as a message (":flushed:"), never an ask.
 var reactionOnlyRe = regexp.MustCompile(`^(?::[a-z0-9_+'-]+:\s*)+$`)
 
-// slackJoinNoticeRe matches Slack's own "X has joined Slack – take a
-// second to say hello" DM notice. Search attributes it to the new member,
-// so it surfaced as a pending mention addressed to the operator.
-var slackJoinNoticeRe = regexp.MustCompile(`(?i)has joined slack\s*[–—-]\s*take a second to say hello\.?$`)
+// slackJoinNoticeRe matches Slack's own conversation notices: "X has
+// joined Slack – take a second to say hello", and the rename stamps
+// ("named the conversation …", "renamed the channel from …"). Search
+// attributes them to the person who triggered them, so they surfaced as
+// pending mentions addressed to the operator. None of them asks anything.
+var slackJoinNoticeRe = regexp.MustCompile(`(?i)(?:has joined slack\s*[–—-]\s*take a second to say hello\.?$|^named the conversation\s+"[^"]*"\.?$|^has renamed the (?:channel|conversation) from\s+"[^"]*"\s+to\s+"[^"]*"\.?$)`)
 
 // isClosingAckText reports whether a message body is a conversation-
 // closing acknowledgement. Two tiers: the exact-match regex ("спасибо",

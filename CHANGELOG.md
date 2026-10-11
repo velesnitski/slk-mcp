@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.53.2] - 2026-10-11
+
+### Fixed
+
+- **Messages from earlier days carry their date** (`02.10 17:17`);
+  today's lines keep the short `17:17`.
+- **`@handle` resolves DM partners from other organisations** (Slack
+  Connect), who are missing from `users.list`.
+- **Conversation rename stamps are dropped** by `drop_closing_acks`, like
+  the join notice.
+- **`rich_text` blocks are read**, so Slackbot reminders, workflow and
+  app posts show their text instead of `[blocks: 1]`.
+  ADR 116.
+
 ## [1.53.1] - 2026-10-02
 
 ### Fixed

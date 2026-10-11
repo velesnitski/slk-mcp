@@ -64,3 +64,15 @@ func TestIsClosingAckText_NewClosers(t *testing.T) {
 		}
 	}
 }
+
+func TestIsClosingAckText_RenameStampsAreNotAsks(t *testing.T) {
+	for _, s := range []string{`named the conversation "Project kickoff"`,
+		`has renamed the channel from "old-name" to "new-name"`} {
+		if !isClosingAckText(s) {
+			t.Errorf("%q is a Slack system stamp, not a pending ask", s)
+		}
+	}
+	if isClosingAckText(`can you rename the conversation "x"?`) {
+		t.Error("a real request mentioning a rename must stay")
+	}
+}
