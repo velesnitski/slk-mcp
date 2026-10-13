@@ -46,7 +46,7 @@ func TestRunListUsers_ExcludesBotsAndSlackbotByDefault(t *testing.T) {
 	f.On("users.list", usRoster(usMemberSam, usMemberBot, usMemberSB, usMemberAlex))
 	h := f.hub(t)
 
-	res := h.runListUsers(context.Background(), "", false, false, "")
+	res := h.runListUsers(context.Background(), "", false, userRowOpts{}, "")
 	if res.IsError {
 		t.Fatalf("roster read failed: %q", resultText(res))
 	}
@@ -68,7 +68,7 @@ func TestRunListUsers_IncludeBotsAddsThemWithAFlag(t *testing.T) {
 	f.On("users.list", usRoster(usMemberAlex, usMemberBot, usMemberSB))
 	h := f.hub(t)
 
-	text := resultText(h.runListUsers(context.Background(), "", true, false, ""))
+	text := resultText(h.runListUsers(context.Background(), "", true, userRowOpts{}, ""))
 	if !strings.HasPrefix(text, "3 users\n") {
 		t.Fatalf("include_bots should count every account; got:\n%s", text)
 	}
@@ -83,17 +83,17 @@ func TestRunListUsers_FilterIsCaseInsensitiveAcrossFields(t *testing.T) {
 	h := f.hub(t)
 
 	// Job title.
-	text := resultText(h.runListUsers(context.Background(), "", false, false, "qa"))
+	text := resultText(h.runListUsers(context.Background(), "", false, userRowOpts{}, "qa"))
 	if !strings.HasPrefix(text, "1 users\n") || !strings.Contains(text, "alex") {
 		t.Fatalf("filter should match the job title; got:\n%s", text)
 	}
 	// Handle.
-	text = resultText(h.runListUsers(context.Background(), "", false, false, "sam"))
+	text = resultText(h.runListUsers(context.Background(), "", false, userRowOpts{}, "sam"))
 	if !strings.HasPrefix(text, "1 users\n") || !strings.Contains(text, "sam") {
 		t.Fatalf("filter should match the handle; got:\n%s", text)
 	}
 	// No match is an honest empty roster, not the full list.
-	text = resultText(h.runListUsers(context.Background(), "", false, false, "nobody-here"))
+	text = resultText(h.runListUsers(context.Background(), "", false, userRowOpts{}, "nobody-here"))
 	if !strings.HasPrefix(text, "0 users") {
 		t.Fatalf("an unmatched filter must yield an empty roster; got:\n%s", text)
 	}
@@ -104,7 +104,7 @@ func TestRunListUsers_APIErrorIsReported(t *testing.T) {
 	f.OnError("users.list", "missing_scope")
 	h := f.hub(t)
 
-	res := h.runListUsers(context.Background(), "", false, false, "")
+	res := h.runListUsers(context.Background(), "", false, userRowOpts{}, "")
 	if res == nil || !res.IsError {
 		t.Fatalf("a failed roster read must be an error, not an empty list; got %q", resultText(res))
 	}
@@ -125,7 +125,7 @@ func TestRunListUsers_MultiWorkspaceSectionsAndPerWorkspaceError(t *testing.T) {
 	})
 	h := f.multiHub(t, usWS{Name: "alpha"}, usWS{Name: "beta"})
 
-	res := h.runListUsers(context.Background(), "", false, false, "")
+	res := h.runListUsers(context.Background(), "", false, userRowOpts{}, "")
 	if res.IsError {
 		t.Fatalf("one failing workspace must not void the other: %q", resultText(res))
 	}
@@ -151,7 +151,7 @@ func TestRunListUsers_WithActivityAddsLastPostPerUser(t *testing.T) {
 	})
 	h := f.hub(t)
 
-	text := resultText(h.runListUsers(context.Background(), "", false, true, ""))
+	text := resultText(h.runListUsers(context.Background(), "", false, userRowOpts{withActivity: true}, ""))
 	if !strings.Contains(text, "last_post=2023-11-14") {
 		t.Errorf("a search hit should become a date:\n%s", text)
 	}
@@ -216,7 +216,7 @@ func TestRenderUserRows_FlagsAndNameFallbacks(t *testing.T) {
 	admin := goslack.User{ID: "U3", Name: "admin.one", IsAdmin: true, IsOwner: true, RealName: "Alex"}
 	nameless := goslack.User{ID: "U4", Name: "ghost"}
 
-	got := renderUserRows([]goslack.User{owner, guest, admin, nameless}, nil, false)
+	got := renderUserRows([]goslack.User{owner, guest, admin, nameless}, nil, userRowOpts{})
 	for _, want := range []string{
 		"U1 | owner.one | Pat |  | owner",  // RealName falls back to Profile.RealName
 		"U2 | guest.one | Sam |  | guest",  // then to Profile.DisplayName
@@ -231,14 +231,14 @@ func TestRenderUserRows_FlagsAndNameFallbacks(t *testing.T) {
 
 func TestRenderUserRows_ActivityModeLabelsAMissingDate(t *testing.T) {
 	u := goslack.User{ID: "U1", Name: "alex", RealName: "Alex"}
-	got := renderUserRows([]goslack.User{u}, map[string]string{}, true)
+	got := renderUserRows([]goslack.User{u}, map[string]string{}, userRowOpts{withActivity: true})
 	if !strings.Contains(got, "last_post=(none found)") {
 		t.Fatalf("an absent date must be labelled, not blank:\n%s", got)
 	}
 }
 
 func TestRenderUserRows_EmptyRosterStillCounts(t *testing.T) {
-	if got := renderUserRows(nil, nil, false); got != "0 users\n" {
+	if got := renderUserRows(nil, nil, userRowOpts{}); got != "0 users\n" {
 		t.Fatalf("an empty roster should still carry the count header, got %q", got)
 	}
 }
@@ -302,7 +302,7 @@ func TestListUsersTool_UnknownWorkspaceNamesTheOnesItHas(t *testing.T) {
 	f := usNewFakeSlack(t)
 	h := f.multiHub(t, usWS{Name: "alpha"}, usWS{Name: "beta"})
 
-	res := h.runListUsers(context.Background(), "ghost", false, false, "")
+	res := h.runListUsers(context.Background(), "ghost", false, userRowOpts{}, "")
 	if res == nil || !res.IsError {
 		t.Fatalf("an unknown workspace must error, got %+v", res)
 	}

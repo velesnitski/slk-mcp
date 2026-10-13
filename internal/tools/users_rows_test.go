@@ -18,7 +18,7 @@ func TestRenderUserRows_LeadsWithTheSlackID(t *testing.T) {
 	// to a person: the roster lists handles, the payload carries IDs.
 	got := renderUserRows([]goslack.User{
 		rosterUser("U0EXAMPLE01", "handle.one", "First Person", "Engineer"),
-	}, nil, false)
+	}, nil, userRowOpts{})
 
 	line := ""
 	for _, l := range strings.Split(got, "\n") {
@@ -37,7 +37,7 @@ func TestRenderUserRows_LeadsWithTheSlackID(t *testing.T) {
 func TestRenderUserRows_KeepsIDInActivityMode(t *testing.T) {
 	got := renderUserRows(
 		[]goslack.User{rosterUser("U0EXAMPLE02", "handle.two", "Second Person", "")},
-		map[string]string{"U0EXAMPLE02": "2026-09-01"}, true)
+		map[string]string{"U0EXAMPLE02": "2026-09-01"}, userRowOpts{withActivity: true})
 	if !strings.Contains(got, "U0EXAMPLE02 | handle.two") {
 		t.Errorf("id must survive the with_activity variant; got:\n%s", got)
 	}
@@ -50,7 +50,7 @@ func TestRenderUserRows_CountsUsers(t *testing.T) {
 	got := renderUserRows([]goslack.User{
 		rosterUser("U0EXAMPLE03", "a", "A", ""),
 		rosterUser("U0EXAMPLE04", "b", "B", ""),
-	}, nil, false)
+	}, nil, userRowOpts{})
 	if !strings.HasPrefix(got, "2 users\n") {
 		t.Fatalf("header must count the rendered rows; got:\n%s", got)
 	}

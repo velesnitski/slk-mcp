@@ -19,17 +19,24 @@ func (h *Hub) registerUserTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("list_users",
-			mcp.WithDescription("List active workspace users with Slack ID, handle, real name, job title, role flags, and profile-update date. The ID is what messages and API payloads carry, so it is the column that turns a raw <@U…> back into a person. Optionally include last-message date. With multiple workspaces configured, empty workspace lists every one under a [label] heading."),
+			mcp.WithDescription("List active workspace users with Slack ID, handle, real name, job title, role flags, and profile-update date; with_email adds each email and email_domain keeps only addresses on a domain (e.g. ru). The ID is what messages and API payloads carry, so it is the column that turns a raw <@U…> back into a person. Optionally include last-message date. With multiple workspaces configured, empty workspace lists every one under a [label] heading."),
 			mcp.WithBoolean("include_bots", mcp.Description("Include bot/integration accounts (default: false)")),
 			mcp.WithBoolean("with_activity", mcp.Description("Fetch each user's last-message date via search (slower; one search.messages call per user, run in parallel) (default: false)")),
 			mcp.WithString("filter", mcp.Description("Case-insensitive substring filter — matches against handle, real name, and job title. Useful for 'marketing', 'qa', 'devops' etc.")),
+			mcp.WithBoolean("with_email", mcp.Description("Add each user's email (default: false). Slack only returns emails to a token with the users:read.email scope; without it the column says so instead of looking empty.")),
+			mcp.WithString("email_domain", mcp.Description("Keep only users whose email is on this domain or a subdomain of it — 'ru' matches x@mail.ru and x@corp.example.ru, 'example.net' matches x@example.net. Implies with_email.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			domain := normalizeEmailDomain(req.GetString("email_domain", ""))
 			return h.runListUsers(ctx,
 				req.GetString("workspace", ""),
 				req.GetBool("include_bots", false),
-				req.GetBool("with_activity", false),
+				userRowOpts{
+					withActivity: req.GetBool("with_activity", false),
+					withEmail:    req.GetBool("with_email", false) || domain != "",
+					emailDomain:  domain,
+				},
 				strings.ToLower(strings.TrimSpace(req.GetString("filter", "")))), nil
 		},
 	)
@@ -41,7 +48,7 @@ func (h *Hub) registerUserTools(s *server.MCPServer) {
 // regardless of the `workspace` argument was a bug, not a contract).
 // Single workspace renders the flat list byte-for-byte as before; two
 // or more nest each under a `## [label]` heading.
-func (h *Hub) runListUsers(ctx context.Context, workspace string, includeBots, withActivity bool, filter string) *mcp.CallToolResult {
+func (h *Hub) runListUsers(ctx context.Context, workspace string, includeBots bool, opts userRowOpts, filter string) *mcp.CallToolResult {
 	targets := h.workspaceTargets(workspace)
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
@@ -50,7 +57,7 @@ func (h *Hub) runListUsers(ctx context.Context, workspace string, includeBots, w
 
 	var sections []string
 	for _, ws := range targets {
-		body, err := h.withClient(ws.Client).listUsersBody(ctx, includeBots, withActivity, filter)
+		body, err := h.withClient(ws.Client).listUsersBody(ctx, includeBots, opts, filter)
 		switch {
 		case err != nil && !multi:
 			return mcp.NewToolResultError(err.Error())
@@ -70,7 +77,7 @@ func (h *Hub) runListUsers(ctx context.Context, workspace string, includeBots, w
 // run against the SAME workspace's search index (a primary-scoped
 // search over a secondary workspace's handles would silently return
 // wrong last-post dates).
-func (h *Hub) listUsersBody(ctx context.Context, includeBots, withActivity bool, filter string) (string, error) {
+func (h *Hub) listUsersBody(ctx context.Context, includeBots bool, opts userRowOpts, filter string) (string, error) {
 	users, err := h.Users().List(ctx)
 	if err != nil {
 		return "", err
@@ -89,12 +96,36 @@ func (h *Hub) listUsersBody(ctx context.Context, includeBots, withActivity bool,
 		filtered = append(filtered, u)
 	}
 
+	// The domain filter runs on the full roster, but whether Slack sent
+	// emails at all is judged before it: an empty result must say "no
+	// emails visible" rather than "nobody on that domain". ADR 120.
+	visible := 0
+	for _, u := range filtered {
+		if u.Profile.Email != "" {
+			visible++
+		}
+	}
+	scanned := len(filtered)
+	if opts.emailDomain != "" {
+		kept := filtered[:0]
+		for _, u := range filtered {
+			if emailOnDomain(u.Profile.Email, opts.emailDomain) {
+				kept = append(kept, u)
+			}
+		}
+		filtered = kept
+	}
+
 	lastPost := map[string]string{}
-	if withActivity {
+	if opts.withActivity {
 		lastPost = h.fetchLastPostDates(ctx, filtered)
 	}
 
-	return renderUserRows(filtered, lastPost, withActivity), nil
+	body := renderUserRows(filtered, lastPost, opts)
+	if opts.withEmail {
+		body += "\n" + emailCoverageNote(visible, scanned, opts.emailDomain)
+	}
+	return body, nil
 }
 
 // renderUserRows renders the roster one user per line. Split out of
@@ -107,7 +138,14 @@ func (h *Hub) listUsersBody(ctx context.Context, includeBots, withActivity bool,
 // stripped canvas mention. Without the ID in the roster there is no
 // second route from "<@U…>" back to a person, and the reader is left
 // correlating by guesswork. See ADR 096.
-func renderUserRows(users []goslack.User, lastPost map[string]string, withActivity bool) string {
+// userRowOpts selects the optional roster columns.
+type userRowOpts struct {
+	withActivity bool
+	withEmail    bool
+	emailDomain  string // normalized; non-empty filters the roster
+}
+
+func renderUserRows(users []goslack.User, lastPost map[string]string, opts userRowOpts) string {
 	var b strings.Builder
 	for _, u := range users {
 		flags := ""
@@ -134,17 +172,22 @@ func renderUserRows(users []goslack.User, lastPost map[string]string, withActivi
 		}
 		updated := u.Updated.Time().UTC().Format("2006-01-02")
 		title := strings.TrimSpace(u.Profile.Title)
-		if withActivity {
+		fmt.Fprintf(&b, "%s | %s | %s | %s |%s | profile_updated=%s", u.ID, u.Name, real, title, flags, updated)
+		if opts.withEmail {
+			email := u.Profile.Email
+			if email == "" {
+				email = "(not visible)"
+			}
+			fmt.Fprintf(&b, " | email=%s", email)
+		}
+		if opts.withActivity {
 			last := lastPost[u.ID]
 			if last == "" {
 				last = "(none found)"
 			}
-			fmt.Fprintf(&b, "%s | %s | %s | %s |%s | profile_updated=%s | last_post=%s\n",
-				u.ID, u.Name, real, title, flags, updated, last)
-		} else {
-			fmt.Fprintf(&b, "%s | %s | %s | %s |%s | profile_updated=%s\n",
-				u.ID, u.Name, real, title, flags, updated)
+			fmt.Fprintf(&b, " | last_post=%s", last)
 		}
+		b.WriteString("\n")
 	}
 	header := fmt.Sprintf("%d users\n", len(users))
 	return header + strings.TrimRight(b.String(), "\n")
@@ -213,4 +256,40 @@ func parseSlackTS(ts string) time.Time {
 		sec = sec*10 + int64(c-'0')
 	}
 	return time.Unix(sec, 0)
+}
+
+// normalizeEmailDomain turns "@Mail.RU", ".ru" or " ru " into "mail.ru" /
+// "ru". Pure.
+func normalizeEmailDomain(d string) string {
+	d = strings.ToLower(strings.TrimSpace(d))
+	return strings.TrimLeft(d, "@.")
+}
+
+// emailOnDomain reports whether email's domain is domain or a subdomain
+// of it. "ru" matches mail.ru but not "guru.com" or "ru.example.com".
+// Pure.
+func emailOnDomain(email, domain string) bool {
+	at := strings.LastIndexByte(email, '@')
+	if at < 0 || domain == "" {
+		return false
+	}
+	host := strings.ToLower(email[at+1:])
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+// emailCoverageNote says how many emails Slack returned, so a column of
+// "(not visible)" — or an empty domain match — is read as a missing
+// scope, not as an answer. Pure.
+func emailCoverageNote(visible, total int, domain string) string {
+	if total > 0 && visible == 0 {
+		return fmt.Sprintf("note: Slack returned no emails for these %d users — the token lacks users:read.email (add it to the app's user token scopes and reinstall). No domain check was possible.", total)
+	}
+	note := fmt.Sprintf("emails visible: %d of %d", visible, total)
+	if visible < total {
+		note += " (bots and some guests have none)"
+	}
+	if domain != "" {
+		note += fmt.Sprintf("; filtered to @%s and its subdomains", domain)
+	}
+	return note
 }

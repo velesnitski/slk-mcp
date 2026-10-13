@@ -32,6 +32,7 @@ Under **OAuth & Permissions → User Token Scopes**, add:
 - `groups:history`, `groups:read`
 - `im:history`, `im:read`, `mpim:history`, `mpim:read`
 - `users:read`
+- `users:read.email` (optional — email column in `list_users with_email` / `email_domain`)
 - `search:read`
 - `chat:write` (optional — for `post_message`)
 - `reactions:write` (optional — for `add_reaction`)

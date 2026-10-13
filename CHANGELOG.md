@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.57.0] - 2026-10-13
+
+### Added
+
+- **`list_users with_email` and `email_domain`**: an email column, and a
+  filter that keeps only users on a domain or its subdomains (`ru`
+  matches `mail.ru`, not `guru.com`). A coverage line says how many
+  emails Slack returned; with none it names the missing
+  `users:read.email` scope instead of reporting an empty match. ADR 120.
+
 ## [1.56.0] - 2026-10-13
 
 ### Added

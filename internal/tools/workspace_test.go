@@ -349,7 +349,7 @@ func TestWorkspaceHelpers_PureFormatting(t *testing.T) {
 }
 func TestRunListUsers_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
-	res := hub.runListUsers(context.Background(), "ghost", false, false, "")
+	res := hub.runListUsers(context.Background(), "ghost", false, userRowOpts{}, "")
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should error, got %+v", res)
 	}
