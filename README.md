@@ -35,6 +35,7 @@ Under **OAuth & Permissions → User Token Scopes**, add:
 - `search:read`
 - `chat:write` (optional — for `post_message`)
 - `reactions:write` (optional — for `add_reaction`)
+- `reactions:read` (optional — completes long reactor lists in `get_message reactors=true`)
 
 **Install to Workspace**, copy the **User OAuth Token** (`xoxp-...`) → `SLACK_USER_TOKEN`.
 
@@ -51,6 +52,7 @@ Under **OAuth & Permissions → Bot Token Scopes**, add:
 - `users:read`
 - `chat:write` (optional — for `post_message`)
 - `reactions:write` (optional — for `add_reaction`)
+- `reactions:read` (optional — completes long reactor lists in `get_message reactors=true`)
 
 Optional — add **User Token Scopes** to unlock `get_unread_summary`, `get_mentions`, `mark_read`:
 
@@ -122,6 +124,7 @@ Or via config file (`~/.claude.json`):
 | `search_messages` | Workspace search (Slack syntax) |
 | `find_decisions` | Messages that look like decisions (keywords + reactions) |
 | `get_thread` | Full thread replies |
+| `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
 | `get_user_messages` | Recent messages from a specific user |
 | `post_message` | Post a message (disabled in `SLACK_READ_ONLY`) |
 | `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |

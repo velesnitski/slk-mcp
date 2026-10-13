@@ -492,3 +492,26 @@ func (s *MessageService) AddReaction(ctx context.Context, channelID, timestamp, 
 		})
 	})
 }
+
+// Reactions returns every reaction on a message with its complete list of
+// reacting users. conversations.history already carries reactions, but
+// Slack may cut a busy reaction's user list short of its count; only
+// reactions.get with full=true promises all of them. The user token is
+// retried on an auth refusal, as for downloads. See ADR 119.
+func (s *MessageService) Reactions(ctx context.Context, channelID, ts string) ([]goslack.ItemReaction, error) {
+	ref := goslack.NewRefToMessage(channelID, ts)
+	params := goslack.GetReactionsParameters{Full: true}
+	get := func(api *goslack.Client) ([]goslack.ItemReaction, error) {
+		return ratelimit.DoR(ctx, s.log, func() ([]goslack.ItemReaction, error) {
+			return api.GetReactionsContext(ctx, ref, params)
+		})
+	}
+	out, err := get(s.api)
+	if err != nil && s.fallback != nil && isAuthRefusal(err) {
+		out, err = get(s.fallback)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reactions.get: %w", err)
+	}
+	return out, nil
+}

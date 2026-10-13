@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -27,11 +28,12 @@ func (h *Hub) registerMessageTools(s *server.MCPServer) {
 	}
 	s.AddTool(
 		mcp.NewTool("get_message",
-			mcp.WithDescription("Fetch ONE message verbatim — full text, no truncation — plus its metadata (author, time, edited flag, reactions with counts, attached files, thread position). Pass a permalink (preferred: the workspace is auto-detected from the link's host) or channel + ts. This is the drill-in for any '(+N chars)' preview in a digest or sweep."),
+			mcp.WithDescription("Fetch ONE message verbatim — full text, no truncation — plus its metadata (author, time, edited flag, reactions with counts, attached files, thread position). Pass reactors=true to also list WHO reacted, per emoji and as one de-duplicated roster. Pass a permalink (preferred: the workspace is auto-detected from the link's host) or channel + ts. This is the drill-in for any '(+N chars)' preview in a digest or sweep."),
 			mcp.WithString("permalink", mcp.Description("Slack permalink to the message. The host picks the workspace automatically; thread replies are resolved through their thread_ts.")),
 			mcp.WithString("channel", mcp.Description("Channel name, @handle DM, or C.../D... id — only needed when no permalink is given")),
 			mcp.WithString("ts", mcp.Description("Message timestamp (e.g. 1714000000.000123) — only needed when no permalink is given")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgSingle+" Overrides the permalink-host auto-detection.")),
+			mcp.WithBoolean("reactors", mcp.Description("Also list the people behind each reaction, plus everyone who reacted at all, by name (default: false). Fills in user lists Slack cut short with one reactions.get call.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			permalink := strings.TrimSpace(req.GetString("permalink", ""))
@@ -99,6 +101,9 @@ func (h *Hub) registerMessageTools(s *server.MCPServer) {
 				label = "#" + names[channelID]
 			}
 			body := renderFullMessage(*msg, parent, refs, wsName, label, note)
+			if req.GetBool("reactors", false) && len(msg.Reactions) > 0 {
+				body += "\n" + scoped.reactorsBlock(ctx, channelID, msg)
+			}
 			return mcp.NewToolResultText(body), nil
 		},
 	)
@@ -365,4 +370,75 @@ func hostsEqual(host, teamURL string) bool {
 		return false
 	}
 	return strings.EqualFold(host, u.Host)
+}
+
+// reactorsBlock names who reacted to a message. History usually carries
+// each reaction's users already; when any list is shorter than its count
+// Slack truncated it, and reactions.get (full) fills it in. If that call
+// fails, the partial lists are still shown, marked as partial. ADR 119.
+func (h *Hub) reactorsBlock(ctx context.Context, channelID string, msg *goslack.Message) string {
+	reactions := msg.Reactions
+	note := ""
+	if reactionsTruncated(reactions) {
+		full, err := h.Messages().Reactions(ctx, channelID, msg.Timestamp)
+		if err == nil && len(full) > 0 {
+			reactions = full
+		} else if err != nil {
+			note = "partial — Slack listed fewer users than the counts and the full lookup failed: " + err.Error()
+		}
+	}
+	var ids []string
+	for _, r := range reactions {
+		ids = append(ids, r.Users...)
+	}
+	return renderReactors(reactions, h.Users().NamesFor(ctx, ids), note)
+}
+
+// reactionsTruncated reports whether any reaction lists fewer users than
+// its count. Pure.
+func reactionsTruncated(reactions []goslack.ItemReaction) bool {
+	for _, r := range reactions {
+		if len(r.Users) < r.Count {
+			return true
+		}
+	}
+	return false
+}
+
+// renderReactors renders who reacted: one line per emoji, then everyone
+// who reacted at all, de-duplicated and sorted, so "who did not react"
+// is a set difference against a member list. Unresolved ids show as the
+// raw id. Pure.
+func renderReactors(reactions []goslack.ItemReaction, names map[string]string, note string) string {
+	name := func(id string) string {
+		if n := names[id]; n != "" {
+			return n
+		}
+		return id
+	}
+	var b strings.Builder
+	b.WriteString("reacted by:\n")
+	seen := map[string]bool{}
+	var all []string
+	for _, r := range reactions {
+		people := make([]string, 0, len(r.Users))
+		for _, id := range r.Users {
+			people = append(people, name(id))
+			if !seen[id] {
+				seen[id] = true
+				all = append(all, name(id))
+			}
+		}
+		line := fmt.Sprintf("  :%s: ×%d — %s", r.Name, r.Count, strings.Join(people, ", "))
+		if missing := r.Count - len(r.Users); missing > 0 {
+			line += fmt.Sprintf(" (+%d not listed)", missing)
+		}
+		b.WriteString(line + "\n")
+	}
+	sort.Strings(all)
+	fmt.Fprintf(&b, "everyone who reacted (%d): %s", len(all), strings.Join(all, ", "))
+	if note != "" {
+		b.WriteString("\nnote: " + note)
+	}
+	return b.String()
 }

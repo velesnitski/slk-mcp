@@ -272,3 +272,7 @@ func TestRunDownloadAudio_BadPermalinkIsError(t *testing.T) {
 		t.Fatalf("unparseable permalink should error, got %+v", res)
 	}
 }
+
+func (f *fakeAudioClient) Reactions(ctx context.Context, channelID, ts string) ([]goslack.ItemReaction, error) {
+	return nil, errors.New("Reactions not supported in fake")
+}

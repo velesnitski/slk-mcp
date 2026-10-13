@@ -311,3 +311,7 @@ func TestOperatorRepliedSince_EmptySelfBails(t *testing.T) {
 			fake.HistoryCalls, fake.RepliesCalls)
 	}
 }
+
+func (f *fakeMessageClient) Reactions(ctx context.Context, channelID, ts string) ([]goslack.ItemReaction, error) {
+	return nil, errors.New("Reactions not supported in fake")
+}
