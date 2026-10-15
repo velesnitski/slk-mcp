@@ -700,16 +700,12 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	return strings.TrimRight(b.String(), "\n"), cursor, nil
 }
 
-// buildMentions renders the mentions sweep for the single workspace this
-// Hub is scoped to. Returns the rendered block (including its own count
-// header) or "" when there are no qualifying mentions.
-func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error) {
-	return h.sweepMentions(ctx, newSweep(ctx, h.log, "get_mentions", ""), p)
-}
-
-// sweepMentions is buildMentions with its fetch phases run through sw
-// (ADR 121). A search query or the DM backstop cut by the deadline makes
-// the list partial — said so at the top, never rendered as "no mentions".
+// sweepMentions renders the mentions sweep for the single workspace this
+// Hub is scoped to, its fetch phases run through sw (ADR 121). Returns
+// the rendered block (including its own count header) or "" when there
+// are no qualifying mentions. A search query or the DM backstop cut by
+// the deadline makes the list partial — said so at the top, never
+// rendered as "no mentions".
 func (h *Hub) sweepMentions(ctx context.Context, sw *sweep, p mentionParams) (string, error) {
 	after := time.Now().Add(-time.Duration(p.hours) * time.Hour).Format("2006-01-02")
 
