@@ -48,7 +48,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	// apiOpts is empty in production — cfg.APIURL has no environment
 	// binding, so only an in-process caller (a test) can redirect the
 	// Web API. See the field's doc comment.
-	var apiOpts []goslack.Option
+	apiOpts := []goslack.Option{goslack.OptionHTTPClient(newHTTPClient())}
 	if cfg.APIURL != "" {
 		apiOpts = append(apiOpts, goslack.OptionAPIURL(cfg.APIURL))
 	}

@@ -8,6 +8,7 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -78,6 +79,18 @@ func Do(ctx context.Context, log *slog.Logger, maxRetries int, fn func() error) 
 		wait := rle.RetryAfter
 		if wait <= 0 {
 			wait = time.Duration(1<<attempt) * time.Second
+		}
+		// A wait the caller's deadline cannot cover is not worth starting:
+		// sleeping until the context expires only to fail anyway burns the
+		// whole remaining budget of a sweep that could have reported what it
+		// already has. Fail now, keeping the rate-limit error. ADR 121.
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
+			log.Warn("slack rate-limited beyond the deadline, not retrying",
+				"attempt", attempt+1,
+				"wait", wait.String(),
+				"remaining", time.Until(dl).Round(time.Millisecond).String(),
+			)
+			return fmt.Errorf("rate-limited for %s, beyond the remaining deadline: %w", wait, lastErr)
 		}
 		log.Warn("slack rate-limited, retrying",
 			"attempt", attempt+1,

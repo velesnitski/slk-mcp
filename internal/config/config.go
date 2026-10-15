@@ -45,6 +45,14 @@ type Config struct {
 	MaxMessagesPerChannel int
 	CompactOutput         bool
 
+	// SweepTimeoutSeconds bounds the fetch phases of get_unread_summary
+	// and get_mentions (SLACK_SWEEP_TIMEOUT, default 100; 0 = no bound).
+	// When it fires the tools return what they gathered and name what
+	// they skipped; a workspace that did not finish keeps its incoming
+	// delta cursor. The default stays under the 120 s after which an MCP
+	// host typically moves a call to the background. ADR 121.
+	SweepTimeoutSeconds int
+
 	// AutodiscoverLimit caps the number of channels used when no channels
 	// are passed and SLACK_CHANNELS is empty (the server falls back to the
 	// channels the bot/user has joined).
@@ -131,6 +139,7 @@ func Load() *Config {
 		DigestHours:           parseIntDefault(os.Getenv("SLACK_DIGEST_HOURS"), 24),
 		MaxMessagesPerChannel: parseIntDefault(os.Getenv("SLACK_MAX_MESSAGES"), 200),
 		CompactOutput:         parseBoolDefault(os.Getenv("SLACK_COMPACT"), true),
+		SweepTimeoutSeconds:   parseNonNegativeDefault(os.Getenv("SLACK_SWEEP_TIMEOUT"), 100),
 		AutodiscoverLimit:     parseIntDefault(os.Getenv("SLACK_AUTODISCOVER_LIMIT"), 50),
 		FFmpegBin:             os.Getenv("SLACK_FFMPEG_BIN"),
 		WhisperBin:            os.Getenv("SLACK_WHISPER_BIN"),
@@ -349,6 +358,20 @@ func parseIntDefault(s string, def int) int {
 	}
 	v, err := strconv.Atoi(s)
 	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+// parseNonNegativeDefault is parseIntDefault for settings where 0 is a
+// meaningful value ("off"); only an empty, malformed or negative input
+// falls back to def.
+func parseNonNegativeDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || v < 0 {
 		return def
 	}
 	return v

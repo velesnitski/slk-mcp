@@ -111,7 +111,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("get_unread_summary") {
 		s.AddTool(
 			mcp.NewTool("get_unread_summary",
-				mcp.WithDescription("Smart summary of all unread messages across joined channels. Requires SLACK_USER_TOKEN. With multiple workspaces configured, merges every workspace under a [label] heading."),
+				mcp.WithDescription("Smart summary of all unread messages across joined channels. Requires SLACK_USER_TOKEN. With multiple workspaces configured, merges every workspace under a [label] heading. Fetching is time-bounded (SLACK_SWEEP_TIMEOUT): an 'incomplete:' line names what was not read, and that workspace's cursor is not advanced, so passing the returned cursor re-reads it."),
 				mcp.WithNumber("max_per_channel", mcp.Description("Max unread messages to inline per channel (default: 20)")),
 				mcp.WithBoolean("mentions_only", mcp.Description("If true, return only channels that contain a direct mention of the authenticated user (default: false)")),
 				mcp.WithNumber("thread_preview_replies", mcp.Description("Max thread replies inlined per parent (default: 3)")),
@@ -165,7 +165,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("get_mentions") {
 		s.AddTool(
 			mcp.NewTool("get_mentions",
-				mcp.WithDescription("Messages that mention the authenticated user. Requires SLACK_USER_TOKEN. With multiple workspaces configured, merges every workspace under a [label] heading."),
+				mcp.WithDescription("Messages that mention the authenticated user. Requires SLACK_USER_TOKEN. With multiple workspaces configured, merges every workspace under a [label] heading. Fetching is time-bounded (SLACK_SWEEP_TIMEOUT): an 'incomplete:' line means the list is partial, not that there are no further mentions."),
 				mcp.WithNumber("hours", mcp.Description("Lookback window in hours (default: 72)")),
 				mcp.WithNumber("limit", mcp.Description("Max hits (default: 30)")),
 				mcp.WithBoolean("with_context", mcp.Description("For each hit, fetch a few preceding messages from the same channel/DM (default: false)")),
@@ -266,6 +266,12 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 	perWSAfter, plainAfter := parseAfterCursor(p.afterTS)
 	cursors := make(map[string]string, len(targets))
 
+	// One deadline for the whole fetch, across workspaces (ADR 121).
+	// Rendering runs on ctx: names resolve from caches and must not be
+	// cut to raw ids because the fetch used the budget up.
+	fetchCtx, cancel := sweepContext(ctx, h.cfg.SweepTimeoutSeconds)
+	defer cancel()
+
 	var sections []string
 	for _, ws := range targets {
 		scoped := h.withClient(ws.Client)
@@ -277,7 +283,14 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 		}
 		pws := p
 		pws.afterTS = cursorForWorkspace(perWSAfter, plainAfter, ws.Name)
-		body, wsCursor, err := scoped.buildUnreadSummary(ctx, pws)
+		if fetchCtx.Err() != nil {
+			// Never started: its cursor stays exactly where it was.
+			cursors[ws.Name] = pws.afterTS
+			sections = append(sections, workspaceSection(ws.Name, "_skipped: the get_unread_summary deadline passed before this workspace — cursor kept, re-pull to read it_"))
+			continue
+		}
+		sw := newSweep(fetchCtx, scoped.log, "get_unread_summary", ws.Name)
+		body, wsCursor, err := scoped.sweepUnread(ctx, sw, pws)
 		if wsCursor == "" {
 			wsCursor = pws.afterTS // never regress a workspace's cursor
 		}
@@ -326,6 +339,9 @@ func (h *Hub) runMentions(ctx context.Context, p mentionParams, workspace string
 	}
 	multi := len(targets) > 1
 
+	fetchCtx, cancel := sweepContext(ctx, h.cfg.SweepTimeoutSeconds)
+	defer cancel()
+
 	var sections []string
 	for _, ws := range targets {
 		scoped := h.withClient(ws.Client)
@@ -335,7 +351,12 @@ func (h *Hub) runMentions(ctx context.Context, p mentionParams, workspace string
 			}
 			continue
 		}
-		body, err := scoped.buildMentions(ctx, p)
+		if fetchCtx.Err() != nil {
+			sections = append(sections, workspaceSection(ws.Name, "_skipped: the get_mentions deadline passed before this workspace — re-run to check it_"))
+			continue
+		}
+		sw := newSweep(fetchCtx, scoped.log, "get_mentions", ws.Name)
+		body, err := scoped.sweepMentions(ctx, sw, p)
 		switch {
 		case err != nil && !multi:
 			return mcp.NewToolResultError(err.Error())
@@ -364,8 +385,23 @@ func (h *Hub) runMentions(ctx context.Context, p mentionParams, workspace string
 // means "nothing unread", which the caller turns into the caught-up
 // message.
 func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cursor string, err error) {
-	results, err := h.Unread().UnreadAll(ctx, p.maxPer)
-	if err != nil {
+	return h.sweepUnread(ctx, newSweep(ctx, h.log, "get_unread_summary", ""), p)
+}
+
+// sweepUnread is buildUnreadSummary with its fetch phases run through sw
+// (ADR 121): each is timed, and once sw's deadline passes the rest are
+// skipped and named. Any cut phase keeps the incoming cursor — advancing
+// it would make the next delta pull skip what this pull never read.
+func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body, cursor string, err error) {
+	var results []*slack.ChannelUnread
+	if err := sw.run("unread", func(c context.Context) error {
+		r, e := h.Unread().UnreadAll(c, p.maxPer)
+		results = r
+		return e
+	}); err != nil {
+		if sw.incomplete() {
+			return strings.TrimRight(sw.note(true), "\n"), p.afterTS, nil
+		}
 		return "", "", err
 	}
 
@@ -375,7 +411,12 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	// unread sweep. Same-channel DM entries replace their UnreadAll
 	// counterparts so we don't duplicate.
 	if p.dmWindowHours > 0 {
-		dmResults, dmErr := h.Unread().RecentDMActivity(ctx, p.dmWindowHours, p.maxPer)
+		var dmResults []*slack.ChannelUnread
+		dmErr := sw.run("dm-window", func(c context.Context) error {
+			r, e := h.Unread().RecentDMActivity(c, p.dmWindowHours, p.maxPer)
+			dmResults = r
+			return e
+		})
 		if dmErr != nil {
 			h.log.Warn("dm window fetch failed; falling back to unread-only", "err", dmErr)
 		} else {
@@ -394,10 +435,18 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 		if ts, perr := strconv.ParseFloat(p.afterTS, 64); perr == nil && ts > 0 {
 			oldest = ts
 		}
-		pr, missing, prErr := h.Unread().PriorityActivity(ctx, refs, oldest, p.maxPer)
+		var pr []*slack.ChannelUnread
+		var missing []string
+		prErr := sw.run("priority", func(c context.Context) error {
+			r, m, e := h.Unread().PriorityActivity(c, refs, oldest, p.maxPer)
+			pr, missing = r, m
+			return e
+		})
 		if prErr != nil {
 			h.log.Warn("priority channels fetch failed", "err", prErr)
-			priorityNote = "priority channels could not be read: " + prErr.Error() + "\n"
+			if sw.ctx.Err() == nil { // a deadline cut is reported once, by the sweep note
+				priorityNote = "priority channels could not be read: " + prErr.Error() + "\n"
+			}
 		} else {
 			results = mergePriority(results, pr)
 		}
@@ -410,7 +459,12 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	// to NEW top-level messages. Search-based `to:me` catches replies to
 	// already-read parents; merge their channels into results.
 	if p.threadMentionHours > 0 {
-		tmResults, tmErr := h.Unread().UnreadThreadMentions(ctx, p.threadMentionHours)
+		var tmResults []*slack.ChannelUnread
+		tmErr := sw.run("thread-mentions", func(c context.Context) error {
+			r, e := h.Unread().UnreadThreadMentions(c, p.threadMentionHours)
+			tmResults = r
+			return e
+		})
 		if tmErr != nil {
 			h.log.Warn("thread-mention backstop failed; falling back to unread-only", "err", tmErr)
 		} else {
@@ -425,7 +479,12 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	// the operator's last message. Reuses mergeThreadMentions (augment,
 	// never replace).
 	if p.ownThreadHours > 0 {
-		otResults, otErr := h.Unread().UnreadOwnThreads(ctx, p.ownThreadHours)
+		var otResults []*slack.ChannelUnread
+		otErr := sw.run("own-threads", func(c context.Context) error {
+			r, e := h.Unread().UnreadOwnThreads(c, p.ownThreadHours)
+			otResults = r
+			return e
+		})
 		if otErr != nil {
 			h.log.Warn("own-thread backstop failed; falling back to unread-only", "err", otErr)
 		} else {
@@ -448,7 +507,14 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	var canvasBlock string
 	if p.canvasHours > 0 {
 		nowUnix := time.Now().Unix()
-		if hits := h.canvasDelta(ctx, canvasSince(p.afterTS, p.canvasHours, nowUnix), selfID); len(hits) > 0 {
+		var hits []canvasHit
+		// canvasDelta degrades to "no canvases" on its own errors, so only
+		// the deadline can mark this phase cut.
+		_ = sw.run("canvases", func(c context.Context) error {
+			hits = h.canvasDelta(c, canvasSince(p.afterTS, p.canvasHours, nowUnix), selfID)
+			return c.Err()
+		})
+		if len(hits) > 0 {
 			canvasBlock = renderCanvasDelta(hits, nowUnix)
 		}
 	}
@@ -478,7 +544,11 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 			return h.Messages().History(ctx, slack.HistoryParams{ChannelID: channelID, Limit: answeredDMWindow})
 		}
 		var answered []*slack.ChannelUnread
-		results, answered = dropAnsweredDMs(ctx, recentFn, selfID, results)
+		// Display-only: a DM the probe could not check stays visible.
+		_ = sw.runDisplay("answered-dms", func(c context.Context) error {
+			results, answered = dropAnsweredDMs(c, recentFn, selfID, results)
+			return c.Err()
+		})
 		if len(answered) > 0 {
 			labels := make([]string, 0, len(answered))
 			for _, cu := range answered {
@@ -489,10 +559,12 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 		}
 	}
 
+	deadlineNote := sw.note(true)
+
 	if len(results) == 0 {
 		// No unread messages, but a canvas may still have changed — report
 		// it rather than claiming "all caught up".
-		tail := strings.TrimRight(priorityNote+answeredNote+canvasBlock, "\n")
+		tail := strings.TrimRight(deadlineNote+priorityNote+answeredNote+canvasBlock, "\n")
 		if tail != "" {
 			return tail, p.afterTS, nil
 		}
@@ -522,6 +594,7 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d channels, %d top-level + %d thread replies\n",
 		len(results), totalMsgs, totalReplies)
+	b.WriteString(deadlineNote)
 	if priorityNote != "" {
 		b.WriteString(priorityNote)
 	}
@@ -534,6 +607,9 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 	// value is returned to the caller, which in multi-workspace mode folds
 	// it into the combined per-workspace cursor token.
 	cursor = newestTS(results)
+	if sw.incomplete() {
+		cursor = p.afterTS
+	}
 	if cursor != "" {
 		fmt.Fprintf(&b, "cursor: %s (pass as after= next pull for a delta)\n", cursor)
 	}
@@ -628,6 +704,13 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 // Hub is scoped to. Returns the rendered block (including its own count
 // header) or "" when there are no qualifying mentions.
 func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error) {
+	return h.sweepMentions(ctx, newSweep(ctx, h.log, "get_mentions", ""), p)
+}
+
+// sweepMentions is buildMentions with its fetch phases run through sw
+// (ADR 121). A search query or the DM backstop cut by the deadline makes
+// the list partial — said so at the top, never rendered as "no mentions".
+func (h *Hub) sweepMentions(ctx context.Context, sw *sweep, p mentionParams) (string, error) {
 	after := time.Now().Add(-time.Duration(p.hours) * time.Hour).Format("2006-01-02")
 
 	selfID, _ := h.Unread().Self(ctx)
@@ -638,9 +721,17 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 	// mention sat in a channel. Both queries run and merge; see
 	// slack.MentionQueries for why neither one alone is enough.
 	var matches []goslack.SearchMessage
-	for _, q := range slack.MentionQueries(handle, after) {
-		hits, err := h.Search().Messages(ctx, q, p.limit)
+	for i, q := range slack.MentionQueries(handle, after) {
+		var hits []goslack.SearchMessage
+		err := sw.run(fmt.Sprintf("search-%d", i+1), func(c context.Context) error {
+			r, e := h.Search().Messages(c, q, p.limit)
+			hits = r
+			return e
+		})
 		if err != nil {
+			if sw.incomplete() {
+				break
+			}
 			return "", err
 		}
 		matches = mergeSearchHits(matches, hits)
@@ -657,7 +748,12 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 	// channel+ts, re-sorted newest-first) so get_mentions stops silently
 	// missing just-arrived DMs. Needs self id to exclude our own lines.
 	if p.dmHistory && selfID != "" {
-		if dmCus, dmErr := h.Unread().RecentDMActivity(ctx, p.hours, p.limit); dmErr != nil {
+		var dmCus []*slack.ChannelUnread
+		if dmErr := sw.run("dm-history", func(c context.Context) error {
+			r, e := h.Unread().RecentDMActivity(c, p.hours, p.limit)
+			dmCus = r
+			return e
+		}); dmErr != nil {
 			h.log.Warn("mentions dm-history backstop failed; fresh DMs may lag", "err", dmErr)
 		} else if hits := dmActivityToHits(dmCus, selfID); len(hits) > 0 {
 			matches = mergeSearchHits(matches, hits)
@@ -676,7 +772,11 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 		if p.dropAcks {
 			matches = filterClosingAcks(matches)
 		}
-		matches = h.filterPendingMentions(ctx, matches, selfID)
+		// Display-only: a mention whose reply check did not run stays listed.
+		_ = sw.runDisplay("pending-check", func(c context.Context) error {
+			matches = h.filterPendingMentions(c, matches, selfID)
+			return c.Err()
+		})
 	}
 	if p.strictMention {
 		if selfID == "" {
@@ -692,15 +792,17 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 		matches = matches[:p.limit]
 	}
 
+	deadlineNote := sw.note(false)
 	if len(matches) == 0 {
-		return "", nil
+		// An empty list from a cut sweep is not "no mentions".
+		return strings.TrimRight(deadlineNote, "\n"), nil
 	}
 
 	// Summary mode: the operational-load view — aggregates over the same
 	// filtered match set the list view would render, so pending_only /
 	// strict_mention / dm_history all compose identically.
 	if p.summaryOnly {
-		return summarizeMentions(matches, p.hours, p.pendingOnly), nil
+		return deadlineNote + summarizeMentions(matches, p.hours, p.pendingOnly), nil
 	}
 
 	var b strings.Builder
@@ -710,6 +812,7 @@ func (h *Hub) buildMentions(ctx context.Context, p mentionParams) (string, error
 	}
 	b.WriteString(header)
 	b.WriteByte('\n')
+	b.WriteString(deadlineNote)
 	shownContext := map[string]struct{}{}
 	for _, m := range matches {
 		b.WriteString(format.SearchResult(m))

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.58.0] - 2026-10-15
+
+### Added
+
+- **Sweep deadline** for `get_unread_summary` and `get_mentions`
+  (`SLACK_SWEEP_TIMEOUT`, default 100 s, `0` = off). When it passes, the
+  tools return what they gathered and name the phases or workspaces they
+  did not finish. A workspace whose unread sweep was cut keeps its
+  incoming delta cursor, so the next pull re-reads instead of skipping.
+  Display-only phases (answered-DM probe, pending-reply check) never
+  hold the cursor back. ADR 121.
+- **Per-phase timing in the log**: every fetch phase logs one INFO line
+  with its workspace and duration, so a slow sweep shows where the time
+  went.
+
+### Fixed
+
+- **A Slack server that accepts a connection and never answers no
+  longer hangs a tool call.** The Web API clients now bound dialing, the
+  TLS handshake and the wait for response headers. Bodies are not time
+  capped, so long file downloads are unaffected; a replaced
+  `http.DefaultTransport` is still honoured.
+- **A rate-limit wait longer than the caller's remaining deadline fails
+  at once** instead of sleeping until the deadline and failing anyway.
+
 ## [1.57.0] - 2026-10-13
 
 ### Added

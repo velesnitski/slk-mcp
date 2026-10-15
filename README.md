@@ -230,6 +230,7 @@ chain from a single message permalink.
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
+| `SLACK_SWEEP_TIMEOUT` | No | Seconds `get_unread_summary` / `get_mentions` may spend fetching before returning what they have, naming what they skipped (default: `100`; `0` = no limit). A workspace that did not finish keeps its delta cursor |
 | `SLACK_COMPACT` | No | `false` to disable compact output (default: `true`) |
 | `SLACK_LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
 | `DISABLED_TOOLS` | No | Comma-separated list of tool names to hide |

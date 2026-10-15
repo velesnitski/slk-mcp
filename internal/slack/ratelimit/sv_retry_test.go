@@ -275,3 +275,58 @@ func TestDoR_CancelledContextReturnsZeroValueAndContextError(t *testing.T) {
 		t.Fatalf("got = %q, want empty", got)
 	}
 }
+
+// ADR 121: a Retry-After the deadline cannot cover fails at once.
+
+func TestDo_RetryAfterBeyondTheDeadlineFailsWithoutSleeping(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	calls := 0
+	start := time.Now()
+	err := Do(ctx, svLog(), 5, func() error {
+		calls++
+		return svLimited(time.Minute)
+	})
+	var rle *slack.RateLimitedError
+	if !errors.As(err, &rle) {
+		t.Fatalf("err = %v, want the rate-limit error kept in the chain", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+	if d := time.Since(start); d > svBudget {
+		t.Fatalf("took %v — the minute-long wait was started although the deadline was a second away", d)
+	}
+}
+
+func TestDo_RetryAfterWithinTheDeadlineIsStillHonoured(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	calls := 0
+	err := Do(ctx, svLog(), 5, func() error {
+		calls++
+		if calls == 1 {
+			return svLimited(svTick)
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("err = %v, calls = %d; a wait the deadline covers must be retried", err, calls)
+	}
+}
+
+func TestDo_NoDeadlineKeepsTheOldBehaviour(t *testing.T) {
+	calls := 0
+	err := Do(context.Background(), svLog(), 5, func() error {
+		calls++
+		if calls < 3 {
+			return svLimited(svTick)
+		}
+		return nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("err = %v, calls = %d", err, calls)
+	}
+}
