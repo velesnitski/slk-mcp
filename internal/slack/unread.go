@@ -347,16 +347,20 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 	if !s.Enabled() {
 		return nil, ErrNoUserToken
 	}
+	start := time.Now()
 	channels, err := s.JoinedChannels(ctx)
 	if err != nil {
 		return nil, err
 	}
+	listed := time.Since(start)
 
 	// Fetch in parallel, capped to a modest concurrency to stay polite.
 	const workers = 4
 	type result struct {
-		cu  *ChannelUnread
-		err error
+		cu   *ChannelUnread
+		err  error
+		took time.Duration
+		id   string
 	}
 
 	jobs := make(chan goslack.Channel, len(channels))
@@ -370,8 +374,9 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 				// users.conversations does not populate unread_count;
 				// Unread() fetches conversations.info and short-circuits
 				// when the channel is actually caught up.
+				t0 := time.Now()
 				cu, err := s.Unread(ctx, ch.ID, maxPerChannel)
-				results <- result{cu, err}
+				results <- result{cu, err, time.Since(t0), ch.ID}
 			}
 		}()
 	}
@@ -383,7 +388,9 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 	close(results)
 
 	var out []*ChannelUnread
+	var st unreadStats
 	for r := range results {
+		st.add(r.id, r.took, r.cu, r.err)
 		if r.err != nil {
 			s.log.Warn("unread fetch failed", "err", r.err)
 			continue
@@ -392,7 +399,39 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 			out = append(out, r.cu)
 		}
 	}
+	// One line per sweep: where the time of the "unread" phase goes —
+	// listing, how many channels needed a history read, and the slowest
+	// one. Without it, a slow sweep could only be guessed at. ADR 122.
+	s.log.Info("unread sweep",
+		"channels", len(channels),
+		"history_reads", st.historyReads,
+		"with_unread", len(out),
+		"failed", st.failed,
+		"list_took", listed.Round(time.Millisecond).String(),
+		"took", time.Since(start).Round(time.Millisecond).String(),
+		"slowest_channel", st.slowestID,
+		"slowest_took", st.slowest.Round(time.Millisecond).String(),
+	)
 	return out, nil
+}
+
+// unreadStats tallies one UnreadAll pass for its log line.
+type unreadStats struct {
+	historyReads, failed int
+	slowest              time.Duration
+	slowestID            string
+}
+
+func (u *unreadStats) add(id string, took time.Duration, cu *ChannelUnread, err error) {
+	switch {
+	case err != nil:
+		u.failed++
+	case cu != nil && cu.LastRead != "":
+		u.historyReads++ // conversations.info short-circuits without last_read
+	}
+	if took > u.slowest {
+		u.slowest, u.slowestID = took, id
+	}
 }
 
 // RecentDMActivity returns DM and multi-party-DM conversations the

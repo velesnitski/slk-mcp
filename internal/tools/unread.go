@@ -243,7 +243,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 // `workspace` argument) renders exactly as the single-workspace tool
 // always has. Two or more render each under a `## [label]` heading.
 func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace string) *mcp.CallToolResult {
-	targets := h.workspaceTargets(workspace)
+	targets, excluded := h.sweepTargets(workspace)
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
 	}
@@ -256,7 +256,9 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 	if p.mentionsOnly {
 		titleSuffix = " (mentions only)"
 	}
-	multi := len(targets) > 1
+	// An excluded workspace forces the multi-workspace frame: its note and
+	// its carried-over cursor have nowhere to go in the single-body form.
+	multi := len(targets) > 1 || len(excluded) > 0
 
 	// Per-workspace delta cursors: the combined "ws=ts;ws2=ts2" token (as
 	// emitted below) applies each workspace's own cursor; a plain ts still
@@ -272,27 +274,51 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 	fetchCtx, cancel := sweepContext(ctx, h.cfg.SweepTimeoutSeconds)
 	defer cancel()
 
-	var sections []string
-	for _, ws := range targets {
+	// Workspaces run concurrently (ADR 122); rendering below walks the
+	// results in registry order, exactly as the sequential loop did.
+	type wsUnread struct {
+		noToken             bool
+		body, cursor, after string
+		err                 error
+	}
+	results := fanOut(targets, func(ws slack.Workspace) wsUnread {
 		scoped := h.withClient(ws.Client)
+		r := wsUnread{after: cursorForWorkspace(perWSAfter, plainAfter, ws.Name)}
 		if !scoped.client.HasUserToken() {
+			r.noToken = true
+			return r
+		}
+		// A deadline that has already passed needs no special case: the
+		// sweep's first phase is then cut, and it reports itself incomplete
+		// with the incoming cursor (ADR 121).
+		pws := p
+		pws.afterTS = r.after
+		sw := newSweep(fetchCtx, scoped.log, "get_unread_summary", ws.Name)
+		t0 := time.Now()
+		r.body, r.cursor, r.err = scoped.sweepUnread(ctx, sw, pws)
+		scoped.log.Info("sweep workspace", "tool", "get_unread_summary", "workspace", ws.Name,
+			"took", time.Since(t0).Round(time.Millisecond).String())
+		return r
+	})
+	for _, ws := range excluded {
+		// Not read, so not advanced: a later explicit pull starts where it left off.
+		if c := cursorForWorkspace(perWSAfter, plainAfter, ws.Name); c != "" {
+			cursors[ws.Name] = c
+		}
+	}
+
+	var sections []string
+	for i, ws := range targets {
+		r := results[i]
+		if r.noToken {
 			if multi {
 				sections = append(sections, workspaceSection(ws.Name, "_skipped: no user token for this workspace_"))
 			}
 			continue
 		}
-		pws := p
-		pws.afterTS = cursorForWorkspace(perWSAfter, plainAfter, ws.Name)
-		if fetchCtx.Err() != nil {
-			// Never started: its cursor stays exactly where it was.
-			cursors[ws.Name] = pws.afterTS
-			sections = append(sections, workspaceSection(ws.Name, "_skipped: the get_unread_summary deadline passed before this workspace — cursor kept, re-pull to read it_"))
-			continue
-		}
-		sw := newSweep(fetchCtx, scoped.log, "get_unread_summary", ws.Name)
-		body, wsCursor, err := scoped.sweepUnread(ctx, sw, pws)
+		body, wsCursor, err := r.body, r.cursor, r.err
 		if wsCursor == "" {
-			wsCursor = pws.afterTS // never regress a workspace's cursor
+			wsCursor = r.after // never regress a workspace's cursor
 		}
 		cursors[ws.Name] = wsCursor
 		switch {
@@ -313,9 +339,13 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 
 	header := fmt.Sprintf("# Unread summary%s — %d workspaces · %s", titleSuffix, len(targets), format.TimeZoneNote())
 	out := header + "\n\n" + strings.Join(sections, "\n\n")
+	if note := excludedNote(excluded); note != "" {
+		out = strings.TrimRight(out, "\n") + "\n\n" + note
+	}
 	// One exact token for the next delta pull — no more taking the min of
-	// the per-workspace cursor lines by hand.
-	if combined := combinedCursor(workspaceOrder(targets), cursors); combined != "" {
+	// the per-workspace cursor lines by hand. Excluded workspaces keep their
+	// incoming cursor in it, in registry order.
+	if combined := combinedCursor(workspaceOrder(h.workspaceTargets(workspace)), cursors); combined != "" {
 		out = strings.TrimRight(out, "\n") + "\n\ncursor: " + combined + " (pass as after= next pull for an exact per-workspace delta)"
 	}
 	return mcp.NewToolResultText(strings.TrimRight(out, "\n"))
@@ -333,30 +363,43 @@ func workspaceOrder(targets []slack.Workspace) []string {
 
 // runMentions is the get_mentions analogue of runUnreadSummary.
 func (h *Hub) runMentions(ctx context.Context, p mentionParams, workspace string) *mcp.CallToolResult {
-	targets := h.workspaceTargets(workspace)
+	targets, excluded := h.sweepTargets(workspace)
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
 	}
-	multi := len(targets) > 1
+	multi := len(targets) > 1 || len(excluded) > 0
 
 	fetchCtx, cancel := sweepContext(ctx, h.cfg.SweepTimeoutSeconds)
 	defer cancel()
 
-	var sections []string
-	for _, ws := range targets {
+	type wsMentions struct {
+		noToken bool
+		body    string
+		err     error
+	}
+	results := fanOut(targets, func(ws slack.Workspace) wsMentions {
 		scoped := h.withClient(ws.Client)
 		if !scoped.client.HasUserToken() {
+			return wsMentions{noToken: true}
+		}
+		sw := newSweep(fetchCtx, scoped.log, "get_mentions", ws.Name)
+		t0 := time.Now()
+		body, err := scoped.sweepMentions(ctx, sw, p)
+		scoped.log.Info("sweep workspace", "tool", "get_mentions", "workspace", ws.Name,
+			"took", time.Since(t0).Round(time.Millisecond).String())
+		return wsMentions{body: body, err: err}
+	})
+
+	var sections []string
+	for i, ws := range targets {
+		r := results[i]
+		if r.noToken {
 			if multi {
 				sections = append(sections, workspaceSection(ws.Name, "_skipped: no user token for this workspace_"))
 			}
 			continue
 		}
-		if fetchCtx.Err() != nil {
-			sections = append(sections, workspaceSection(ws.Name, "_skipped: the get_mentions deadline passed before this workspace — re-run to check it_"))
-			continue
-		}
-		sw := newSweep(fetchCtx, scoped.log, "get_mentions", ws.Name)
-		body, err := scoped.sweepMentions(ctx, sw, p)
+		body, err := r.body, r.err
 		switch {
 		case err != nil && !multi:
 			return mcp.NewToolResultError(err.Error())
@@ -375,6 +418,9 @@ func (h *Hub) runMentions(ctx context.Context, p mentionParams, workspace string
 
 	header := fmt.Sprintf("# Mentions — %d workspaces", len(targets))
 	out := header + "\n\n" + strings.Join(sections, "\n\n")
+	if note := excludedNote(excluded); note != "" {
+		out = strings.TrimRight(out, "\n") + "\n\n" + note
+	}
 	return mcp.NewToolResultText(strings.TrimRight(out, "\n"))
 }
 

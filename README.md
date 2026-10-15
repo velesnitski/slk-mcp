@@ -231,6 +231,8 @@ chain from a single message permalink.
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
 | `SLACK_SWEEP_TIMEOUT` | No | Seconds `get_unread_summary` / `get_mentions` may spend fetching before returning what they have, naming what they skipped (default: `100`; `0` = no limit). A workspace that did not finish keeps its delta cursor |
+| `SLACK_SWEEP_EXCLUDE` | No | Comma-separated workspace labels that `get_unread_summary` / `get_mentions` skip unless asked by name; the output names them and keeps their delta cursor |
+| `SLACK_LOG_FILE` | No | Also append logs to this file (created `0600`, `~/` expanded, rotated to `.1` past 10 MB at startup). Per-phase sweep timings land here, since MCP hosts don't keep a server's stderr |
 | `SLACK_COMPACT` | No | `false` to disable compact output (default: `true`) |
 | `SLACK_LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` (default: `info`) |
 | `DISABLED_TOOLS` | No | Comma-separated list of tool names to hide |

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.59.0] - 2026-10-15
+
+### Added
+
+- **`SLACK_LOG_FILE`**: logs also go to a file (0600, rotated at 10 MB on
+  start), so sweep timings can be read back — MCP hosts don't keep a
+  server's stderr.
+- **`SLACK_SWEEP_EXCLUDE`**: workspaces `get_unread_summary` and
+  `get_mentions` skip unless named. The output says which were skipped
+  and their delta cursor carries over unchanged.
+- **Sweep stats in the log**: one line per unread pass (channels,
+  history reads, failures, list time, slowest channel) and one per
+  workspace with its total time.
+
+### Changed
+
+- **Workspaces are swept concurrently** in `get_unread_summary` and
+  `get_mentions`; output order and the combined cursor are unchanged.
+
+ADR 122.
+
 ## [1.58.0] - 2026-10-15
 
 ### Added

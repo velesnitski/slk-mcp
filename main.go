@@ -27,7 +27,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "1.58.0"
+var version = "1.59.0"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -51,7 +51,7 @@ func run() error {
 		return nil
 	}
 
-	log := logger.Setup(*logLevel)
+	log := logger.SetupWithFile(*logLevel, os.Getenv("SLACK_LOG_FILE"))
 
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {

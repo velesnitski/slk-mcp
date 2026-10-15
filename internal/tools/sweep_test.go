@@ -81,7 +81,10 @@ func TestUnreadSummary_NoDeadlineHitAdvancesTheCursorAsBefore(t *testing.T) {
 	}
 }
 
-func TestUnreadSummary_AWorkspaceNeverStartedKeepsItsCursorInTheCombinedToken(t *testing.T) {
+func TestUnreadSummary_EveryWorkspaceCutByTheDeadlineKeepsItsCursor(t *testing.T) {
+	// Workspaces run concurrently (ADR 122), so a deadline cuts each of
+	// them mid-sweep rather than skipping the later ones; each must still
+	// return its own incoming cursor in the combined token.
 	fastSweep(t)
 	f := uaNewFakeSlack(t)
 	uaSweepFixture(t, f)
@@ -96,10 +99,10 @@ func TestUnreadSummary_AWorkspaceNeverStartedKeepsItsCursorInTheCombinedToken(t 
 
 	out := resultText(h.runUnreadSummary(context.Background(), p, ""))
 
-	if !strings.Contains(out, "the get_unread_summary deadline passed before this workspace") {
-		t.Fatalf("the second workspace must be reported as skipped:\n%s", out)
+	if strings.Count(out, "incomplete: the get_unread_summary deadline passed") != 2 {
+		t.Fatalf("both workspaces must report the cut:\n%s", out)
 	}
-	if !strings.Contains(out, "secondary="+secondaryAfter) || !strings.Contains(out, "primary="+primaryAfter) {
+	if !strings.Contains(out, "cursor: primary="+primaryAfter+";secondary="+secondaryAfter) {
 		t.Fatalf("both workspaces must keep their incoming cursors:\n%s", out)
 	}
 }
@@ -166,7 +169,7 @@ func TestMentions_ACutSweepWithNoHitsIsNotReportedAsNoMentions(t *testing.T) {
 	}
 }
 
-func TestMentions_ASecondWorkspaceAfterTheDeadlineIsSkippedNotSearched(t *testing.T) {
+func TestMentions_EveryWorkspaceCutByTheDeadlineSaysSo(t *testing.T) {
 	fastSweep(t)
 	f := uaNewFakeSlack(t)
 	f.On("auth.test", uaAuthOK)
@@ -177,8 +180,8 @@ func TestMentions_ASecondWorkspaceAfterTheDeadlineIsSkippedNotSearched(t *testin
 
 	out := resultText(h.runMentions(context.Background(), uaMentionDefaults(), ""))
 
-	if !strings.Contains(out, "the get_mentions deadline passed before this workspace") {
-		t.Fatalf("missing skip note:\n%s", out)
+	if strings.Count(out, "incomplete: the get_mentions deadline passed") != 2 {
+		t.Fatalf("both workspaces must report the cut:\n%s", out)
 	}
 }
 

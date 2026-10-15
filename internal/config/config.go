@@ -53,6 +53,12 @@ type Config struct {
 	// host typically moves a call to the background. ADR 121.
 	SweepTimeoutSeconds int
 
+	// SweepExclude lists workspace labels that get_unread_summary and
+	// get_mentions skip when no `workspace` is given
+	// (SLACK_SWEEP_EXCLUDE, comma-separated, case-insensitive). An
+	// explicit `workspace` argument still reaches them. ADR 122.
+	SweepExclude []string
+
 	// AutodiscoverLimit caps the number of channels used when no channels
 	// are passed and SLACK_CHANNELS is empty (the server falls back to the
 	// channels the bot/user has joined).
@@ -140,6 +146,7 @@ func Load() *Config {
 		MaxMessagesPerChannel: parseIntDefault(os.Getenv("SLACK_MAX_MESSAGES"), 200),
 		CompactOutput:         parseBoolDefault(os.Getenv("SLACK_COMPACT"), true),
 		SweepTimeoutSeconds:   parseNonNegativeDefault(os.Getenv("SLACK_SWEEP_TIMEOUT"), 100),
+		SweepExclude:          parseCSV(os.Getenv("SLACK_SWEEP_EXCLUDE")),
 		AutodiscoverLimit:     parseIntDefault(os.Getenv("SLACK_AUTODISCOVER_LIMIT"), 50),
 		FFmpegBin:             os.Getenv("SLACK_FFMPEG_BIN"),
 		WhisperBin:            os.Getenv("SLACK_WHISPER_BIN"),
