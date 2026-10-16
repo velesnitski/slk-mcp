@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.61.0] - 2026-10-19
+
+### Added
+
+- **`edit_canvas`** — edit a canvas as the operator through
+  `canvases.edit`: insert at the start or end, insert before or after a
+  section, replace or delete a section, replace the whole canvas, or
+  rename it. The canvas is addressed by id or link, or through a channel
+  (the canvas tab, or a shared canvas picked with `match` / `date`).
+  A section is addressed by its text via `canvases.sections.lookup` and
+  must match exactly one section; a whole-canvas replace needs
+  `replace_all=true`; a channel with several canvases and no selector is
+  refused with the list; `dry_run` resolves everything without writing.
+  Needs a user token with `canvases:write`; hidden in `SLACK_READ_ONLY`.
+  See ADR 124.
+
 ## [1.60.0] - 2026-10-16
 
 ### Fixed

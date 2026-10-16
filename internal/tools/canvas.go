@@ -23,6 +23,7 @@ import (
 const canvasMaxBytes = 200_000
 
 func (h *Hub) registerCanvasTools(s *server.MCPServer) {
+	h.registerEditCanvas(s)
 	if h.cfg.IsDisabled("read_canvas") {
 		return
 	}
@@ -129,23 +130,9 @@ func (h *Hub) readCanvas(ctx context.Context, channel string, sel canvasSelector
 // canvases that do exist — one call resolves "did the meeting notes for
 // day X land?" either way.
 func (h *Hub) readCanvasSelected(ctx context.Context, channel, channelID string, sel canvasSelector) (string, error) {
-	files, err := h.Canvas().CanvasFiles(ctx, channelID)
+	files, err := h.canvasSet(ctx, channelID)
 	if err != nil {
-		return "", fmt.Errorf("canvas lookup (files.list): %w", err)
-	}
-	if tabID, _, terr := h.Canvas().ChannelCanvas(ctx, channelID); terr == nil && tabID != "" {
-		seen := false
-		for _, f := range files {
-			if f.ID == tabID {
-				seen = true
-				break
-			}
-		}
-		if !seen {
-			if f, ferr := h.Messages().FileInfo(ctx, tabID); ferr == nil {
-				files = append(files, f)
-			}
-		}
+		return "", err
 	}
 	if len(files) == 0 {
 		return fmt.Sprintf("no canvases in #%s at all", channel), nil
@@ -171,6 +158,30 @@ func (h *Hub) readCanvasSelected(ctx context.Context, channel, channelID string,
 		return fmt.Sprintf("no canvas matching %q in #%s; available:\n%s", want, channel, renderCanvasList(files)), nil
 	}
 	return h.renderCanvasFile(ctx, channel, *pick)
+}
+
+// canvasSet is a channel's full canvas set: shared canvas files plus the
+// attached canvas tab, deduped.
+func (h *Hub) canvasSet(ctx context.Context, channelID string) ([]goslack.File, error) {
+	files, err := h.Canvas().CanvasFiles(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("canvas lookup (files.list): %w", err)
+	}
+	if tabID, _, terr := h.Canvas().ChannelCanvas(ctx, channelID); terr == nil && tabID != "" {
+		seen := false
+		for _, f := range files {
+			if f.ID == tabID {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			if f, ferr := h.Messages().FileInfo(ctx, tabID); ferr == nil {
+				files = append(files, f)
+			}
+		}
+	}
+	return files, nil
 }
 
 // renderCanvasFile downloads a resolved canvas file and renders it.

@@ -131,6 +131,9 @@ type CanvasClient interface {
 	ChannelCanvas(ctx context.Context, channelID string) (fileID string, isEmpty bool, err error)
 	CanvasFiles(ctx context.Context, channelID string) ([]goslack.File, error)
 	RecentCanvases(ctx context.Context, since int64, limit int) ([]slack.CanvasRef, error)
+	// Edits run as the operator (user token only) — ADR 124.
+	EditCanvas(ctx context.Context, canvasID string, edits []slack.CanvasEdit) error
+	LookupCanvasSections(ctx context.Context, canvasID, contains string, types []string) ([]string, error)
 }
 
 // Compile-time assertions: if the concrete services in

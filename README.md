@@ -37,6 +37,7 @@ Under **OAuth & Permissions → User Token Scopes**, add:
 - `chat:write` (optional — for `post_message`)
 - `reactions:write` (optional — for `add_reaction`)
 - `reactions:read` (optional — completes long reactor lists in `get_message reactors=true`)
+- `canvases:write` (optional — for `edit_canvas`)
 
 **Install to Workspace**, copy the **User OAuth Token** (`xoxp-...`) → `SLACK_USER_TOKEN`.
 
@@ -146,6 +147,7 @@ Or via config file (`~/.claude.json`):
 | `get_unread_summary` | Unread messages across all joined channels, sorted by volume |
 | `get_mentions` | Messages that mention you; `summary=true` returns load stats (by sender / channel, DM split) instead of the list |
 | `mark_read` | Mark a channel read through a given timestamp |
+| `edit_canvas` | Edit a canvas as you: append/prepend, insert before/after, replace or delete a section found by its text, replace the whole canvas, rename; `dry_run` previews (disabled in `SLACK_READ_ONLY`, needs `canvases:write`) |
 | `list_scheduled_messages` | Your pending scheduled (queued-to-send) messages with send time + channel; you-global by default |
 
 ## How-to: transcribe voice messages
@@ -224,7 +226,7 @@ chain from a single message permalink.
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
 | `SLACK_PRIORITY_CHANNELS` | No | Channels (names or IDs, comma-separated) that `get_unread_summary` always shows for its window, even when you have already read them — first in the output, marked `★`, with `· read` when nothing in them is new to you. Window: `priority_hours` (default 24) or everything after the `after` cursor. Channels it cannot find are named in the output. Per extra workspace: `priority_channels`. ADR 112. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
-| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read` |
+| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read`, `edit_canvas` |
 | `SLACK_FFMPEG_BIN` | No | ffmpeg binary for `transcribe_audio` (default: `ffmpeg` from PATH) |
 | `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
