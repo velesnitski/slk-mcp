@@ -110,11 +110,23 @@ func DetectLogChannel(cu *slack.ChannelUnread) bool {
 			botCount++
 		}
 	}
-	if float64(botCount)/float64(len(cu.Messages)) >= logChannelBotThreshold {
+	n := len(cu.Messages)
+	// A handful of new messages is too small a sample for a ratio: one
+	// automated post next to one human message made a human channel
+	// render as a log. Below the floor only an all-bot window counts.
+	if n < logChannelMinSample {
+		return botCount == n || isLogChannelName(cu.Channel.Name)
+	}
+	if float64(botCount)/float64(n) >= logChannelBotThreshold {
 		return true
 	}
 	return isLogChannelName(cu.Channel.Name)
 }
+
+// logChannelMinSample is the smallest window the bot-ratio rule applies
+// to; smaller windows classify as a log only when every message is a
+// bot's, or when the channel name says so. ADR 123.
+const logChannelMinSample = 4
 
 // logChannelBotThreshold — fraction of bot messages required to
 // auto-classify a channel as log mode purely on authorship.
@@ -128,9 +140,14 @@ func isBotMessage(m goslack.Message) bool {
 
 // logChannelNameKeywords drive the fallback channel-name signal in
 // DetectLogChannel. Substrings are matched case-insensitively.
+//
+// "report"/"reports" are deliberately absent (ADR 123): channels named
+// that way carry hand-written status reports, and treating them as
+// feeds collapsed what people wrote into a severity histogram. A bot
+// report channel still qualifies through the bot-share rule.
 var logChannelNameKeywords = []string{
 	"log", "alert", "alarm", "monitor", "monitoring",
-	"metric", "metrics", "report", "reports", "cron",
+	"metric", "metrics", "cron",
 	"incident",
 }
 

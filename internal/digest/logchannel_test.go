@@ -101,8 +101,6 @@ func TestIsLogChannelName(t *testing.T) {
 		"perf-monitoring",    // monitoring
 		"metric-feed",        // metric
 		"metrics-stream",     // metrics
-		"weekly-report",      // report
-		"daily-reports",      // reports
 		"build-cron-feed",    // cron
 		"team-incident-room", // incident
 	}
@@ -346,4 +344,56 @@ func mkLogMsg(text string) goslack.Message {
 	m.Timestamp = "1700000000.000000"
 	m.Text = text
 	return m
+}
+
+// ADR 123: report channels hold hand-written reports, not feeds.
+
+func TestIsLogChannelName_ReportChannelsAreNotFeeds(t *testing.T) {
+	for _, n := range []string{"weekly-report", "daily-reports", "team-reporting"} {
+		if isLogChannelName(n) {
+			t.Errorf("isLogChannelName(%q) = true; a report channel is human-written", n)
+		}
+	}
+}
+
+func TestDetectLogChannel_HumanReportChannelRendersInFull(t *testing.T) {
+	cu := mkChannelUnread("team-reporting", []goslack.Message{
+		humanMsg("U1", "weekly status: on track"),
+	}, nil)
+	if DetectLogChannel(cu) {
+		t.Fatal("a human report must not be collapsed into a severity histogram")
+	}
+}
+
+func TestDetectLogChannel_SmallMixedWindowStaysHuman(t *testing.T) {
+	// One automated post next to one human message: too small a sample
+	// for the bot-share rule.
+	bot := humanMsg("U_BOT", "automated summary")
+	bot.BotID = "B1"
+	cu := mkChannelUnread("team-main", []goslack.Message{bot, humanMsg("U1", "sounds good, see you at the sync")}, nil)
+	if DetectLogChannel(cu) {
+		t.Fatal("1 bot + 1 human in a neutral channel must render as a normal digest")
+	}
+}
+
+func TestDetectLogChannel_SmallAllBotWindowIsStillALog(t *testing.T) {
+	a, b := humanMsg("U_BOT", "CRITICAL x"), humanMsg("U_BOT", "RESOLVED x")
+	a.BotID, b.BotID = "B1", "B1"
+	if !DetectLogChannel(mkChannelUnread("triage-feed", []goslack.Message{a, b}, nil)) {
+		t.Fatal("a small window of only bot posts is a feed")
+	}
+}
+
+func TestDetectLogChannel_LargeWindowUsesTheBotShare(t *testing.T) {
+	var msgs []goslack.Message
+	for i := 0; i < 4; i++ {
+		m := humanMsg("U_BOT", "alert")
+		if i < 2 {
+			m.BotID = "B1"
+		}
+		msgs = append(msgs, m)
+	}
+	if !DetectLogChannel(mkChannelUnread("team-main", msgs, nil)) {
+		t.Fatal("2 of 4 bot posts meets the 0.5 share at the sample floor")
+	}
 }

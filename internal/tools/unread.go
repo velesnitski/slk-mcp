@@ -674,26 +674,27 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		}
 		isGit := p.logMode != "off" && digest.DetectGitChannel(r)
 		isLog := !isGit && p.logMode != "off" && digest.DetectLogChannel(r)
-		if p.skipGit && isGit {
-			continue
-		}
-		if p.skipLog && isLog {
+		lowSignal := !isGit && !isLog && !r.Priority && digest.DetectLowSignalChannel(r)
+		// skip_git_mode / skip_log_mode hide the bot feed, not a human
+		// reply in it: a channel that carries thread replies keeps them.
+		skipped := (p.skipGit && isGit) || (p.skipLog && isLog)
+		if skipped && len(r.Replies) == 0 {
 			continue
 		}
 		var rendered string
 		switch {
 		case isGit:
 			logChannels++
-			workflows, orphans := digest.GroupGitWorkflows(r.Messages)
-			if len(workflows) == 0 && len(orphans) == 0 {
-				continue
+			// An empty git feed renders nothing, but its thread replies
+			// still do (below) — no `continue` here.
+			if workflows, orphans := digest.GroupGitWorkflows(r.Messages); len(workflows) > 0 || len(orphans) > 0 {
+				rendered = digest.RenderGitChannel(label, len(r.Messages), workflows, orphans)
 			}
-			rendered = digest.RenderGitChannel(label, len(r.Messages), workflows, orphans)
 		case isLog:
 			logChannels++
 			bands := digest.BuildLogBands(r.Messages, p.logSamples)
 			rendered = format.LogChannelDigest(label, len(r.Messages), bands, users)
-		case !r.Priority && digest.DetectLowSignalChannel(r):
+		case lowSignal:
 			rendered = digest.RenderLowSignalChannel(label, r)
 		default:
 			chOpts := []format.DigestOption{
@@ -719,6 +720,24 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 				chOpts = append(chOpts, format.WithHuddleAggregation())
 			}
 			rendered = format.ChannelDigest(label, r.Messages, users, p.maxPer, chOpts...)
+		}
+		// Summarising renderers (git, log, low-signal) describe the
+		// top-level messages and used to drop thread replies with them —
+		// including a human answer in a thread the operator is part of,
+		// brought in by the own-thread or mention backstops. Keep them.
+		// ADR 123.
+		if skipped {
+			rendered = ""
+		}
+		if (isGit || isLog || lowSignal) && len(r.Replies) > 0 {
+			if block := format.ThreadRepliesBlock(r.Replies, users,
+				format.WithMentionHighlight(selfID),
+				format.WithThreadPreviewReplies(p.replyCap)); block != "" {
+				if rendered == "" {
+					rendered = "## " + label
+				}
+				rendered += "\n" + block
+			}
 		}
 		if rendered == "" {
 			continue

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.60.0] - 2026-10-16
+
+### Fixed
+
+- **Thread replies are no longer dropped in log, git and low-signal
+  channels.** Those renderers summarise top-level messages and silently
+  discarded every reply with them — including a human answer in a thread
+  the operator took part in, brought in by the own-thread backstop.
+  Replies now follow the summary as a "+ N replies in earlier threads"
+  block. `skip_log_mode` / `skip_git_mode` still hide the bot feed but
+  keep a channel's thread replies.
+- **A small mixed window is no longer rendered as a log.** With fewer
+  than 4 new messages a channel counts as a feed only when all of them
+  are from bots (or its name says so); one automated post next to one
+  human message had collapsed a human channel into a severity histogram.
+- **Report channels render in full.** "report"/"reports" no longer mark
+  a channel as a feed by name: they carry hand-written status reports.
+  A bot-driven report channel still qualifies by bot share.
+
+ADR 123.
+
 ## [1.59.0] - 2026-10-15
 
 ### Added

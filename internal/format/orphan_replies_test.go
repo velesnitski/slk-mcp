@@ -101,3 +101,29 @@ func TestChannelDigest_TopLevelPathUnchanged(t *testing.T) {
 		t.Fatalf("normal rendering lost content:\n%s", got)
 	}
 }
+
+// ADR 123: the replies block used by summarising renderers.
+
+func TestThreadRepliesBlock(t *testing.T) {
+	if got := ThreadRepliesBlock(nil, nil); got != "" {
+		t.Fatalf("no replies → empty, got %q", got)
+	}
+	if got := ThreadRepliesBlock(map[string][]goslack.Message{"1714000000.000100": {}}, nil); got != "" {
+		t.Fatalf("empty chains → empty, got %q", got)
+	}
+	one := map[string][]goslack.Message{"1714000000.000100": {orphanMsg("U1", "1714003600.000200", "only one")}}
+	if got := ThreadRepliesBlock(one, nil); !strings.HasPrefix(got, "+ 1 reply in earlier threads:\n") || !strings.Contains(got, "only one") {
+		t.Fatalf("got %q", got)
+	}
+	two := map[string][]goslack.Message{
+		"1714000000.000100": {orphanMsg("U1", "1714003600.000200", "a")},
+		"1713000000.000100": {orphanMsg("U2", "1714003700.000300", "b")},
+	}
+	got := ThreadRepliesBlock(two, nil)
+	if !strings.HasPrefix(got, "+ 2 replies in earlier threads:\n") || strings.Count(got, "thread from ") != 2 {
+		t.Fatalf("got %q", got)
+	}
+	if strings.Index(got, "] b") > strings.Index(got, "] a") {
+		t.Fatalf("threads must be ordered by parent time:\n%s", got)
+	}
+}

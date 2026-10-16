@@ -1034,6 +1034,31 @@ func countReplies(replies map[string][]goslack.Message) int {
 	return n
 }
 
+// ThreadRepliesBlock renders reply chains as the "+ N replies in earlier
+// threads:" block, each thread labelled with its parent's time. It exists
+// for the channel renderers that summarise top-level messages instead of
+// listing them — log, git and low-signal channels — which used to drop
+// every reply, including a human answer in a thread the operator was in
+// (ADR 123). Empty when there are no replies. Pure.
+func ThreadRepliesBlock(replies map[string][]goslack.Message, users map[string]string, opts ...DigestOption) string {
+	n := countReplies(replies)
+	if n == 0 {
+		return ""
+	}
+	cfg := digestOpts{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var b strings.Builder
+	noun := "replies"
+	if n == 1 {
+		noun = "reply"
+	}
+	fmt.Fprintf(&b, "+ %d %s in earlier threads:\n", n, noun)
+	writeThreadsByParent(&b, replies, cfg, users)
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // renderOrphanReplies renders reply chains whose parent falls outside
 // the window. Threads are ordered by their parent timestamp so the
 // output reads chronologically, and each is labelled with the parent's
