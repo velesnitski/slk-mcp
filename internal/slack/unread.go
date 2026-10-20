@@ -30,6 +30,10 @@ type UnreadService struct {
 	search   *SearchService
 	log      *slog.Logger
 
+	// pages lends the unread sweep's DM history to the DM window that
+	// follows it in the same sweep (ADR 125).
+	pages historyPages
+
 	selfMu     sync.RWMutex
 	selfID     string
 	selfHandle string
@@ -247,6 +251,9 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	if err != nil {
 		return nil, fmt.Errorf("conversations.history (unread): %w", err)
 	}
+	if isDirectMessage(*info) {
+		s.pages.put(channelID, resp.Messages, params.Limit)
+	}
 
 	for _, msg := range resp.Messages {
 		ts, _ := strconv.ParseFloat(msg.Timestamp, 64)
@@ -267,10 +274,11 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	}
 	if err := s.fetchReplies(ctx, channelID, oldest, parents, cu); err != nil {
 		// Replies are best-effort context; a failure here should not
-		// block the rest of the digest. Log and continue.
+		// block the rest of the digest. Log and continue — unless the
+		// deadline cut them, which the sweep must hear about (ADR 125).
 		s.log.Warn("fetch thread replies failed", "channel", channelID, "err", err)
 	}
-	return cu, nil
+	return cu, ctx.Err()
 }
 
 // threadLookbackHours is how far BEFORE last_read the channel history is
@@ -348,6 +356,7 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 		return nil, ErrNoUserToken
 	}
 	start := time.Now()
+	s.pages.reset() // only this sweep's pages may be lent on
 	channels, err := s.JoinedChannels(ctx)
 	if err != nil {
 		return nil, err
@@ -374,6 +383,9 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 				// users.conversations does not populate unread_count;
 				// Unread() fetches conversations.info and short-circuits
 				// when the channel is actually caught up.
+				if ctx.Err() != nil {
+					continue // drain: the deadline is reported once, below
+				}
 				t0 := time.Now()
 				cu, err := s.Unread(ctx, ch.ID, maxPerChannel)
 				results <- result{cu, err, time.Since(t0), ch.ID}
@@ -391,7 +403,9 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 	var st unreadStats
 	for r := range results {
 		st.add(r.id, r.took, r.cu, r.err)
-		if r.err != nil {
+		// A channel the deadline cut mid-way keeps what it already read;
+		// the returned error still holds the cursor.
+		if r.err != nil && (r.cu == nil || ctx.Err() == nil) {
 			s.log.Warn("unread fetch failed", "err", r.err)
 			continue
 		}
@@ -412,7 +426,7 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 		"slowest_channel", st.slowestID,
 		"slowest_took", st.slowest.Round(time.Millisecond).String(),
 	)
-	return out, nil
+	return out, ctx.Err()
 }
 
 // unreadStats tallies one UnreadAll pass for its log line.
@@ -444,6 +458,19 @@ func (u *unreadStats) add(id string, took time.Duration, cu *ChannelUnread, err 
 // hours <= 0 is a programming error and returns nil, nil so the
 // caller can no-op trivially. maxPerChannel caps history depth.
 func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChannel int) ([]*ChannelUnread, error) {
+	return s.recentDMActivity(ctx, hours, maxPerChannel, false)
+}
+
+// RecentDMActivityAfterUnread is RecentDMActivity for the DM window of an
+// unread sweep: a DM whose newest page UnreadAll read moments ago in the
+// same sweep is not read again (ADR 125). Only a caller whose delta
+// cursor is capped at the sweep's start may use it — that cap is what
+// makes a message arriving after the page was read safe to miss here.
+func (s *UnreadService) RecentDMActivityAfterUnread(ctx context.Context, hours, maxPerChannel int) ([]*ChannelUnread, error) {
+	return s.recentDMActivity(ctx, hours, maxPerChannel, true)
+}
+
+func (s *UnreadService) recentDMActivity(ctx context.Context, hours, maxPerChannel int, reuse bool) ([]*ChannelUnread, error) {
 	if !s.Enabled() {
 		return nil, ErrNoUserToken
 	}
@@ -464,29 +491,36 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 	// canonically.
 	oldestFloat := float64(s.nowUnix() - int64(hours)*3600)
 
+	var probe []goslack.Channel
+	for _, ch := range channels {
+		if isDirectMessage(ch) {
+			probe = append(probe, ch) // non-DM channels handled by UnreadAll
+		}
+	}
+
 	// Workers cap stays at 4 to match UnreadAll — same politeness budget.
 	const workers = 4
 	type result struct {
 		cu  *ChannelUnread
 		err error
 	}
-	jobs := make(chan goslack.Channel, len(channels))
-	results := make(chan result, len(channels))
+	jobs := make(chan goslack.Channel, len(probe))
+	results := make(chan result, len(probe))
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for ch := range jobs {
-				if !isDirectMessage(ch) {
-					continue // non-DM channels handled by UnreadAll
+				if ctx.Err() != nil {
+					continue // drain: the deadline is reported once, below
 				}
-				cu, err := s.recentActivity(ctx, ch, oldestFloat, maxPerChannel)
+				cu, err := s.recentActivity(ctx, ch, oldestFloat, maxPerChannel, reuse)
 				results <- result{cu, err}
 			}
 		}()
 	}
-	for _, ch := range channels {
+	for _, ch := range probe {
 		jobs <- ch
 	}
 	close(jobs)
@@ -495,7 +529,7 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 
 	var out []*ChannelUnread
 	for r := range results {
-		if r.err != nil {
+		if r.err != nil && (r.cu == nil || ctx.Err() == nil) {
 			s.log.Warn("dm window fetch failed", "err", r.err)
 			continue
 		}
@@ -503,13 +537,18 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 			out = append(out, r.cu)
 		}
 	}
-	return out, nil
+	if reuse {
+		s.log.Info("dm window", "dms", len(probe), "reused_pages", s.pages.lentCount())
+	}
+	// One conversation failing is tolerated; the deadline passing is not
+	// a per-conversation failure — the caller must hold its cursor.
+	return out, ctx.Err()
 }
 
 // dmHistorySince is the per-channel worker for RecentDMActivity. It
 // pulls history newer than `oldest` and reuses fetchReplies so the
 // thread-reply contract matches UnreadAll's output shape exactly.
-func (s *UnreadService) recentActivity(ctx context.Context, ch goslack.Channel, oldestFloat float64, maxMessages int) (*ChannelUnread, error) {
+func (s *UnreadService) recentActivity(ctx context.Context, ch goslack.Channel, oldestFloat float64, maxMessages int, reuse bool) (*ChannelUnread, error) {
 	// Anchored at now, trimmed to the window locally. A page requested
 	// with `oldest` is the one adjacent to `oldest` — the stale end of the
 	// window — so a busy DM returned its oldest messages and dropped the
@@ -518,21 +557,29 @@ func (s *UnreadService) recentActivity(ctx context.Context, ch goslack.Channel, 
 		ChannelID: ch.ID,
 		Limit:     maxMessages,
 	}
-	var resp *goslack.GetConversationHistoryResponse
-	err := ratelimit.Do(ctx, s.log, 0, func() error {
-		r, err := s.api.GetConversationHistoryContext(ctx, params)
+	var page []goslack.Message
+	cached := false
+	if reuse {
+		page, cached = s.pages.get(ch.ID, maxMessages)
+	}
+	if !cached {
+		var resp *goslack.GetConversationHistoryResponse
+		err := ratelimit.Do(ctx, s.log, 0, func() error {
+			r, err := s.api.GetConversationHistoryContext(ctx, params)
+			if err != nil {
+				return err
+			}
+			resp = r
+			return nil
+		})
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("conversations.history (recent activity): %w", err)
 		}
-		resp = r
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("conversations.history (recent activity): %w", err)
+		page = resp.Messages
 	}
 
 	cu := &ChannelUnread{Channel: ch, LastRead: ch.LastRead}
-	for _, msg := range resp.Messages {
+	for _, msg := range page {
 		if ts, perr := strconv.ParseFloat(msg.Timestamp, 64); perr == nil && ts <= oldestFloat {
 			continue
 		}
@@ -541,7 +588,7 @@ func (s *UnreadService) recentActivity(ctx context.Context, ch goslack.Channel, 
 	if err := s.fetchReplies(ctx, ch.ID, oldestFloat, cu.Messages, cu); err != nil {
 		s.log.Warn("fetch thread replies failed", "channel", ch.ID, "err", err)
 	}
-	return cu, nil
+	return cu, ctx.Err()
 }
 
 // PriorityActivity returns the recent activity of the operator's priority
@@ -594,8 +641,14 @@ func (s *UnreadService) PriorityActivity(ctx context.Context, refs []string, old
 				ch.LastRead = info.LastRead
 			}
 		}
-		cu, herr := s.recentActivity(ctx, ch, oldestFloat, maxPerChannel)
+		if ctx.Err() != nil {
+			break
+		}
+		cu, herr := s.recentActivity(ctx, ch, oldestFloat, maxPerChannel, false)
 		if herr != nil {
+			if ctx.Err() != nil {
+				break // a deadline cut, not a missing channel
+			}
 			s.log.Warn("priority channel fetch failed", "channel", ch.ID, "err", herr)
 			missing = append(missing, ref+" (fetch failed)")
 			continue
@@ -603,7 +656,7 @@ func (s *UnreadService) PriorityActivity(ctx context.Context, refs []string, old
 		cu.Priority = true
 		out = append(out, cu)
 	}
-	return out, missing, nil
+	return out, missing, ctx.Err()
 }
 
 // nowUnix is a seam for tests — overridden via a package-level var
@@ -794,6 +847,9 @@ func (s *UnreadService) UnreadOwnThreads(ctx context.Context, hours int) ([]*Cha
 
 	byChannel := make(map[string]*ChannelUnread)
 	for k, chName := range roots {
+		if ctx.Err() != nil {
+			break // reported below; no point logging every thread
+		}
 		var thread []goslack.Message
 		rerr := ratelimit.Do(ctx, s.log, 0, func() error {
 			r, _, _, e := s.api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
@@ -809,7 +865,10 @@ func (s *UnreadService) UnreadOwnThreads(ctx context.Context, hours int) ([]*Cha
 		})
 		if rerr != nil {
 			// Best-effort: a single unreadable thread shouldn't sink the
-			// backstop.
+			// backstop. The deadline passing is not that (ADR 125).
+			if ctx.Err() != nil {
+				break
+			}
 			s.log.Warn("own-thread replies fetch failed", "channel", k.channelID, "thread", k.root, "err", rerr)
 			continue
 		}
@@ -834,7 +893,7 @@ func (s *UnreadService) UnreadOwnThreads(ctx context.Context, hours int) ([]*Cha
 	for _, cu := range byChannel {
 		out = append(out, cu)
 	}
-	return out, nil
+	return out, ctx.Err()
 }
 
 // unseenAfterMine returns the messages in a thread that were authored by

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/digest"
@@ -770,6 +771,21 @@ func newestTS(results []*slack.ChannelUnread) string {
 		}
 	}
 	return maxTS
+}
+
+// capCursor keeps a delta cursor at or below the moment the sweep began.
+// A sweep reads conversations one after another for up to its deadline,
+// so a message can land in a conversation already read while a later one
+// supplies a newer timestamp; a cursor taken from that newer message
+// would make the next pull drop the first one for good. Capped at the
+// start, the next pull re-shows what arrived during the sweep instead of
+// losing any of it. ADR 125. Pure.
+func capCursor(cursor string, start time.Time) string {
+	v, err := strconv.ParseFloat(cursor, 64)
+	if err != nil || start.IsZero() || v <= float64(start.Unix()) {
+		return cursor
+	}
+	return fmt.Sprintf("%d.000000", start.Unix())
 }
 
 // tsAfter reports whether Slack timestamp ts is strictly newer than

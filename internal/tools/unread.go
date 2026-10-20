@@ -459,15 +459,15 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	if p.dmWindowHours > 0 {
 		var dmResults []*slack.ChannelUnread
 		dmErr := sw.run("dm-window", func(c context.Context) error {
-			r, e := h.Unread().RecentDMActivity(c, p.dmWindowHours, p.maxPer)
+			r, e := h.Unread().RecentDMActivityAfterUnread(c, p.dmWindowHours, p.maxPer)
 			dmResults = r
 			return e
 		})
 		if dmErr != nil {
 			h.log.Warn("dm window fetch failed; falling back to unread-only", "err", dmErr)
-		} else {
-			results = mergeDMOverride(results, dmResults)
 		}
+		// What was read before a deadline cut is still shown (ADR 125).
+		results = mergeDMOverride(results, dmResults)
 	}
 
 	// Priority channels (ADR 112): shown for their window whether or not
@@ -493,9 +493,8 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 			if sw.ctx.Err() == nil { // a deadline cut is reported once, by the sweep note
 				priorityNote = "priority channels could not be read: " + prErr.Error() + "\n"
 			}
-		} else {
-			results = mergePriority(results, pr)
 		}
+		results = mergePriority(results, pr)
 		if len(missing) > 0 {
 			priorityNote += "priority channel(s) not found or not joined: " + strings.Join(missing, ", ") + "\n"
 		}
@@ -533,9 +532,8 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		})
 		if otErr != nil {
 			h.log.Warn("own-thread backstop failed; falling back to unread-only", "err", otErr)
-		} else {
-			results = mergeThreadMentions(results, otResults)
 		}
+		results = mergeThreadMentions(results, otResults)
 	}
 
 	// Best-effort self-resolution for mention markers; a failure here
@@ -652,7 +650,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	// block as the default machine-readable handle on this pull. The same
 	// value is returned to the caller, which in multi-workspace mode folds
 	// it into the combined per-workspace cursor token.
-	cursor = newestTS(results)
+	cursor = capCursor(newestTS(results), sw.start)
 	if sw.incomplete() {
 		cursor = p.afterTS
 	}
@@ -816,7 +814,8 @@ func (h *Hub) sweepMentions(ctx context.Context, sw *sweep, p mentionParams) (st
 			return e
 		}); dmErr != nil {
 			h.log.Warn("mentions dm-history backstop failed; fresh DMs may lag", "err", dmErr)
-		} else if hits := dmActivityToHits(dmCus, selfID); len(hits) > 0 {
+		}
+		if hits := dmActivityToHits(dmCus, selfID); len(hits) > 0 {
 			matches = mergeSearchHits(matches, hits)
 		}
 	}

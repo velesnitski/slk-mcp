@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.62.0] - 2026-10-20
+
+### Fixed
+
+- **A sweep cut by its deadline no longer advances its cursor past what
+  it never read.** The unread pass, the DM window, the priority channels
+  and the own-thread backstop logged deadline failures as ordinary
+  per-item failures, so the phase looked complete. They now stop at the
+  deadline, keep what they read and report the cut.
+- **The delta cursor is capped at the moment the sweep began.** A
+  message that landed in an already-read conversation during the sweep
+  could be skipped by the next pull; it is now shown by the next pull.
+
+### Changed
+
+- **The DM window reuses the history pages the unread pass just read**
+  instead of reading every DM again, removing the slowest phase of the
+  sweep. get_mentions still reads DMs fresh. See ADR 125.
+
 ## [1.61.0] - 2026-10-19
 
 ### Added

@@ -75,6 +75,7 @@ type SearchClient interface {
 type UnreadClient interface {
 	UnreadAll(ctx context.Context, maxPerChannel int) ([]*slack.ChannelUnread, error)
 	RecentDMActivity(ctx context.Context, hours, maxPerChannel int) ([]*slack.ChannelUnread, error)
+	RecentDMActivityAfterUnread(ctx context.Context, hours, maxPerChannel int) ([]*slack.ChannelUnread, error)
 	UnreadThreadMentions(ctx context.Context, hours int) ([]*slack.ChannelUnread, error)
 	UnreadOwnThreads(ctx context.Context, hours int) ([]*slack.ChannelUnread, error)
 	Self(ctx context.Context) (string, error)
