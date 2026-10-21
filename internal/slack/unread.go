@@ -745,9 +745,20 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 		}
 	}
 
+	// A mention the operator has since answered in the same thread is not
+	// pending. Best-effort: without the operator's own posts every mention
+	// is shown, as before.
+	answered, aerr := s.lastOwnPosts(ctx, afterDate, selfID)
+	if aerr != nil {
+		s.log.Warn("thread mentions: own replies lookup failed; showing every mention", "err", aerr)
+	}
+
 	byChannel := make(map[string]*ChannelUnread)
 	for _, m := range matches {
 		if m.Channel.ID == "" {
+			continue
+		}
+		if answeredLater(answered, m) {
 			continue
 		}
 		// The handle query also matches the operator's own messages —
@@ -791,6 +802,60 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 		out = append(out, cu)
 	}
 	return out, nil
+}
+
+// lastOwnPosts maps every thread the operator posted in since afterDate
+// (YYYY-MM-DD), keyed "channel|thread root", to the time of their newest
+// post there. A top-level post is the root of its own thread. ADR 126.
+func (s *UnreadService) lastOwnPosts(ctx context.Context, afterDate, selfID string) (map[string]float64, error) {
+	hits, err := s.search.Messages(ctx, "from:me after:"+afterDate, 100)
+	if err != nil {
+		return nil, fmt.Errorf("search from:me: %w", err)
+	}
+	return newestPostPerThread(hits, selfID), nil
+}
+
+// newestPostPerThread keys each of selfID's hits by channel and thread
+// root and keeps the newest time per key. Another author's hit never
+// counts, whatever the search returned; with no selfID nothing does. Pure.
+func newestPostPerThread(hits []goslack.SearchMessage, selfID string) map[string]float64 {
+	out := make(map[string]float64)
+	if selfID == "" {
+		return out
+	}
+	for _, h := range hits {
+		ts, err := strconv.ParseFloat(h.Timestamp, 64)
+		if err != nil || h.Channel.ID == "" || h.User != selfID {
+			continue
+		}
+		key := h.Channel.ID + "|" + threadRoot(searchHitToMessage(h))
+		if ts > out[key] {
+			out[key] = ts
+		}
+	}
+	return out
+}
+
+// answeredLater reports whether the operator posted in the mention's
+// thread after the mention. Pure.
+func answeredLater(lastOwn map[string]float64, m goslack.SearchMessage) bool {
+	if len(lastOwn) == 0 {
+		return false
+	}
+	ts, err := strconv.ParseFloat(m.Timestamp, 64)
+	if err != nil {
+		return false
+	}
+	return lastOwn[m.Channel.ID+"|"+threadRoot(searchHitToMessage(m))] > ts
+}
+
+// threadRoot is the ts of the thread a message belongs to: its parent's
+// for a reply, its own otherwise. Pure.
+func threadRoot(m goslack.Message) string {
+	if m.ThreadTimestamp != "" {
+		return m.ThreadTimestamp
+	}
+	return m.Timestamp
 }
 
 // UnreadOwnThreads catches the OTHER blind spot UnreadThreadMentions

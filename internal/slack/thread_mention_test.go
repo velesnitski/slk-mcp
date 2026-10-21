@@ -221,8 +221,9 @@ func TestUnreadThreadMentions_searchesHandleAsWellAsToMe(t *testing.T) {
 		t.Fatalf("UnreadThreadMentions err: %v", err)
 	}
 
-	if len(queries) != 2 {
-		t.Fatalf("want 2 searches (to:me + handle), got %d: %v", len(queries), queries)
+	// Third: from:me, to drop mentions already answered in-thread (ADR 126).
+	if len(queries) != 3 {
+		t.Fatalf("want 3 searches (to:me + handle + from:me), got %d: %v", len(queries), queries)
 	}
 	var sawToMe, sawHandle bool
 	for _, q := range queries {

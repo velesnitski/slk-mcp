@@ -91,7 +91,8 @@ func RenderCanvasText(text string, refs map[string]string) string {
 //   - <#CHANNELID>        → #channel-name (looked up in refs) or
 //     #CHANNELID as a last-resort fallback — never
 //     dropped, since the ID alone is correlatable
-//   - <url|label>         → label
+//   - <url|label>         → label, or the URL (scheme dropped) when the
+//     label is only Slack's display of the URL itself — see linkText
 //   - <url>               → (dropped — caller can re-add a [link]
 //     marker if needed)
 //
@@ -130,9 +131,34 @@ func RenderText(text string, refs map[string]string) string {
 		// the LLM) can still correlate it instead of dropping the ref.
 		return "#" + cid
 	})
-	text = linkRefRe.ReplaceAllString(text, "$2")
+	text = linkRefRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := linkRefRe.FindStringSubmatch(m)
+		return linkText(sub[1], sub[2])
+	})
 	text = bareLinkRe.ReplaceAllString(text, "")
 	return text
+}
+
+// linkText renders one <url|label>. A label that is only the URL's own
+// display — what Slack writes when a link is pasted: the scheme dropped
+// and, once the URL is long, its middle elided with "…" — stands for the
+// URL and is replaced by it; otherwise a long document link reached the
+// reader with its id cut out and could not be opened. A label that is
+// real text is kept as written. Pure.
+func linkText(url, label string) string {
+	bare := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://")
+	shown := strings.TrimSpace(label)
+	shown = strings.TrimPrefix(strings.TrimPrefix(shown, "https://"), "http://")
+	if shown == bare {
+		return bare
+	}
+	if i := strings.Index(shown, "…"); i > 0 {
+		head, tail := shown[:i], shown[i+len("…"):]
+		if strings.HasPrefix(bare, head) && strings.HasSuffix(bare, tail) && len(bare) > len(head)+len(tail) {
+			return bare
+		}
+	}
+	return label
 }
 
 // CollectMentionedUserIDs returns the unique set of <@USERID> tokens
