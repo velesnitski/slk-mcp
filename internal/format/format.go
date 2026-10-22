@@ -347,6 +347,25 @@ type digestOpts struct {
 	fullText         bool // render bodies without the MessageLineLimit truncation
 	msgLimit         int  // per-call body truncation cap; 0 = MessageLineLimit default
 	showTS           bool // append the message ts so each line is addressable
+	followUps        map[string]string
+}
+
+// WithFollowUps marks top-level messages the operator posted after in the
+// same channel: followUps maps a message ts to the operator's later post
+// ts, and each such message gets a "you posted here after it" line under
+// it. A channel post may or may not answer the message, so this informs
+// the reader rather than hiding anything (ADR 127).
+func WithFollowUps(followUps map[string]string) DigestOption {
+	return func(o *digestOpts) { o.followUps = followUps }
+}
+
+// FollowUpLine is the annotation WithFollowUps adds. Pure.
+func FollowUpLine(ownTS string) string {
+	label := ""
+	if t := ParseTS(ownTS); !t.IsZero() {
+		label = " (" + ClockLabel(t) + ")"
+	}
+	return ReplyIndent + "you posted in this channel after it" + label + " — check whether that answered it"
 }
 
 // WithMessageTimestamps appends " ts=<ts>" to every top-level digest
@@ -997,6 +1016,10 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 			b.WriteString(m.Timestamp)
 		}
 		b.WriteByte('\n')
+		if own, ok := cfg.followUps[m.Timestamp]; ok {
+			b.WriteString(FollowUpLine(own))
+			b.WriteByte('\n')
+		}
 
 		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
 			writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)

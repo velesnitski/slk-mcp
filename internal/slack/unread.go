@@ -143,6 +143,12 @@ type ChannelUnread struct {
 	// Priority marks a conversation fetched because the operator listed it
 	// as a priority channel, not because it is unread (ADR 112).
 	Priority bool
+
+	// FollowUps maps a top-level mention's ts to the operator's later
+	// top-level post in the same channel. It marks a mention probably
+	// answered, not certainly — so the mention is kept and annotated
+	// (ADR 127).
+	FollowUps map[string]string
 }
 
 // JoinedChannels returns channels the user is a member of, useful for
@@ -748,7 +754,7 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 	// A mention the operator has since answered in the same thread is not
 	// pending. Best-effort: without the operator's own posts every mention
 	// is shown, as before.
-	answered, aerr := s.lastOwnPosts(ctx, afterDate, selfID)
+	answered, ownTop, aerr := s.lastOwnPosts(ctx, afterDate, selfID)
 	if aerr != nil {
 		s.log.Warn("thread mentions: own replies lookup failed; showing every mention", "err", aerr)
 	}
@@ -783,6 +789,12 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 			byChannel[m.Channel.ID] = cu
 		}
 		msg := searchHitToMessage(m)
+		if follow := followUpAfter(ownTop, m.Channel.ID, msg); follow != "" {
+			if cu.FollowUps == nil {
+				cu.FollowUps = make(map[string]string)
+			}
+			cu.FollowUps[msg.Timestamp] = follow
+		}
 		// Decide whether to attach as a top-level message or as a
 		// reply under its parent's ts. Replies go under Replies[ts]
 		// so ChannelMentions traverses them via the same loop it
@@ -807,12 +819,62 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 // lastOwnPosts maps every thread the operator posted in since afterDate
 // (YYYY-MM-DD), keyed "channel|thread root", to the time of their newest
 // post there. A top-level post is the root of its own thread. ADR 126.
-func (s *UnreadService) lastOwnPosts(ctx context.Context, afterDate, selfID string) (map[string]float64, error) {
+//
+// It also returns, per channel, the operator's newest top-level post
+// (not a thread reply) as its Slack ts — what followUpAfter compares a
+// top-level mention against (ADR 127).
+func (s *UnreadService) lastOwnPosts(ctx context.Context, afterDate, selfID string) (map[string]float64, map[string]string, error) {
 	hits, err := s.search.Messages(ctx, "from:me after:"+afterDate, 100)
 	if err != nil {
-		return nil, fmt.Errorf("search from:me: %w", err)
+		return nil, nil, fmt.Errorf("search from:me: %w", err)
 	}
-	return newestPostPerThread(hits, selfID), nil
+	return newestPostPerThread(hits, selfID), newestTopLevelPost(hits, selfID), nil
+}
+
+// newestTopLevelPost maps each channel to the ts of selfID's newest
+// top-level post there. Thread replies do not count: they answer their
+// own thread, which newestPostPerThread already covers. Pure.
+func newestTopLevelPost(hits []goslack.SearchMessage, selfID string) map[string]string {
+	out := make(map[string]string)
+	if selfID == "" {
+		return out
+	}
+	best := make(map[string]float64)
+	for _, h := range hits {
+		if h.User != selfID || h.Channel.ID == "" {
+			continue
+		}
+		if m := searchHitToMessage(h); m.ThreadTimestamp != "" && m.ThreadTimestamp != m.Timestamp {
+			continue
+		}
+		ts, err := strconv.ParseFloat(h.Timestamp, 64)
+		if err != nil {
+			continue
+		}
+		if ts > best[h.Channel.ID] {
+			best[h.Channel.ID], out[h.Channel.ID] = ts, h.Timestamp
+		}
+	}
+	return out
+}
+
+// followUpAfter returns the operator's newest top-level post in channel
+// when it is newer than the top-level mention msg, else "". A reply is
+// never followed up this way — its thread is the place to answer. Pure.
+func followUpAfter(ownTop map[string]string, channel string, msg goslack.Message) string {
+	if msg.ThreadTimestamp != "" && msg.ThreadTimestamp != msg.Timestamp {
+		return ""
+	}
+	own, ok := ownTop[channel]
+	if !ok {
+		return ""
+	}
+	o, err1 := strconv.ParseFloat(own, 64)
+	m, err2 := strconv.ParseFloat(msg.Timestamp, 64)
+	if err1 != nil || err2 != nil || o <= m {
+		return ""
+	}
+	return own
 }
 
 // newestPostPerThread keys each of selfID's hits by channel and thread

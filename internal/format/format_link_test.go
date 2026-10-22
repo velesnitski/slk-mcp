@@ -1,6 +1,11 @@
 package format
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	goslack "github.com/slack-go/slack"
+)
 
 func TestLinkText(t *testing.T) {
 	const doc = "https://docs.example.com/document/d/1abcDEFghiJKLmnoPQRstu/edit?tab=t.0"
@@ -29,5 +34,19 @@ func TestRenderText_KeepsTheIdOfAnElidedLink(t *testing.T) {
 	want := "short analysis docs.example.com/document/d/1abcDEFghiJKLmnoPQRstu/edit"
 	if got := RenderText(in, nil); got != want {
 		t.Fatalf("RenderText = %q, want %q", got, want)
+	}
+}
+
+func TestChannelDigest_FollowUpLine(t *testing.T) {
+	m := goslack.Message{}
+	m.User, m.Timestamp, m.Text = "U2", "1700090000.000100", "<@U1> have you seen this?"
+	out := ChannelDigest("#alpha", []goslack.Message{m}, map[string]string{"U2": "Sam"}, 10,
+		WithMentionHighlight("U1"), WithFollowUps(map[string]string{m.Timestamp: "1700094000.000100"}))
+	if !strings.Contains(out, "you posted in this channel after it") || !strings.Contains(out, "have you seen this?") {
+		t.Fatalf("missing follow-up line or the mention itself:\n%s", out)
+	}
+	plain := ChannelDigest("#alpha", []goslack.Message{m}, map[string]string{"U2": "Sam"}, 10, WithMentionHighlight("U1"))
+	if strings.Contains(plain, "you posted") {
+		t.Fatalf("no follow-up line without WithFollowUps:\n%s", plain)
 	}
 }

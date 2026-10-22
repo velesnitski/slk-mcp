@@ -700,6 +700,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 				format.WithThreadReplies(r.Replies),
 				format.WithThreadPreviewReplies(p.replyCap),
 				format.WithOmitEmpty(),
+				format.WithFollowUps(r.FollowUps),
 			}
 			if slack.IsDirectMessage(r.Channel) {
 				// DMs are the actionable layer — few, human-length, and the
@@ -1000,6 +1001,12 @@ func mergeThreadMentions(base, mentions []*slack.ChannelUnread) []*slack.Channel
 			base = append(base, m)
 			byID[m.Channel.ID] = m
 			continue
+		}
+		for ts, own := range m.FollowUps {
+			if existing.FollowUps == nil {
+				existing.FollowUps = make(map[string]string)
+			}
+			existing.FollowUps[ts] = own
 		}
 		// Merge top-level messages with timestamp dedup.
 		seen := make(map[string]struct{}, len(existing.Messages))

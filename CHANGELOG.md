@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.64.0] - 2026-10-22
+
+### Changed
+
+- **A channel mention followed by your own post in that channel is
+  marked.** When you answered with a new message in the channel rather
+  than in a thread, the mention is kept and annotated "you posted in
+  this channel after it (time)", since a channel post may be about
+  something else. Thread answers are still dropped as before. See
+  ADR 127.
+
 ## [1.63.0] - 2026-10-21
 
 ### Fixed

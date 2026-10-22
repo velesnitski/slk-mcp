@@ -88,3 +88,54 @@ func TestUnreadThreadMentions_OwnPostsLookupFailingShowsEveryMention(t *testing.
 		t.Fatalf("a failed lookup must not hide mentions: %+v", out)
 	}
 }
+
+// ADR 127: a top-level mention the operator posted after in the same
+// channel is kept and annotated, never dropped.
+func TestUnreadThreadMentions_AnnotatesATopLevelMentionFollowedByAnOwnPost(t *testing.T) {
+	f := newFakeSlack(t)
+	prev := nowUnixFn
+	nowUnixFn = func() int64 { return 1700100000 }
+	t.Cleanup(func() { nowUnixFn = prev })
+
+	const followed, earlier, other = "1700090000.000100", "1700095000.000100", "1700096000.000100"
+	f.on("search.messages", func(r *http.Request) any {
+		_ = r.ParseForm()
+		var matches []map[string]any
+		if strings.Contains(r.Form.Get("query"), "from:me") {
+			matches = []map[string]any{
+				tmHit("C1", "U_SELF", "1700094000.000100", "", "good morning, both teams are on it"),
+				// A thread reply is not a channel follow-up.
+				tmHit("C2", "U_SELF", "1700099000.000100", "1700000000.000100", "in a thread"),
+			}
+		} else {
+			matches = []map[string]any{
+				tmHit("C1", "U2", followed, "", "<@U_SELF> have you seen this?"),
+				tmHit("C1", "U3", earlier, "", "<@U_SELF> and this?"),
+				tmHit("C2", "U4", other, "", "<@U_SELF> elsewhere"),
+			}
+		}
+		return map[string]any{"ok": true, "messages": map[string]any{"total": len(matches), "matches": matches}}
+	})
+
+	out, err := newTestUnreadServiceWithSearch(t, f).UnreadThreadMentions(context.Background(), 24)
+	if err != nil {
+		t.Fatalf("UnreadThreadMentions: %v", err)
+	}
+	byID := map[string]*ChannelUnread{}
+	for _, cu := range out {
+		byID[cu.Channel.ID] = cu
+	}
+	c1 := byID["C1"]
+	if c1 == nil || len(c1.Messages) != 2 {
+		t.Fatalf("both C1 mentions must be kept: %+v", c1)
+	}
+	if c1.FollowUps[followed] != "1700094000.000100" {
+		t.Fatalf("the followed-up mention is not annotated: %v", c1.FollowUps)
+	}
+	if _, ok := c1.FollowUps[earlier]; ok {
+		t.Fatalf("a mention newer than the own post must not be annotated: %v", c1.FollowUps)
+	}
+	if c2 := byID["C2"]; c2 == nil || len(c2.FollowUps) != 0 {
+		t.Fatalf("a thread reply is not a channel follow-up: %+v", c2)
+	}
+}

@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
 // ADR 125: the DM window reuses the unread sweep's pages, and the delta
@@ -103,5 +106,17 @@ func TestCapCursor(t *testing.T) {
 	}
 	if got := capCursor("1700000900.000100", time.Time{}); got != "1700000900.000100" {
 		t.Errorf("zero start must not cap: %q", got)
+	}
+}
+
+func TestMergeThreadMentions_CarriesFollowUps(t *testing.T) {
+	base := []*slack.ChannelUnread{{Channel: goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C1"}}}}}
+	mentions := []*slack.ChannelUnread{{
+		Channel:   goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: "C1"}}},
+		FollowUps: map[string]string{"1700090000.000100": "1700094000.000100"},
+	}}
+	got := mergeThreadMentions(base, mentions)
+	if len(got) != 1 || got[0].FollowUps["1700090000.000100"] != "1700094000.000100" {
+		t.Fatalf("follow-ups lost in the merge: %+v", got)
 	}
 }
