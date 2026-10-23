@@ -773,6 +773,29 @@ func newestTS(results []*slack.ChannelUnread) string {
 	return maxTS
 }
 
+// dmCap is the per-conversation cap for a DM in the unread sweep: the
+// caller's cap, but never below slack.DMMinMessages (ADR 128). Pure.
+func dmCap(maxPer int) int {
+	if maxPer < slack.DMMinMessages {
+		return slack.DMMinMessages
+	}
+	return maxPer
+}
+
+// readMoreHint is the call that reads a truncated conversation in full,
+// shown where the sweep cut it. The workspace is named only when there is
+// more than one to choose from. Pure.
+func readMoreHint(channelID, workspace string, multi bool) string {
+	if channelID == "" {
+		return ""
+	}
+	hint := "get_channel_digest channel=" + channelID
+	if multi && workspace != "" {
+		hint += " workspace=" + workspace
+	}
+	return hint + " reads the rest"
+}
+
 // capCursor keeps a delta cursor at or below the moment the sweep began.
 // A sweep reads conversations one after another for up to its deadline,
 // so a message can land in a conversation already read while a later one

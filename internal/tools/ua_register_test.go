@@ -140,7 +140,7 @@ func TestGetUnreadSummaryTool_ArgumentsReachTheSweep(t *testing.T) {
 	if !strings.Contains(out, "first line") {
 		t.Fatalf("the newest message should be inlined:\n%s", out)
 	}
-	if !strings.Contains(out, `+1 more messages`) {
+	if !strings.Contains(out, `+1 older messages not shown`) {
 		t.Fatalf("max_per_channel=1 must collapse the rest:\n%s", out)
 	}
 	// The three windows were switched off, so no search / files call ran.

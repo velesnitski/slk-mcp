@@ -48,8 +48,8 @@ func TestChannelDigest_HidesExtras(t *testing.T) {
 		msgs = append(msgs, m)
 	}
 	out := ChannelDigest("dev", msgs, map[string]string{"U1": "alex"}, 3)
-	if !strings.Contains(out, "+7 more messages") {
-		t.Fatalf("expected +7 more marker, got: %s", out)
+	if !strings.Contains(out, "+7 older messages not shown") {
+		t.Fatalf("expected +7 older marker, got: %s", out)
 	}
 }
 

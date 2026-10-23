@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.65.0] - 2026-10-23
+
+### Fixed
+
+- **DMs are no longer cut to the per-channel cap.** The sweep reads and
+  shows at least 50 messages of a DM, so the replies it shows keep the
+  messages they answer.
+- **A cut conversation says what is missing:** "+N older messages not
+  shown", with the `get_channel_digest` call that reads the rest.
+- **Merged mention hits keep newest-first order**, so a cut never drops
+  a newer message in favour of an older one.
+- **DMs are never collapsed into "short status updates"** and no longer
+  carry the "you posted in this channel after it" note. See ADR 128.
+
 ## [1.64.0] - 2026-10-22
 
 ### Changed

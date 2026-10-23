@@ -28,6 +28,12 @@ const lowSignalShortMessageThreshold = 16
 //   - At least 5 messages, no thread replies, and the average body
 //     length is under lowSignalShortMessageThreshold characters.
 func DetectLowSignalChannel(cu *slack.ChannelUnread) bool {
+	// A DM is a conversation: its short lines ("ok", "yes, at 3") are the
+	// content, not status noise. Collapsing it to a count hid the whole
+	// exchange (ADR 128).
+	if slack.IsDirectMessage(cu.Channel) {
+		return false
+	}
 	name := strings.ToLower(cu.Channel.Name)
 	for _, kw := range lowSignalNameKeywords {
 		if strings.Contains(name, kw) {

@@ -459,7 +459,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	if p.dmWindowHours > 0 {
 		var dmResults []*slack.ChannelUnread
 		dmErr := sw.run("dm-window", func(c context.Context) error {
-			r, e := h.Unread().RecentDMActivityAfterUnread(c, p.dmWindowHours, p.maxPer)
+			r, e := h.Unread().RecentDMActivityAfterUnread(c, p.dmWindowHours, dmCap(p.maxPer))
 			dmResults = r
 			return e
 		})
@@ -700,9 +700,11 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 				format.WithThreadReplies(r.Replies),
 				format.WithThreadPreviewReplies(p.replyCap),
 				format.WithOmitEmpty(),
-				format.WithFollowUps(r.FollowUps),
+				format.WithTruncationHint(readMoreHint(r.Channel.ID, sw.ws, len(h.workspaceNames()) > 1)),
 			}
+			perChannel := p.maxPer
 			if slack.IsDirectMessage(r.Channel) {
+				perChannel = dmCap(p.maxPer)
 				// DMs are the actionable layer — few, human-length, and the
 				// place amounts/deadlines/asks live. Render them fuller than
 				// the 280-char channel preview so the sweep stops truncating
@@ -717,8 +719,12 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 				// pings); huddles stay inline in DMs, where the call is the
 				// signal.
 				chOpts = append(chOpts, format.WithHuddleAggregation())
+				// In a DM every line follows one of the operator's; the
+				// "you posted after it" note only means something in a
+				// channel (ADR 128).
+				chOpts = append(chOpts, format.WithFollowUps(r.FollowUps))
 			}
-			rendered = format.ChannelDigest(label, r.Messages, users, p.maxPer, chOpts...)
+			rendered = format.ChannelDigest(label, r.Messages, users, perChannel, chOpts...)
 		}
 		// Summarising renderers (git, log, low-signal) describe the
 		// top-level messages and used to drop thread replies with them —
@@ -1019,6 +1025,12 @@ func mergeThreadMentions(base, mentions []*slack.ChannelUnread) []*slack.Channel
 			}
 			existing.Messages = append(existing.Messages, msg)
 		}
+		// Newest first again: renderers keep the head of the list, so an
+		// appended hit out of order would push a newer message out of the
+		// shown window (ADR 128).
+		sort.SliceStable(existing.Messages, func(a, b int) bool {
+			return tsLessStr(existing.Messages[b].Timestamp, existing.Messages[a].Timestamp)
+		})
 		// Merge thread replies into existing buckets with ts dedup.
 		if existing.Replies == nil && len(m.Replies) > 0 {
 			existing.Replies = make(map[string][]goslack.Message)

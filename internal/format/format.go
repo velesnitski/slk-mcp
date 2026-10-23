@@ -348,6 +348,14 @@ type digestOpts struct {
 	msgLimit         int  // per-call body truncation cap; 0 = MessageLineLimit default
 	showTS           bool // append the message ts so each line is addressable
 	followUps        map[string]string
+	truncationHint   string
+}
+
+// WithTruncationHint names, on the line that reports messages cut by the
+// per-channel cap, how to read them. Cut messages are the oldest, so the
+// line says so: in a conversation they are its beginning (ADR 128).
+func WithTruncationHint(hint string) DigestOption {
+	return func(o *digestOpts) { o.truncationHint = hint }
 }
 
 // WithFollowUps marks top-level messages the operator posted after in the
@@ -357,6 +365,15 @@ type digestOpts struct {
 // the reader rather than hiding anything (ADR 127).
 func WithFollowUps(followUps map[string]string) DigestOption {
 	return func(o *digestOpts) { o.followUps = followUps }
+}
+
+// TruncationLine reports the older messages a cap left out. Pure.
+func TruncationLine(hidden int, hint string) string {
+	line := fmt.Sprintf("... +%d older messages not shown", hidden)
+	if hint != "" {
+		line += " — " + hint
+	}
+	return line
 }
 
 // FollowUpLine is the annotation WithFollowUps adds. Pure.
@@ -1026,7 +1043,8 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		}
 	}
 	if hidden > 0 {
-		fmt.Fprintf(&b, "... +%d more messages\n", hidden)
+		b.WriteString(TruncationLine(hidden, cfg.truncationHint))
+		b.WriteByte('\n')
 	}
 	// Replies whose parent is not in this window. The empty-window branch
 	// above already renders them; here the window also has top-level

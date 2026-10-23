@@ -240,6 +240,11 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	if lookback := float64(s.nowUnix() - threadLookbackHours*3600); lookback < lookbackFloor {
 		lookbackFloor = lookback
 	}
+	// A DM is a conversation, not a feed: cut short, its first lines lose
+	// the subject the rest refers to. Read more of it (ADR 128).
+	if isDirectMessage(*info) && maxMessages < DMMinMessages {
+		maxMessages = DMMinMessages
+	}
 	params := &goslack.GetConversationHistoryParameters{
 		ChannelID: channelID,
 		Limit:     maxMessages + threadParentHeadroom,
@@ -292,6 +297,12 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 // moving. It bounds the extra work: parents older than this cannot
 // surface new replies through the sweep.
 const threadLookbackHours = 12
+
+// DMMinMessages is the fewest messages the unread sweep reads and shows
+// for a DM, whatever the per-channel cap. A channel cut to its newest
+// messages loses old news; a DM cut the same way loses the start of the
+// conversation its newest lines answer (ADR 128).
+const DMMinMessages = 50
 
 // threadParentHeadroom is the extra page size requested so the
 // pre-last_read lookback cannot crowd out genuinely new messages:
