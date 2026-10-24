@@ -195,7 +195,8 @@ func TestGetChannelInfo_RendersMetadata_Behaviour(t *testing.T) {
 		"first topic line\nsecond line", "", false, created))
 	hub := deHub(t, f)
 
-	out := resultText(deCall(t, hub, "get_channel_info", map[string]any{"channel": "#alpha"}))
+	// The read-state line has its own tests (ADR 129); this pins metadata.
+	out := resultText(deCall(t, hub, "get_channel_info", map[string]any{"channel": "#alpha", "read_state": false}))
 
 	want := "#alpha\nmembers: 12\ncreated: " + time.Unix(created, 0).Format("2006-01-02") +
 		"\ntopic: first topic line\npurpose: (none)\narchived: false"

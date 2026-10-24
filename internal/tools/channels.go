@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	goslack "github.com/slack-go/slack"
+	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
 
@@ -89,8 +90,9 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 	if !h.cfg.IsDisabled("get_channel_info") {
 		s.AddTool(
 			mcp.NewTool("get_channel_info",
-				mcp.WithDescription("Get a channel's topic, purpose, member count and created date. Optionally lists member display names. Accepts either a channel name (#devops, devops) or a Slack channel ID (C0ABC1234DE) — useful for resolving `<#CID>` references from message bodies."),
-				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops, devops) or Slack channel ID (C0ABC1234DE)")),
+				mcp.WithDescription("Get a channel's or DM's topic, purpose, member count and created date, and — with a user token — how far you have read it: your read marker, the newest message and how many messages by others came after the marker. Optionally lists member display names. Accepts a channel name (#devops, devops), a DM as @handle or bare U… user id, or a C/G/D conversation id — useful for resolving `<#CID>` references from message bodies and for checking whether a DM is really unread."),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name (#devops, devops), a DM as @handle or bare U… user id, or a C/G/D conversation id")),
+				mcp.WithBoolean("read_state", mcp.Description("Report your read marker and unread count (one extra history read; needs a user token). Default: true.")),
 				mcp.WithBoolean("include_members", mcp.Description("Resolve and list channel members (default: false)")),
 				mcp.WithNumber("members_limit", mcp.Description("Cap on members listed (default: 50, 0 = all)")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
@@ -114,7 +116,8 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 				if slack.IsChannelID(trimmed) {
 					channelID = trimmed
 				} else {
-					channelID, err = scoped.Channels().ResolveID(ctx, input)
+					// @handle and U… open the DM; names resolve as before.
+					channelID, err = scoped.resolveConversation(ctx, input)
 					if err != nil {
 						return mcp.NewToolResultError(err.Error()), nil
 					}
@@ -126,11 +129,19 @@ func (h *Hub) registerChannelTools(s *server.MCPServer) {
 
 				created := time.Unix(int64(ch.Created), 0).Format("2006-01-02")
 				var b strings.Builder
+				label := "#" + ch.Name
+				if slack.IsDirectMessage(*ch) {
+					label = channelDisplayLabel(ctx, *ch, scoped.Users()) + " (DM)"
+				}
 				fmt.Fprintf(&b,
-					"#%s%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
-					ch.Name, h.wsLabel(wsName), ch.NumMembers, created,
+					"%s%s\nmembers: %d\ncreated: %s\ntopic: %s\npurpose: %s\narchived: %v",
+					label, h.wsLabel(wsName), ch.NumMembers, created,
 					firstLine(ch.Topic.Value), firstLine(ch.Purpose.Value), ch.IsArchived,
 				)
+				if req.GetBool("read_state", true) && scoped.client.HasUserToken() {
+					b.WriteString("\n")
+					b.WriteString(scoped.readStateLine(ctx, channelID))
+				}
 
 				if includeMembers {
 					ids, err := scoped.Channels().Members(ctx, channelID, membersLimit)
@@ -278,4 +289,53 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// readStateLine renders the operator's read state of one conversation
+// (ADR 129): where the marker is, the newest message, and whether that
+// message is read. A failure is reported on the line, never as a guess.
+func (h *Hub) readStateLine(ctx context.Context, channelID string) string {
+	rs, err := h.Unread().ReadState(ctx, channelID)
+	if err != nil {
+		return "read state: unavailable — " + err.Error()
+	}
+	return formatReadState(rs, h.Users().Name(ctx, newestUser(rs)))
+}
+
+func newestUser(rs slack.ReadState) string {
+	if rs.Newest == nil {
+		return ""
+	}
+	return rs.Newest.User
+}
+
+// formatReadState renders a ReadState in one line. Pure.
+func formatReadState(rs slack.ReadState, newestAuthor string) string {
+	var b strings.Builder
+	b.WriteString("read state: ")
+	if rs.LastRead == "" {
+		b.WriteString("no read marker from Slack for your token (not a member, or not tracked)")
+	} else {
+		b.WriteString("last read " + format.ClockLabel(format.ParseTS(rs.LastRead)))
+	}
+	if rs.Newest == nil {
+		b.WriteString(" · no messages")
+		return b.String()
+	}
+	newest := "newest " + format.ClockLabel(format.ParseTS(rs.Newest.Timestamp))
+	if newestAuthor != "" {
+		newest += " " + newestAuthor
+	}
+	b.WriteString(" · " + newest)
+	switch {
+	case rs.LastRead == "":
+	case rs.Unread == 0:
+		b.WriteString(" · read")
+	case rs.Capped:
+		fmt.Fprintf(&b, " · %d+ unread", rs.Unread)
+	default:
+		fmt.Fprintf(&b, " · %d unread", rs.Unread)
+	}
+	b.WriteString(" (thread replies are tracked separately)")
+	return b.String()
 }

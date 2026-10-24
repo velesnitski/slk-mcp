@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.66.0] - 2026-10-24
+
+### Added
+
+- **`get_channel_info` shows how far you have read a conversation:** your
+  read marker, the newest message and how many messages by others came
+  after it ("read" / "N unread"), from your own token's marker. It also
+  accepts a DM as @handle or user id and labels it as a DM.
+  `read_state=false` skips the extra call. See ADR 129.
+
 ## [1.65.0] - 2026-10-23
 
 ### Fixed
