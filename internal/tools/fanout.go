@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -35,6 +36,30 @@ func (h *Hub) sweepTargets(workspace string) (read, excluded []slack.Workspace) 
 		return all, nil
 	}
 	return read, excluded
+}
+
+// selfTargets resolves the workspaces a you-global change (status,
+// presence, DND) applies to. An empty name follows the sweep: workspaces
+// SLACK_SWEEP_EXCLUDE keeps out of the operator's view are left alone,
+// because an AFK the operator set for the workspaces they work in should
+// not land in one they do not follow (ADR 130). "all" or "*" reaches every
+// workspace; a label reaches that one. Unknown name → nil, nil.
+func (h *Hub) selfTargets(workspace string) (apply, skipped []slack.Workspace) {
+	switch strings.ToLower(strings.TrimSpace(workspace)) {
+	case "all", "*":
+		return h.registry, nil
+	}
+	return h.sweepTargets(workspace)
+}
+
+// selfSkippedLines reports the workspaces a you-global change left
+// alone, so "set everywhere" is never assumed where it did not happen.
+func (h *Hub) selfSkippedLines(skipped []slack.Workspace) []string {
+	var lines []string
+	for _, ws := range skipped {
+		lines = append(lines, fmt.Sprintf("- unchanged%s: excluded by SLACK_SWEEP_EXCLUDE — pass workspace=%s or workspace=all", h.wsLabel(ws.Name), ws.Name))
+	}
+	return lines
 }
 
 // excludedNote names the workspaces a default sweep left out, so their

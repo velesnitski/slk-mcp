@@ -37,7 +37,7 @@ func (h *Hub) registerDNDTools(s *server.MCPServer) {
 			mcp.WithDescription("Pause (or resume) your Slack notifications — Do Not Disturb / snooze. Unlike a custom status, this actually SILENCES notifications. DND is a property of YOU, so an empty workspace pauses notifications on EVERY configured workspace at once. Pass minutes>0 to snooze for that long; minutes=0 or resume=true ends the snooze now. Requires a user token (xoxp-) with the dnd:write scope."),
 			mcp.WithNumber("minutes", mcp.Description("How long to pause notifications, in minutes (>0). 0 (or resume=true) ends the snooze immediately.")),
 			mcp.WithBoolean("resume", mcp.Description("true = end the current snooze now (resume notifications), ignoring minutes. Default false.")),
-			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): apply to EVERY workspace — DND is you-global.")),
+			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): every workspace the unread sweep covers — ones in SLACK_SWEEP_EXCLUDE are left unchanged and listed. workspace=all reaches every configured workspace.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return h.runSetDND(ctx, req.GetString("workspace", ""), int(req.GetFloat("minutes", 0)), req.GetBool("resume", false)), nil
@@ -49,7 +49,7 @@ func (h *Hub) registerDNDTools(s *server.MCPServer) {
 // workspaces (empty = all, you-global). minutes<=0 or resume ends the
 // snooze; otherwise notifications are paused for `minutes`.
 func (h *Hub) runSetDND(ctx context.Context, workspace string, minutes int, resume bool) *mcp.CallToolResult {
-	targets := h.workspaceTargets(workspace)
+	targets, skipped := h.selfTargets(workspace)
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
 	}
@@ -84,6 +84,7 @@ func (h *Hub) runSetDND(ctx context.Context, workspace string, minutes int, resu
 	if applied == 0 {
 		return mcp.NewToolResultError("no workspace has a user token; cannot change DND:\n" + strings.Join(lines, "\n"))
 	}
+	lines = append(lines, h.selfSkippedLines(skipped)...)
 	return mcp.NewToolResultText(strings.Join(lines, "\n"))
 }
 

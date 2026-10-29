@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.67.0] - 2026-10-29
+
+### Fixed
+
+- **Replies addressed to you are no longer cut to the preview.** In the
+  unread sweep, a reply in a thread you started or posted in, or one that
+  @-mentions you, renders at up to 1500 chars instead of 280.
+- **AFK no longer lands in workspaces you excluded.** `set_status`,
+  `set_presence` and `set_dnd` without a workspace follow
+  `SLACK_SWEEP_EXCLUDE` and list the workspaces left unchanged;
+  `workspace=all` reaches every workspace.
+- **A permalink passed as `url` or `link` is accepted** by every tool that
+  takes one. See ADR 130.
+
 ## [1.66.0] - 2026-10-24
 
 ### Added

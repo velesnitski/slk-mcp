@@ -51,7 +51,7 @@ func (h *Hub) registerDocumentTools(s *server.MCPServer) {
 				req.GetString("workspace", ""),
 				req.GetString("channel", ""),
 				req.GetString("timestamp", ""),
-				req.GetString("permalink", ""),
+				permalinkArg(req),
 				req.GetString("from", ""),
 				req.GetString("match", ""),
 				req.GetInt("limit", 1),

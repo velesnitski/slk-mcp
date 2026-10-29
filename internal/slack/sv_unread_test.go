@@ -465,6 +465,9 @@ func TestUnreadOwnThreads_SurfacesRepliesNewerThanMyLastMessage(t *testing.T) {
 	if len(replies) != 1 || replies[0].Text != "here you go" {
 		t.Fatalf("replies = %+v", got[0].Replies)
 	}
+	if !got[0].OwnThreads["1700099000.000000"] {
+		t.Fatalf("own thread not marked: %+v", got[0].OwnThreads)
+	}
 	if q := f.form(t, "search.messages", 0).Get("query"); !svHasSubstr(q, "from:me") {
 		t.Fatalf("query = %q, want a from:me search", q)
 	}

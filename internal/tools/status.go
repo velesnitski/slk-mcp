@@ -43,7 +43,7 @@ func (h *Hub) registerStatusTools(s *server.MCPServer) {
 			mcp.WithNumber("clear_after_minutes", mcp.Description("Auto-clear the status after N minutes from now (server computes the expiry). 0 or omitted = no expiry. For 'AFK till next work day' pass the minutes until tomorrow morning.")),
 			mcp.WithBoolean("away", mcp.Description("Also force presence to 'away' (the grey dot). Default false leaves presence automatic. Pass false explicitly to restore automatic presence when clearing an AFK status.")),
 			mcp.WithBoolean("set_presence", mcp.Description("Whether to touch presence at all (default: false). When true, presence is set from `away`; when false, presence is left untouched. Lets you set a status without also flipping the dot.")),
-			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): apply to EVERY workspace — a status is you-global.")),
+			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): every workspace the unread sweep covers — ones in SLACK_SWEEP_EXCLUDE are left unchanged and listed. workspace=all reaches every configured workspace.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return h.runSetStatus(ctx, statusParams{
@@ -71,7 +71,7 @@ func (h *Hub) registerSetPresence(s *server.MCPServer) {
 		mcp.NewTool("set_presence",
 			mcp.WithDescription("Set your Slack presence to away (the grey dot) or auto, WITHOUT changing your custom status. Presence is a property of YOU, so an empty workspace applies it to every configured workspace. Use set_status when you want to change the status text too. Requires a user token (xoxp-)."),
 			mcp.WithBoolean("away", mcp.Description("true (default) = force presence to 'away' (grey dot); false = restore automatic presence (Slack flips to away on idle again).")),
-			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): apply to EVERY workspace — presence is you-global.")),
+			mcp.WithString("workspace", mcp.Description("Target one workspace by its configured label. Default (empty): every workspace the unread sweep covers — ones in SLACK_SWEEP_EXCLUDE are left unchanged and listed. workspace=all reaches every configured workspace.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return h.runSetPresence(ctx, req.GetString("workspace", ""), req.GetBool("away", true)), nil
@@ -82,7 +82,7 @@ func (h *Hub) registerSetPresence(s *server.MCPServer) {
 // runSetPresence flips presence across the requested workspaces (empty =
 // all, you-global) and leaves the custom status untouched.
 func (h *Hub) runSetPresence(ctx context.Context, workspace string, away bool) *mcp.CallToolResult {
-	targets := h.workspaceTargets(workspace)
+	targets, skipped := h.selfTargets(workspace)
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(workspace, h.workspaceNames()))
 	}
@@ -110,6 +110,7 @@ func (h *Hub) runSetPresence(ctx context.Context, workspace string, away bool) *
 	if applied == 0 {
 		return mcp.NewToolResultError("no workspace has a user token; cannot set presence:\n" + strings.Join(lines, "\n"))
 	}
+	lines = append(lines, h.selfSkippedLines(skipped)...)
 	return mcp.NewToolResultText(strings.Join(lines, "\n"))
 }
 
@@ -176,7 +177,7 @@ func statusExpiry(clearAfterMinutes int, now time.Time) int64 {
 // deliberate opposite of post_message's single-target default). `now`
 // is injected so the expiry computation is unit-testable.
 func (h *Hub) runSetStatus(ctx context.Context, p statusParams, now time.Time) *mcp.CallToolResult {
-	targets := h.workspaceTargets(p.workspace)
+	targets, skipped := h.selfTargets(p.workspace)
 	if targets == nil {
 		return mcp.NewToolResultError(unknownWorkspaceMsg(p.workspace, h.workspaceNames()))
 	}
@@ -223,5 +224,6 @@ func (h *Hub) runSetStatus(ctx context.Context, p statusParams, now time.Time) *
 	if applied == 0 {
 		return mcp.NewToolResultError("no workspace has a user token; cannot set status:\n" + strings.Join(lines, "\n"))
 	}
+	lines = append(lines, h.selfSkippedLines(skipped)...)
 	return mcp.NewToolResultText(strings.Join(lines, "\n"))
 }

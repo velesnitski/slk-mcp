@@ -149,6 +149,11 @@ type ChannelUnread struct {
 	// answered, not certainly — so the mention is kept and annotated
 	// (ADR 127).
 	FollowUps map[string]string
+
+	// OwnThreads marks thread roots the operator takes part in, found by
+	// the own-thread backstop. Replies there are addressed to the
+	// operator, so the sweep renders them at a fuller cap (ADR 130).
+	OwnThreads map[string]bool
 }
 
 // JoinedChannels returns channels the user is a member of, useful for
@@ -1025,6 +1030,10 @@ func (s *UnreadService) UnreadOwnThreads(ctx context.Context, hours int) ([]*Cha
 			cu.Replies = make(map[string][]goslack.Message)
 		}
 		cu.Replies[k.root] = append(cu.Replies[k.root], unseen...)
+		if cu.OwnThreads == nil {
+			cu.OwnThreads = make(map[string]bool)
+		}
+		cu.OwnThreads[k.root] = true
 	}
 
 	out := make([]*ChannelUnread, 0, len(byChannel))

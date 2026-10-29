@@ -349,6 +349,22 @@ type digestOpts struct {
 	showTS           bool // append the message ts so each line is addressable
 	followUps        map[string]string
 	truncationHint   string
+	ownThreads       map[string]bool // thread roots the operator takes part in
+	addressedLimit   int             // body cap for replies addressed to the operator; 0 = msgLimit
+}
+
+// WithAddressedReplies renders replies addressed to the operator at a
+// fuller body cap: a reply in a thread the operator started or posted in
+// (ownThreads, or any message of theirs in the rendered thread), and a
+// reply that @-mentions them. Those are the replies the sweep surfaces so
+// the operator can act on them, and the 280-char preview cut them to
+// "(+N chars)" — which forced a second read of the same thread (ADR 130).
+// Other replies keep the compact cap.
+func WithAddressedReplies(ownThreads map[string]bool, limit int) DigestOption {
+	return func(o *digestOpts) {
+		o.ownThreads = ownThreads
+		o.addressedLimit = limit
+	}
 }
 
 // WithTruncationHint names, on the line that reports messages cut by the
@@ -1039,7 +1055,7 @@ func ChannelDigest(channelLabel string, messages []goslack.Message, users map[st
 		}
 
 		if replies, ok := cfg.replies[m.Timestamp]; ok && len(replies) > 0 {
-			writeReplies(&b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)
+			writeReplies(&b, replies, users, cfg, cfg.threadOwned(m.Timestamp, m.User, replies))
 		}
 	}
 	if hidden > 0 {
@@ -1161,14 +1177,32 @@ func writeThreadsByParent(b *strings.Builder, threads map[string][]goslack.Messa
 		} else {
 			b.WriteString("thread:\n")
 		}
-		writeReplies(b, replies, users, cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit)
+		writeReplies(b, replies, users, cfg, cfg.threadOwned(ts, "", replies))
 	}
+}
+
+// threadOwned reports whether the operator takes part in a thread: the
+// backstop marked it, they wrote the parent, or a reply in it is theirs.
+func (o digestOpts) threadOwned(root, parentUser string, replies []goslack.Message) bool {
+	if o.selfID == "" {
+		return o.ownThreads[root]
+	}
+	if o.ownThreads[root] || parentUser == o.selfID {
+		return true
+	}
+	for _, r := range replies {
+		if r.User == o.selfID {
+			return true
+		}
+	}
+	return false
 }
 
 // writeReplies renders replies indented under the thread parent, up
 // to a cap (cap <= 0 means use ThreadPreviewReplies default). Mentions
 // are highlighted using selfID just like the parent message.
-func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, selfID string, cap int, fullText bool, limit int) {
+func writeReplies(b *strings.Builder, replies []goslack.Message, users map[string]string, cfg digestOpts, owned bool) {
+	selfID, cap, fullText, limit := cfg.selfID, cfg.threadPreviewCap, cfg.fullText, cfg.msgLimit
 	if cap <= 0 {
 		cap = ThreadPreviewReplies
 	}
@@ -1183,7 +1217,11 @@ func writeReplies(b *strings.Builder, replies []goslack.Message, users map[strin
 		if MentionsUser(r, selfID) {
 			b.WriteString(MentionMarker)
 		}
-		b.WriteString(messageLineImpl(r, users[r.User], users, fullText, limit))
+		replyLimit := limit
+		if cfg.addressedLimit > 0 && (owned || MentionsUser(r, selfID)) {
+			replyLimit = cfg.addressedLimit
+		}
+		b.WriteString(messageLineImpl(r, users[r.User], users, fullText, replyLimit))
 		b.WriteByte('\n')
 	}
 	if hidden > 0 {

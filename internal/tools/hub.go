@@ -332,3 +332,16 @@ func (h *Hub) wrap(name string, fn server.ToolHandlerFunc) server.ToolHandlerFun
 	_ = name
 	return fn
 }
+
+// permalinkArg reads the permalink argument, also under the names a caller
+// reaches for first — "url" and "link". The arg was silently dropped when
+// passed as "url", so the call failed with "pass a permalink" while one had
+// in fact been passed (ADR 130).
+func permalinkArg(req mcp.CallToolRequest) string {
+	for _, key := range []string{"permalink", "url", "link"} {
+		if v := strings.TrimSpace(req.GetString(key, "")); v != "" {
+			return v
+		}
+	}
+	return ""
+}

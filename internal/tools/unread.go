@@ -206,7 +206,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel := req.GetString("channel", "")
 				ts := req.GetString("timestamp", "")
-				permalink := req.GetString("permalink", "")
+				permalink := permalinkArg(req)
 
 				// mark_read advances the read cursor up to a specific
 				// message — we want the message's own ts, not its thread
@@ -701,6 +701,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 				format.WithThreadPreviewReplies(p.replyCap),
 				format.WithOmitEmpty(),
 				format.WithTruncationHint(readMoreHint(r.Channel.ID, sw.ws, len(h.workspaceNames()) > 1)),
+				format.WithAddressedReplies(r.OwnThreads, dmMessageLimit),
 			}
 			perChannel := p.maxPer
 			if slack.IsDirectMessage(r.Channel) {
@@ -737,7 +738,8 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		if (isGit || isLog || lowSignal) && len(r.Replies) > 0 {
 			if block := format.ThreadRepliesBlock(r.Replies, users,
 				format.WithMentionHighlight(selfID),
-				format.WithThreadPreviewReplies(p.replyCap)); block != "" {
+				format.WithThreadPreviewReplies(p.replyCap),
+				format.WithAddressedReplies(r.OwnThreads, dmMessageLimit)); block != "" {
 				if rendered == "" {
 					rendered = "## " + label
 				}
@@ -1007,6 +1009,12 @@ func mergeThreadMentions(base, mentions []*slack.ChannelUnread) []*slack.Channel
 			base = append(base, m)
 			byID[m.Channel.ID] = m
 			continue
+		}
+		for root := range m.OwnThreads {
+			if existing.OwnThreads == nil {
+				existing.OwnThreads = make(map[string]bool)
+			}
+			existing.OwnThreads[root] = true
 		}
 		for ts, own := range m.FollowUps {
 			if existing.FollowUps == nil {

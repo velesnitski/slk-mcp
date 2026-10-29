@@ -36,7 +36,7 @@ func (h *Hub) registerMessageTools(s *server.MCPServer) {
 			mcp.WithBoolean("reactors", mcp.Description("Also list the people behind each reaction, plus everyone who reacted at all, by name (default: false). Fills in user lists Slack cut short with one reactions.get call.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			permalink := strings.TrimSpace(req.GetString("permalink", ""))
+			permalink := strings.TrimSpace(permalinkArg(req))
 			channel := req.GetString("channel", "")
 			ts := req.GetString("ts", "")
 			wsArg := req.GetString("workspace", "")

@@ -86,7 +86,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel := req.GetString("channel", "")
 				threadTS := req.GetString("thread_ts", "")
-				permalink := req.GetString("permalink", "")
+				permalink := permalinkArg(req)
 				fullText := req.GetBool("full_text", false)
 
 				// routeWorkspace, not scopedWorkspace: get_message already
@@ -277,7 +277,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 					req.GetString("workspace", ""),
 					req.GetString("channel", ""),
 					req.GetString("timestamp", ""),
-					req.GetString("permalink", "")), nil
+					permalinkArg(req)), nil
 			},
 		)
 	}

@@ -95,7 +95,7 @@ func (h *Hub) registerAudioTools(s *server.MCPServer) {
 				req.GetString("workspace", ""),
 				req.GetString("channel", ""),
 				req.GetString("timestamp", ""),
-				req.GetString("permalink", ""),
+				permalinkArg(req),
 				req.GetString("from", ""),
 				""), nil
 		},
