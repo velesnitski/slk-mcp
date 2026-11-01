@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -237,5 +238,33 @@ func TestSweep_EveryPhaseIsLoggedWithItsDuration(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("log missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestSweep_ConcurrentPhasesReportInSweepOrder(t *testing.T) {
+	sw := newSweep(cancelledCtx(), uaLog(), "get_unread_summary", "w")
+	var wg sync.WaitGroup
+	for _, ph := range []string{"canvases", "own-threads", "priority", "thread-mentions", "unread"} {
+		wg.Add(1)
+		go func(ph string) {
+			defer wg.Done()
+			_ = sw.run(ph, func(context.Context) error { return nil })
+		}(ph)
+	}
+	wg.Wait()
+	note := sw.note(true)
+	if !strings.Contains(note, "not finished: unread, priority, thread-mentions, own-threads, canvases;") {
+		t.Fatalf("cut phases must be named in sweep order, whatever finished first:\n%s", note)
+	}
+}
+
+func TestSweep_TimingsNameEveryPhase(t *testing.T) {
+	sw := newSweep(context.Background(), uaLog(), "get_unread_summary", "w")
+	_ = sw.run("own-threads", func(context.Context) error { return nil })
+	_ = sw.run("unread", func(context.Context) error { time.Sleep(15 * time.Millisecond); return nil })
+	got := sw.timings()
+	if !strings.HasPrefix(got, "timings: ") || !strings.Contains(got, "total · unread ") ||
+		strings.Index(got, "unread") > strings.Index(got, "own-threads") {
+		t.Fatalf("got %q", got)
 	}
 }

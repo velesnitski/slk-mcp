@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -38,6 +39,7 @@ type unreadParams struct {
 	includeRefs        bool
 	showAnswered       bool
 	dmFullText         bool
+	showTimings        bool
 	urg                digest.UrgencyOpts
 }
 
@@ -131,6 +133,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("include_refs", mcp.Description("Append the trailing References block (every issue ID, MR, and branch seen). Off by default — it costs a few hundred tokens and is only worth it when you'll chain into those IDs. The newest message ts also lives in each channel's inline output, so a delta cursor doesn't need this.")),
 				mcp.WithBoolean("show_answered", mcp.Description("Also show DMs where the operator already holds the last word. By default those are suppressed to a one-line note — Slack's last_read updates on client focus, not on send, so a DM answered from a notification can stay 'unread' server-side and re-surface as a false pending item. Default: false.")),
 				mcp.WithBoolean("dm_full_text", mcp.Description("Render DM message bodies at a generous cap (1500 chars) instead of the compact 280-char channel preview, so amounts/deadlines/asks in a direct message aren't truncated to '(+N chars)'. DMs only — channels stay compact. Default: true; set false for a leaner, uniformly-truncated sweep.")),
+				mcp.WithBoolean("show_timings", mcp.Description("Append one line per workspace with the sweep's wall time and each fetch phase's duration. For diagnosing a slow sweep; MCP hosts usually drop a server's stderr, where the same timings are logged. Default: false.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -152,6 +155,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					includeRefs:        req.GetBool("include_refs", false),
 					showAnswered:       req.GetBool("show_answered", false),
 					dmFullText:         req.GetBool("dm_full_text", true),
+					showTimings:        req.GetBool("show_timings", false),
 					urg: digest.UrgencyOpts{
 						Weight:        req.GetFloat("urgency_weight", 0),
 						ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -439,55 +443,142 @@ func (h *Hub) buildUnreadSummary(ctx context.Context, p unreadParams) (body, cur
 // skipped and named. Any cut phase keeps the incoming cursor — advancing
 // it would make the next delta pull skip what this pull never read.
 func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body, cursor string, err error) {
-	var results []*slack.ChannelUnread
-	if err := sw.run("unread", func(c context.Context) error {
-		r, e := h.Unread().UnreadAll(c, p.maxPer)
-		results = r
-		return e
-	}); err != nil {
-		if sw.incomplete() {
-			return strings.TrimRight(sw.note(true), "\n"), p.afterTS, nil
-		}
-		return "", "", err
+	// Best-effort self-resolution for mention markers; a failure here
+	// disables highlighting AND mentions_only filtering (we can't filter
+	// what we can't identify). Cached after the first call, and the canvas
+	// phase below needs it, so it is resolved before the phases start.
+	selfID, err := h.Unread().Self(ctx)
+	if err != nil {
+		h.log.Warn("auth.test failed; mention highlighting disabled", "err", err)
 	}
 
-	// DM time-window override: when the operator wants to see DMs they've
-	// already opened (executive syncs, side chats with decisions), pull
-	// recent activity regardless of last_read and merge it on top of the
-	// unread sweep. Same-channel DM entries replace their UnreadAll
-	// counterparts so we don't duplicate.
-	if p.dmWindowHours > 0 {
-		var dmResults []*slack.ChannelUnread
-		dmErr := sw.run("dm-window", func(c context.Context) error {
-			r, e := h.Unread().RecentDMActivityAfterUnread(c, p.dmWindowHours, dmCap(p.maxPer))
-			dmResults = r
+	// The fetch phases run concurrently (ADR 131). They used to run one
+	// after another, so a sweep took the sum of its phases; only the DM
+	// window depends on another phase — it reuses the unread pass's pages
+	// (ADR 125) — so the two run as one chain while the backstops, the
+	// priority channels and the canvas delta run beside it. Slack rate
+	// limits are per method, and the phases call different methods, so
+	// running them together does not make them wait on each other.
+	// Results are merged below in the same order as before, so the output
+	// does not depend on which phase finished first.
+	var (
+		wg                                           sync.WaitGroup
+		results, dmResults, pr, tmResults, otResults []*slack.ChannelUnread
+		unreadErr, dmErr, prErr, tmErr, otErr        error
+		missing                                      []string
+		canvasHits                                   []canvasHit
+	)
+	spawn := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
+	}
+
+	spawn(func() {
+		unreadErr = sw.run("unread", func(c context.Context) error {
+			r, e := h.Unread().UnreadAll(c, p.maxPer)
+			results = r
 			return e
 		})
-		if dmErr != nil {
-			h.log.Warn("dm window fetch failed; falling back to unread-only", "err", dmErr)
+		// DM time-window override: when the operator wants to see DMs
+		// they've already opened (executive syncs, side chats with
+		// decisions), pull recent activity regardless of last_read and
+		// merge it on top of the unread sweep.
+		if unreadErr == nil && p.dmWindowHours > 0 {
+			dmErr = sw.run("dm-window", func(c context.Context) error {
+				r, e := h.Unread().RecentDMActivityAfterUnread(c, p.dmWindowHours, dmCap(p.maxPer))
+				dmResults = r
+				return e
+			})
 		}
-		// What was read before a deadline cut is still shown (ADR 125).
-		results = mergeDMOverride(results, dmResults)
-	}
+	})
 
 	// Priority channels (ADR 112): shown for their window whether or not
 	// they have been read. The sweep above is last_read-based, so a channel
 	// the operator keeps up with in the client never appears in it — even
 	// when that is where decisions are made. With a delta cursor the window
 	// starts at the cursor, so a re-pull shows only what is new there.
-	var priorityNote string
-	if refs := h.client.Config().PriorityChannels; len(refs) > 0 && p.priorityHours > 0 {
+	refs := h.client.Config().PriorityChannels
+	priority := len(refs) > 0 && p.priorityHours > 0
+	if priority {
 		oldest := float64(time.Now().Add(-time.Duration(p.priorityHours) * time.Hour).Unix())
 		if ts, perr := strconv.ParseFloat(p.afterTS, 64); perr == nil && ts > 0 {
 			oldest = ts
 		}
-		var pr []*slack.ChannelUnread
-		var missing []string
-		prErr := sw.run("priority", func(c context.Context) error {
-			r, m, e := h.Unread().PriorityActivity(c, refs, oldest, p.maxPer)
-			pr, missing = r, m
-			return e
+		spawn(func() {
+			prErr = sw.run("priority", func(c context.Context) error {
+				r, m, e := h.Unread().PriorityActivity(c, refs, oldest, p.maxPer)
+				pr, missing = r, m
+				return e
+			})
 		})
+	}
+
+	// Thread-mention backstop: UnreadAll's fetchReplies only covers replies
+	// to NEW top-level messages. Search-based `to:me` catches replies to
+	// already-read parents.
+	if p.threadMentionHours > 0 {
+		spawn(func() {
+			tmErr = sw.run("thread-mentions", func(c context.Context) error {
+				r, e := h.Unread().UnreadThreadMentions(c, p.threadMentionHours)
+				tmResults = r
+				return e
+			})
+		})
+	}
+
+	// Own-thread backstop: replies in a thread the operator started or
+	// replied in that DON'T @-mention them are invisible to both the
+	// unread sweep (parent already read) and the to:me mention pass.
+	// `from:me` discovers those threads and surfaces replies newer than
+	// the operator's last message.
+	if p.ownThreadHours > 0 {
+		spawn(func() {
+			otErr = sw.run("own-threads", func(c context.Context) error {
+				r, e := h.Unread().UnreadOwnThreads(c, p.ownThreadHours)
+				otResults = r
+				return e
+			})
+		})
+	}
+
+	// Canvas delta. Canvases sit outside the message model entirely — an
+	// edit produces no channel message — so this is computed independently
+	// of `results` and must survive an otherwise-empty sweep: a canvas
+	// edit can be the only thing that happened since the cursor.
+	nowUnix := time.Now().Unix()
+	if p.canvasHours > 0 {
+		spawn(func() {
+			// canvasDelta degrades to "no canvases" on its own errors, so
+			// only the deadline can mark this phase cut.
+			_ = sw.run("canvases", func(c context.Context) error {
+				canvasHits = h.canvasDelta(c, canvasSince(p.afterTS, p.canvasHours, nowUnix), selfID)
+				return c.Err()
+			})
+		})
+	}
+	wg.Wait()
+
+	if unreadErr != nil {
+		if sw.incomplete() {
+			return strings.TrimRight(sw.note(true), "\n"), p.afterTS, nil
+		}
+		return "", "", unreadErr
+	}
+
+	if p.dmWindowHours > 0 {
+		if dmErr != nil {
+			h.log.Warn("dm window fetch failed; falling back to unread-only", "err", dmErr)
+		}
+		// What was read before a deadline cut is still shown (ADR 125).
+		// Same-channel DM entries replace their UnreadAll counterparts.
+		results = mergeDMOverride(results, dmResults)
+	}
+
+	var priorityNote string
+	if priority {
 		if prErr != nil {
 			h.log.Warn("priority channels fetch failed", "err", prErr)
 			if sw.ctx.Err() == nil { // a deadline cut is reported once, by the sweep note
@@ -500,16 +591,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		}
 	}
 
-	// Thread-mention backstop: UnreadAll's fetchReplies only covers replies
-	// to NEW top-level messages. Search-based `to:me` catches replies to
-	// already-read parents; merge their channels into results.
 	if p.threadMentionHours > 0 {
-		var tmResults []*slack.ChannelUnread
-		tmErr := sw.run("thread-mentions", func(c context.Context) error {
-			r, e := h.Unread().UnreadThreadMentions(c, p.threadMentionHours)
-			tmResults = r
-			return e
-		})
 		if tmErr != nil {
 			h.log.Warn("thread-mention backstop failed; falling back to unread-only", "err", tmErr)
 		} else {
@@ -517,50 +599,16 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		}
 	}
 
-	// Own-thread backstop: replies in a thread the operator started or
-	// replied in that DON'T @-mention them are invisible to both the
-	// unread sweep (parent already read) and the to:me mention pass.
-	// `from:me` discovers those threads and surfaces replies newer than
-	// the operator's last message. Reuses mergeThreadMentions (augment,
-	// never replace).
 	if p.ownThreadHours > 0 {
-		var otResults []*slack.ChannelUnread
-		otErr := sw.run("own-threads", func(c context.Context) error {
-			r, e := h.Unread().UnreadOwnThreads(c, p.ownThreadHours)
-			otResults = r
-			return e
-		})
 		if otErr != nil {
 			h.log.Warn("own-thread backstop failed; falling back to unread-only", "err", otErr)
 		}
 		results = mergeThreadMentions(results, otResults)
 	}
 
-	// Best-effort self-resolution for mention markers; a failure here
-	// disables highlighting AND mentions_only filtering (we can't filter
-	// what we can't identify).
-	selfID, err := h.Unread().Self(ctx)
-	if err != nil {
-		h.log.Warn("auth.test failed; mention highlighting disabled", "err", err)
-	}
-
-	// Canvas delta. Canvases sit outside the message model entirely — an
-	// edit produces no channel message — so this is computed independently
-	// of `results` and must survive an otherwise-empty sweep: a canvas
-	// edit can be the only thing that happened since the cursor.
 	var canvasBlock string
-	if p.canvasHours > 0 {
-		nowUnix := time.Now().Unix()
-		var hits []canvasHit
-		// canvasDelta degrades to "no canvases" on its own errors, so only
-		// the deadline can mark this phase cut.
-		_ = sw.run("canvases", func(c context.Context) error {
-			hits = h.canvasDelta(c, canvasSince(p.afterTS, p.canvasHours, nowUnix), selfID)
-			return c.Err()
-		})
-		if len(hits) > 0 {
-			canvasBlock = renderCanvasDelta(hits, nowUnix)
-		}
+	if len(canvasHits) > 0 {
+		canvasBlock = renderCanvasDelta(canvasHits, nowUnix)
 	}
 
 	if p.mentionsOnly {
@@ -604,6 +652,9 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	}
 
 	deadlineNote := sw.note(true)
+	if p.showTimings {
+		deadlineNote += sw.timings()
+	}
 
 	if len(results) == 0 {
 		// No unread messages, but a canvas may still have changed — report

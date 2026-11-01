@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.68.0] - 2026-11-01
+
+### Changed
+
+- **`get_unread_summary` is faster.** Its fetch phases (unread, priority
+  channels, thread mentions, own threads, canvases) now run at the same
+  time instead of one after another; the mention searches and own-thread
+  reply fetches run in parallel too, and the joined-channel listing is
+  fetched once per sweep instead of three times. Output is unchanged.
+
+### Added
+
+- **`show_timings`** on `get_unread_summary`: one line per workspace with
+  the sweep's wall time and each phase's duration. See ADR 131.
+
 ## [1.67.0] - 2026-10-29
 
 ### Fixed

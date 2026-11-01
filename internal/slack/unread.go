@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ type UnreadService struct {
 	selfID     string
 	selfHandle string
 	teamURL    string
+
+	// joined caches users.conversations for one sweep (ADR 131).
+	joined joinedCache
 }
 
 func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, search *SearchService, log *slog.Logger) *UnreadService {
@@ -162,7 +166,11 @@ func (s *UnreadService) JoinedChannels(ctx context.Context) ([]goslack.Channel, 
 	if !s.Enabled() {
 		return nil, ErrNoUserToken
 	}
+	return s.joined.get(ctx, s.listJoined)
+}
 
+// listJoined pages users.conversations once, uncached.
+func (s *UnreadService) listJoined(ctx context.Context) ([]goslack.Channel, error) {
 	var all []goslack.Channel
 	cursor := ""
 	for {
@@ -750,14 +758,43 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 	selfID, _ := s.Self(ctx)
 	handle, _ := s.SelfHandle(ctx)
 
+	// The mention queries and the operator's own posts are independent
+	// searches; they run together instead of one after another (ADR 131).
+	// Hits are merged in query order, so the result does not depend on
+	// which search answered first.
+	queries := MentionQueries(handle, afterDate)
+	hits := make([][]goslack.SearchMessage, len(queries))
+	errs := make([]error, len(queries))
+	var (
+		wg       sync.WaitGroup
+		answered map[string]float64
+		ownTop   map[string]string
+		aerr     error
+	)
+	for i, query := range queries {
+		wg.Add(1)
+		go func(i int, query string) {
+			defer wg.Done()
+			hits[i], errs[i] = s.search.Messages(ctx, query, 100)
+		}(i, query)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// A mention the operator has since answered in the same thread is
+		// not pending. Best-effort: without the operator's own posts every
+		// mention is shown, as before.
+		answered, ownTop, aerr = s.lastOwnPosts(ctx, afterDate, selfID)
+	}()
+	wg.Wait()
+
 	var matches []goslack.SearchMessage
 	seen := make(map[string]struct{})
-	for _, query := range MentionQueries(handle, afterDate) {
-		hits, err := s.search.Messages(ctx, query, 100)
-		if err != nil {
-			return nil, fmt.Errorf("search mentions: %w", err)
+	for i := range queries {
+		if errs[i] != nil {
+			return nil, fmt.Errorf("search mentions: %w", errs[i])
 		}
-		for _, m := range hits {
+		for _, m := range hits[i] {
 			key := m.Channel.ID + "|" + m.Timestamp
 			if _, dup := seen[key]; dup {
 				continue
@@ -767,10 +804,6 @@ func (s *UnreadService) UnreadThreadMentions(ctx context.Context, hours int) ([]
 		}
 	}
 
-	// A mention the operator has since answered in the same thread is not
-	// pending. Best-effort: without the operator's own posts every mention
-	// is shown, as before.
-	answered, ownTop, aerr := s.lastOwnPosts(ctx, afterDate, selfID)
 	if aerr != nil {
 		s.log.Warn("thread mentions: own replies lookup failed; showing every mention", "err", aerr)
 	}
@@ -988,48 +1021,96 @@ func (s *UnreadService) UnreadOwnThreads(ctx context.Context, hours int) ([]*Cha
 		roots[threadKey{m.Channel.ID, root}] = m.Channel.Name
 	}
 
+	// Fetch the threads with a small worker pool: one conversations.replies
+	// per thread used to run back to back (ADR 131). Four workers matches
+	// the unread pass — the same Tier 3 method, the same politeness budget.
+	keys := make([]threadKey, 0, len(roots))
+	for k := range roots {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].channelID != keys[j].channelID {
+			return keys[i].channelID < keys[j].channelID
+		}
+		return keys[i].root < keys[j].root
+	})
+
+	type fetched struct {
+		k      threadKey
+		unseen []goslack.Message
+	}
+	const workers = 4
+	jobs := make(chan threadKey, len(keys))
+	results := make(chan fetched, len(keys))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for k := range jobs {
+				if ctx.Err() != nil {
+					continue // drain: the deadline is reported once, below
+				}
+				var thread []goslack.Message
+				rerr := ratelimit.Do(ctx, s.log, 0, func() error {
+					r, _, _, e := s.api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
+						ChannelID: k.channelID,
+						Timestamp: k.root,
+						Limit:     100,
+					})
+					if e != nil {
+						return e
+					}
+					thread = r
+					return nil
+				})
+				if rerr != nil {
+					// Best-effort: a single unreadable thread shouldn't sink
+					// the backstop. The deadline passing is not that (ADR 125).
+					if ctx.Err() == nil {
+						s.log.Warn("own-thread replies fetch failed", "channel", k.channelID, "thread", k.root, "err", rerr)
+					}
+					continue
+				}
+				if unseen := unseenAfterMine(thread, selfID); len(unseen) > 0 {
+					results <- fetched{k, unseen}
+				}
+			}
+		}()
+	}
+	for _, k := range keys {
+		jobs <- k
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
 	byChannel := make(map[string]*ChannelUnread)
-	for k, chName := range roots {
-		if ctx.Err() != nil {
-			break // reported below; no point logging every thread
+	var got []fetched
+	for r := range results {
+		got = append(got, r)
+	}
+	// Workers finish in any order; merge in key order so the replies of a
+	// channel always come out the same way.
+	sort.Slice(got, func(i, j int) bool {
+		if got[i].k.channelID != got[j].k.channelID {
+			return got[i].k.channelID < got[j].k.channelID
 		}
-		var thread []goslack.Message
-		rerr := ratelimit.Do(ctx, s.log, 0, func() error {
-			r, _, _, e := s.api.GetConversationRepliesContext(ctx, &goslack.GetConversationRepliesParameters{
-				ChannelID: k.channelID,
-				Timestamp: k.root,
-				Limit:     100,
-			})
-			if e != nil {
-				return e
-			}
-			thread = r
-			return nil
-		})
-		if rerr != nil {
-			// Best-effort: a single unreadable thread shouldn't sink the
-			// backstop. The deadline passing is not that (ADR 125).
-			if ctx.Err() != nil {
-				break
-			}
-			s.log.Warn("own-thread replies fetch failed", "channel", k.channelID, "thread", k.root, "err", rerr)
-			continue
-		}
-		unseen := unseenAfterMine(thread, selfID)
-		if len(unseen) == 0 {
-			continue
-		}
+		return got[i].k.root < got[j].k.root
+	})
+	for _, r := range got {
+		k := r.k
 		cu, ok := byChannel[k.channelID]
 		if !ok {
 			cu = &ChannelUnread{}
 			cu.Channel.ID = k.channelID
-			cu.Channel.Name = chName
+			cu.Channel.Name = roots[k]
 			byChannel[k.channelID] = cu
 		}
 		if cu.Replies == nil {
 			cu.Replies = make(map[string][]goslack.Message)
 		}
-		cu.Replies[k.root] = append(cu.Replies[k.root], unseen...)
+		cu.Replies[k.root] = append(cu.Replies[k.root], r.unseen...)
 		if cu.OwnThreads == nil {
 			cu.OwnThreads = make(map[string]bool)
 		}
