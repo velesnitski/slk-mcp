@@ -40,6 +40,7 @@ type unreadParams struct {
 	showAnswered       bool
 	dmFullText         bool
 	showTimings        bool
+	unreadSource       string
 	urg                digest.UrgencyOpts
 }
 
@@ -134,6 +135,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithBoolean("show_answered", mcp.Description("Also show DMs where the operator already holds the last word. By default those are suppressed to a one-line note — Slack's last_read updates on client focus, not on send, so a DM answered from a notification can stay 'unread' server-side and re-surface as a false pending item. Default: false.")),
 				mcp.WithBoolean("dm_full_text", mcp.Description("Render DM message bodies at a generous cap (1500 chars) instead of the compact 280-char channel preview, so amounts/deadlines/asks in a direct message aren't truncated to '(+N chars)'. DMs only — channels stay compact. Default: true; set false for a leaner, uniformly-truncated sweep.")),
 				mcp.WithBoolean("show_timings", mcp.Description("Append one line per workspace with the sweep's wall time and each fetch phase's duration. For diagnosing a slow sweep; MCP hosts usually drop a server's stderr, where the same timings are logged. Default: false.")),
+				mcp.WithString("unread_source", mcp.Description("Experimental. 'counts' asks Slack's undocumented client.counts which conversations have unread messages and reads only those, instead of checking every joined conversation; falls back on any error. The timings line (always shown in this mode) reports what it did. Default: per-conversation check.")),
 				mcp.WithString("workspace", mcp.Description("Limit to a single workspace by its configured label. Default: merge every configured workspace.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -156,6 +158,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 					showAnswered:       req.GetBool("show_answered", false),
 					dmFullText:         req.GetBool("dm_full_text", true),
 					showTimings:        req.GetBool("show_timings", false),
+					unreadSource:       strings.ToLower(strings.TrimSpace(req.GetString("unread_source", ""))),
 					urg: digest.UrgencyOpts{
 						Weight:        req.GetFloat("urgency_weight", 0),
 						ExtraKeywords: digest.ParseExtraKeywords(req.GetString("urgency_keywords", "")),
@@ -468,6 +471,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		missing                                      []string
 		canvasHits                                   []canvasHit
 	)
+	var countsRep slack.CountsReport
 	spawn := func(fn func()) {
 		wg.Add(1)
 		go func() {
@@ -478,7 +482,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 
 	spawn(func() {
 		unreadErr = sw.run("unread", func(c context.Context) error {
-			r, e := h.Unread().UnreadAll(c, p.maxPer)
+			r, e := h.Unread().UnreadAllWith(c, p.maxPer, slack.UnreadOpts{Counts: p.unreadSource == "counts", Report: &countsRep})
 			results = r
 			return e
 		})
@@ -652,8 +656,11 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	}
 
 	deadlineNote := sw.note(true)
-	if p.showTimings {
+	if p.showTimings || p.unreadSource == "counts" {
 		deadlineNote += sw.timings()
+	}
+	if p.unreadSource == "counts" {
+		deadlineNote += countsLine(countsRep)
 	}
 
 	if len(results) == 0 {
@@ -1129,3 +1136,13 @@ func budgetAppend(b *strings.Builder, rendered string, maxChars int) bool {
 
 // filterEmptyMentions drops matches whose body has no real text. An
 // empty mention can't be "pending" — there was nothing to reply to.
+
+// countsLine reports what the experimental client.counts path did, for
+// benchmarking it against the per-conversation check (ADR 131).
+func countsLine(r slack.CountsReport) string {
+	if !r.Used {
+		return fmt.Sprintf("client.counts: not used (%s) — every conversation was checked\n", r.Err)
+	}
+	return fmt.Sprintf("client.counts: %s · %d of %d conversations skipped as read · %d not listed, checked as before\n",
+		r.Took.Round(10*time.Millisecond), r.Skipped, r.Channels, r.Unlisted)
+}

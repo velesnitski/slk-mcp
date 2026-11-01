@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`show_timings`** on `get_unread_summary`: one line per workspace with
-  the sweep's wall time and each phase's duration. See ADR 131.
+  the sweep's wall time and each phase's duration.
+- **Experimental `unread_source=counts`**: asks Slack's undocumented
+  `client.counts` which conversations have unread messages and reads only
+  those; falls back on any error and reports what it did. See ADR 131.
 
 ## [1.67.0] - 2026-10-29
 

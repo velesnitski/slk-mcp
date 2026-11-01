@@ -90,6 +90,11 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 		c.Lists.BaseURL = cfg.APIURL
 		c.Canvas.BaseURL = cfg.APIURL
 	}
+	// client.counts rides on the canvas service's raw-HTTP path: same user
+	// token, same base URL override (ADR 131).
+	if cfg.UserToken != "" {
+		c.Unread.counts = c.Canvas.ClientCounts
+	}
 
 	return c
 }

@@ -74,6 +74,7 @@ type SearchClient interface {
 // `slackSession.HasUserToken()` before constructing requests.
 type UnreadClient interface {
 	UnreadAll(ctx context.Context, maxPerChannel int) ([]*slack.ChannelUnread, error)
+	UnreadAllWith(ctx context.Context, maxPerChannel int, opts slack.UnreadOpts) ([]*slack.ChannelUnread, error)
 	RecentDMActivity(ctx context.Context, hours, maxPerChannel int) ([]*slack.ChannelUnread, error)
 	RecentDMActivityAfterUnread(ctx context.Context, hours, maxPerChannel int) ([]*slack.ChannelUnread, error)
 	ReadState(ctx context.Context, channelID string) (slack.ReadState, error)

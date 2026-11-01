@@ -52,6 +52,18 @@ would only trade waiting for 429 retries.
 - A sweep takes about as long as its slowest phase chain. In the test
   fixture with three slow search/file phases, about 1 s became about 0.2 s.
 - A sweep makes two fewer `users.conversations` listings.
-- `client.counts` (one call for every channel's unread state instead of a
-  `conversations.info` per channel) is left for a benchmark: it is not a
-  documented method.
+
+## Experiment: client.counts
+
+`get_unread_summary` checks every joined conversation with
+`conversations.info` and, when it has a read marker, a history page — two
+calls per conversation, even for one with nothing new. `client.counts`, the
+endpoint Slack's clients use for sidebar badges, returns every
+conversation's unread state in one call. It is undocumented, may refuse a
+user token and can change, so it is only an option:
+`unread_source=counts` reads just the conversations it reports as unread
+(or with mentions) plus any it does not list, falls back to the full check
+on any error, and always prints what it did. A conversation it skips is not
+read at all, so new replies in its already-read threads are left to the
+thread-mention and own-thread backstops. Whether it becomes the default
+depends on the benchmark against real workspaces.

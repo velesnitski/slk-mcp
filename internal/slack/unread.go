@@ -42,6 +42,30 @@ type UnreadService struct {
 
 	// joined caches users.conversations for one sweep (ADR 131).
 	joined joinedCache
+
+	// counts reads every conversation's unread state in one call
+	// (client.counts); nil when unavailable. Used only on request (ADR 131).
+	counts func(context.Context) (map[string]ChannelCount, error)
+}
+
+// UnreadOpts selects how UnreadAll decides which conversations to read.
+type UnreadOpts struct {
+	// Counts asks client.counts which conversations have unread messages
+	// and reads only those, instead of conversations.info + history for
+	// every joined conversation. Experimental: falls back on any error.
+	Counts bool
+	// Report, when set, receives what the counts path did.
+	Report *CountsReport
+}
+
+// CountsReport says what the counts path did in one sweep.
+type CountsReport struct {
+	Used     bool          // client.counts answered and was used
+	Err      string        // why it was not used
+	Took     time.Duration // the client.counts call
+	Channels int           // joined conversations
+	Skipped  int           // read nothing: no unread messages
+	Unlisted int           // joined but absent from client.counts: read as before
 }
 
 func newUnreadService(api *goslack.Client, channels *ChannelService, users *UserService, search *SearchService, log *slog.Logger) *UnreadService {
@@ -382,6 +406,12 @@ func (s *UnreadService) fetchReplies(ctx context.Context, channelID string, olde
 // UnreadAll returns unread state for all channels the user joined.
 // Channels with zero unread are omitted from the result.
 func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*ChannelUnread, error) {
+	return s.UnreadAllWith(ctx, maxPerChannel, UnreadOpts{})
+}
+
+// UnreadAllWith is UnreadAll with a choice of how unread conversations are
+// found (ADR 131).
+func (s *UnreadService) UnreadAllWith(ctx context.Context, maxPerChannel int, opts UnreadOpts) ([]*ChannelUnread, error) {
 	if !s.Enabled() {
 		return nil, ErrNoUserToken
 	}
@@ -392,6 +422,9 @@ func (s *UnreadService) UnreadAll(ctx context.Context, maxPerChannel int) ([]*Ch
 		return nil, err
 	}
 	listed := time.Since(start)
+	if opts.Counts {
+		channels = s.filterByCounts(ctx, channels, opts.Report)
+	}
 
 	// Fetch in parallel, capped to a modest concurrency to stay polite.
 	const workers = 4
@@ -1251,4 +1284,43 @@ func (s *UnreadService) ParticipationChannels(ctx context.Context, hours int) ([
 		out = append(out, ch)
 	}
 	return out, nil
+}
+
+// filterByCounts keeps the conversations client.counts reports as having
+// unread messages, plus any it does not list (read as before). On any
+// error the full list is returned unchanged. A conversation it drops is
+// not read at all, so new replies in its already-read threads are left to
+// the thread-mention and own-thread backstops.
+func (s *UnreadService) filterByCounts(ctx context.Context, channels []goslack.Channel, rep *CountsReport) []goslack.Channel {
+	if rep == nil {
+		rep = &CountsReport{}
+	}
+	rep.Channels = len(channels)
+	if s.counts == nil {
+		rep.Err = "client.counts not available"
+		return channels
+	}
+	t0 := time.Now()
+	counts, err := s.counts(ctx)
+	rep.Took = time.Since(t0)
+	if err != nil {
+		rep.Err = err.Error()
+		s.log.Warn("client.counts failed; reading every conversation", "err", err)
+		return channels
+	}
+	rep.Used = true
+	kept := channels[:0:0]
+	for _, ch := range channels {
+		c, listed := counts[ch.ID]
+		switch {
+		case !listed:
+			rep.Unlisted++
+			kept = append(kept, ch)
+		case c.HasUnreads || c.MentionCount > 0:
+			kept = append(kept, ch)
+		default:
+			rep.Skipped++
+		}
+	}
+	return kept
 }
