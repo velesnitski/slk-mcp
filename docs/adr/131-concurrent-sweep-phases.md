@@ -65,5 +65,14 @@ user token and can change, so it is only an option:
 (or with mentions) plus any it does not list, falls back to the full check
 on any error, and always prints what it did. A conversation it skips is not
 read at all, so new replies in its already-read threads are left to the
-thread-mention and own-thread backstops. Whether it becomes the default
-depends on the benchmark against real workspaces.
+thread-mention and own-thread backstops.
+
+Benchmark result: Slack refuses `client.counts` for a user (xoxp) token
+with `not_allowed_token_type`, so the option always falls back. It stays as
+a documented probe; it does not become the default.
+
+Measured on real workspaces, the unread pass is nearly all of a sweep's
+time: the other phases together were a small fraction, so running them
+concurrently saves their sum and no more. The next lever is the unread
+pass itself — skipping the history read for a conversation that has
+nothing new.
