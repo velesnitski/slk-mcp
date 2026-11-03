@@ -26,10 +26,10 @@ func TestMessageLine_ForwardNamesTheAuthor(t *testing.T) {
 	msg := goslack.Message{Msg: goslack.Msg{
 		Timestamp:   "1700000100.000000",
 		User:        "U_ME",
-		Attachments: []goslack.Attachment{forward("U_KR", "Sasha", "Привет, Принял:ok_hand::skin-tone-2:")},
+		Attachments: []goslack.Attachment{forward("U_FW", "Dana", "Привет, Принял:ok_hand::skin-tone-2:")},
 	}}
-	got := MessageLine(msg, "me", map[string]string{"U_KR": "Alexander K"})
-	if !strings.Contains(got, "↪ Alexander K: Привет, Принял") {
+	got := MessageLine(msg, "me", map[string]string{"U_FW": "Dana R"})
+	if !strings.Contains(got, "↪ Dana R: Привет, Принял") {
 		t.Fatalf("forward must name its author:\n%s", got)
 	}
 }
@@ -39,10 +39,10 @@ func TestMessageLine_ForwardWithCommentKeepsBoth(t *testing.T) {
 		Timestamp:   "1700000100.000000",
 		User:        "U_ME",
 		Text:        "see this",
-		Attachments: []goslack.Attachment{forward("", "Sasha", "the plan is ready")},
+		Attachments: []goslack.Attachment{forward("", "Dana", "the plan is ready")},
 	}}
 	got := MessageLine(msg, "me")
-	if !strings.Contains(got, "see this ↪ Sasha: the plan is ready") {
+	if !strings.Contains(got, "see this ↪ Dana: the plan is ready") {
 		t.Fatalf("a commented forward must keep the forwarded text:\n%s", got)
 	}
 }

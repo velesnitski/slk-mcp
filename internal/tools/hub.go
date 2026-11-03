@@ -250,6 +250,7 @@ func (h *Hub) Canvas() CanvasClient       { return h.client.Canvas }
 // significant; tools register themselves conditionally based on
 // config (read-only, disabled list, user-token availability).
 func (h *Hub) RegisterAll(s *server.MCPServer) {
+	h.registerActionTools(s)
 	h.registerAudioTools(s)
 	h.registerImageTools(s)
 	h.registerCanvasTools(s)

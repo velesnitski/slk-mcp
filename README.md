@@ -146,6 +146,7 @@ Or via config file (`~/.claude.json`):
 |---|---|
 | `get_unread_summary` | Unread messages across all joined channels, sorted by volume |
 | `get_mentions` | Messages that mention you; `summary=true` returns load stats (by sender / channel, DM split) instead of the list |
+| `get_my_actions` | Your open commitments: what you promised, what others asked of you, and what you asked of others — with the deadline each names ("until tomorrow" said yesterday is due today), judged open or done from what followed; `due=today` (default) also lists what needs a ping |
 | `mark_read` | Mark a channel read through a given timestamp |
 | `edit_canvas` | Edit a canvas as you: append/prepend, insert before/after, replace or delete a section found by its text, replace the whole canvas, rename; `dry_run` previews (disabled in `SLACK_READ_ONLY`, needs `canvases:write`) |
 | `list_scheduled_messages` | Your pending scheduled (queued-to-send) messages with send time + channel; you-global by default |

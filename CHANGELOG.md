@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.70.0] - 2026-11-03
+
+### Added
+
+- **`get_my_actions`**: your open commitments across workspaces — what you
+  promised ("пришлю до пятницы", "will investigate"), what others asked of
+  you, and what you asked of others and are still waiting for. Each
+  deadline is read relative to when it was written, so "until tomorrow"
+  said yesterday is due today. A done reaction, a "done" reply or a file
+  closes an item; an acknowledgement ("принял") keeps it open and shows
+  the reply. `due=today` (default) lists what is overdue or due today plus
+  undated asks and requests nobody answered for `stale_hours` (the ping
+  list); `due=week` and `due=all` widen it. Phrase rules in Russian and
+  English, no model. See ADR 133.
+
 ## [1.69.0] - 2026-11-03
 
 ### Fixed
