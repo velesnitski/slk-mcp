@@ -71,3 +71,12 @@ visible from a sweep.
   on real workspaces; when `latest` is missing, nothing changes.
 - A sweep no longer loses its DM window to a deadline in the unread pass,
   and the two phases make no more history calls than before.
+
+## Test note
+
+`TestUnreadOwnThreads_ReportsTheDeadline` expected exactly one
+`conversations.replies` call after a cancel. Since ADR 131 the own-thread
+replies are fetched by concurrent workers, so a second thread's request
+can already be in flight when the first cancels; CI's race run caught it.
+The test now asserts what the deadline guarantees: at most one call per
+thread, no retry.

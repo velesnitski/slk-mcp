@@ -104,8 +104,11 @@ func TestUnreadOwnThreads_ReportsTheDeadline(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the context error", err)
 	}
-	if n := f.count("conversations.replies"); n != 1 {
-		t.Fatalf("conversations.replies called %d times after the deadline, want 1", n)
+	// The two threads are fetched by concurrent workers (ADR 131), so the
+	// second may already be in flight when the first cancels; what must
+	// not happen is a retry after the deadline.
+	if n := f.count("conversations.replies"); n < 1 || n > 2 {
+		t.Fatalf("conversations.replies called %d times, want at most one per thread", n)
 	}
 }
 
