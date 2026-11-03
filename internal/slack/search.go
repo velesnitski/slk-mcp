@@ -43,3 +43,31 @@ func (s *SearchService) Messages(ctx context.Context, query string, count int) (
 	}
 	return result.Matches, nil
 }
+
+// MessagesPages is Messages for up to pages pages of count hits each,
+// newest first: a busy operator's own messages fill one page of 100 in a
+// few days (ADR 133). It stops at the last page Slack reports, and a
+// failure after the first page returns what was read with the error.
+func (s *SearchService) MessagesPages(ctx context.Context, query string, count, pages int) ([]goslack.SearchMessage, error) {
+	if count <= 0 {
+		count = 20
+	}
+	if pages <= 0 {
+		pages = 1
+	}
+	var out []goslack.SearchMessage
+	for page := 1; page <= pages; page++ {
+		params := goslack.SearchParameters{Sort: "timestamp", SortDirection: "desc", Count: count, Page: page}
+		result, err := ratelimit.DoR(ctx, s.log, func() (*goslack.SearchMessages, error) {
+			return s.api.SearchMessagesContext(ctx, query, params)
+		})
+		if err != nil {
+			return out, fmt.Errorf("search.messages page %d: %w", page, err)
+		}
+		out = append(out, result.Matches...)
+		if len(result.Matches) < count || page >= result.Paging.Pages {
+			break
+		}
+	}
+	return out, nil
+}

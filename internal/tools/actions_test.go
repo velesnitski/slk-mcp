@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -122,5 +124,75 @@ func TestClassifyHits_SkipsNoise(t *testing.T) {
 			texts = append(texts, it.hit.Text)
 		}
 		t.Fatalf("want only the mention in the group DM, got %q", texts)
+	}
+}
+
+// ADR 133: in one DM a reply after the operator's next request answers
+// that request, not the one before it.
+func TestRunMyActions_ReplyBelongsToTheNextTurn(t *testing.T) {
+	f := uaNewFakeSlack(t)
+	f.On("auth.test", uaAuthOK)
+	f.uaUsers(map[string]string{"U2": "alice"})
+	oldTS := uaTS(-26*3600, 100) // yesterday: a request with a date
+	oldReply := uaTS(-25*3600, 101)
+	newTS := uaTS(-3*3600, 200) // today: another request
+	newReply := uaTS(-2*3600, 201)
+	f.uaSearchByQuery(t, map[string][]map[string]any{
+		"from:me": {
+			uaHit("D2", "U2", newTS, "U1", "Алиса, нужна помощь срочно с аккаунтом", ""),
+			uaHit("D2", "U2", oldTS, "U1", "Алиса, сделай пожалуйста отчёт до завтра", ""),
+		},
+	})
+	f.uaHistory(t, map[string][]map[string]any{
+		"D2": {
+			uaMsg(newReply, "U2", "предупредите, когда будет свободно", nil),
+			uaMsg(newTS, "U1", "Алиса, нужна помощь срочно с аккаунтом", nil),
+			uaMsg(oldReply, "U2", "посмотрю", nil),
+			uaMsg(oldTS, "U1", "Алиса, сделай пожалуйста отчёт до завтра", nil),
+		},
+	})
+	h := uaHub(t, f)
+	out := resultText(h.runMyActions(context.Background(), actionDefaults(), ""))
+	if !strings.Contains(out, `alice replied`) || strings.Count(out, "предупредите") != 1 {
+		t.Fatalf("today's reply must answer today's request only:\n%s", out)
+	}
+	if !strings.Contains(out, `"посмотрю"`) {
+		t.Fatalf("yesterday's request keeps yesterday's reply:\n%s", out)
+	}
+}
+
+// ADR 133: the operator's own messages are read past the first page.
+func TestRunMyActions_ReadsSeveralSearchPages(t *testing.T) {
+	f := uaNewFakeSlack(t)
+	f.On("auth.test", uaAuthOK)
+	pages := map[string][]map[string]any{}
+	for p := 1; p <= 3; p++ {
+		var hits []map[string]any
+		for i := 0; i < searchPageMax; i++ {
+			hits = append(hits, uaHit("C1", "alpha", uaTS(-int64(p*1000+i), i), "U1", "plain note", ""))
+		}
+		pages[strconv.Itoa(p)] = hits
+	}
+	empty := `{"ok":true,"messages":{"matches":[],"total":0,"paging":{"pages":0}}}`
+	f.OnFunc("search.messages", func(r *http.Request) string {
+		if !strings.Contains(r.Form.Get("query"), "from:me") {
+			return empty
+		}
+		page := r.Form.Get("page")
+		if page == "" {
+			page = "1" // slack-go leaves the default page out
+		}
+		return uaJSON(t, map[string]any{"ok": true, "messages": map[string]any{
+			"matches": pages[page], "total": 300,
+			"paging": map[string]any{"count": 100, "total": 300, "page": 1, "pages": 3},
+		}})
+	})
+	h := uaHub(t, f)
+	out := resultText(h.runMyActions(context.Background(), actionDefaults(), ""))
+	if n := f.CountOf("search.messages"); n != 3+2 {
+		t.Fatalf("search.messages called %d times, want 3 pages of from:me + 2 mention queries", n)
+	}
+	if !strings.Contains(out, "search hit its page limit") {
+		t.Fatalf("300 own messages still fill the window, and the output says so:\n%s", out)
 	}
 }

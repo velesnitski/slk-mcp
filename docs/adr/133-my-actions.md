@@ -16,7 +16,9 @@ morning unless someone converts it to a date.
 
 A tool, `get_my_actions`, built on a pure package `internal/actions`.
 
-**Sources.** Per workspace, three searches run side by side: `from:me`
+**Sources.** Per workspace, three searches run side by side, each read
+up to three pages of 100 (an active operator sends more than 100
+messages a week): `from:me`
 and the two mention queries (`to:me` and the operator's @handle, see
 `slack.MentionQueries`), over the last `days` (default 7). Bot messages are
 ignored.
@@ -54,7 +56,9 @@ heading a daily report — are not deadlines.
 DM from its oldest commitment on: a done reaction, or a later message
 from the responsible side that says done or carries a file, closes it;
 any reply answers a question; any other reply from the responsible side
-only acknowledges it, and the item stays open showing that reply. An
+only acknowledges it, and the item stays open showing that reply. In one DM or thread, an item's follow-ups stop at the next item of the
+same kind from the same person: a reply after the operator's next
+request answers that request, not the one before it. An
 ask or question put to several people is answered when any of them
 other than the operator replies. An acknowledged item two days past its
 date is no longer listed for today: the moment has passed. The
@@ -82,8 +86,8 @@ and the output says that an unusually worded commitment can be missed.
   "готово" about one thing can close another in the same DM. Channel
   commitments are judged from their thread only; a reply posted to the
   channel instead of the thread is not seen.
-- A search page holds 100 hits; when the operator's own messages fill it,
-  the output says older commitments may be missing.
-- The calls are bounded: three searches, plus one read per thread and per
+- A query reads at most 300 hits; when the operator's own messages fill
+  them, the output says older commitments may be missing.
+- The calls are bounded: three searches of up to three pages, plus one read per thread and per
   DM holding a commitment, capped by `limit` (default 60) and the sweep
   deadline.

@@ -175,7 +175,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 		go func(i int, q string) {
 			defer wg.Done()
 			errs[i] = sw.run(fmt.Sprintf("search-%d", i+1), func(c context.Context) error {
-				r, e := h.Search().Messages(c, q, searchPageMax)
+				r, e := h.Search().MessagesPages(c, q, searchPageMax, searchPages)
 				hits[i] = r
 				return e
 			})
@@ -206,14 +206,19 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 	items = dropAnsweringPromises(items)
 
 	var truncated []string
-	if len(hits[0]) >= searchPageMax {
+	if len(hits[0]) >= searchPageMax*searchPages {
 		truncated = append(truncated, "your messages")
 	}
 	return h.renderActions(ctx, items, p, selfID, truncated) + sw.note(false), nil
 }
 
-// searchPageMax is the most hits one search.messages page returns.
-const searchPageMax = 100
+// searchPageMax is the most hits one search.messages page returns, and
+// searchPages how many pages a query reads: an active operator sends more
+// than 100 messages in a week.
+const (
+	searchPageMax = 100
+	searchPages   = 3
+)
 
 // isReport reports whether a message is a report — an automated daily
 // digest, a status write-up — whose "urgent" and "сегодня" are content,
@@ -389,6 +394,7 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 	}
 	wg.Wait()
 
+	cutoffs := nextTurnCutoffs(items)
 	for _, it := range items {
 		var msgs []goslack.Message
 		var ok bool
@@ -408,6 +414,9 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 				item.Reactions = am.Reactions
 				continue
 			}
+			if cut := cutoffs[it]; cut > 0 && am.TS >= cut {
+				continue // the next turn's reply, not this one's
+			}
 			follow = append(follow, am)
 		}
 		it.outcome = actions.Resolve(it.kind, item, follow, selfID)
@@ -418,6 +427,48 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 		}
 		it.checked = true
 	}
+}
+
+// nextTurnCutoffs bounds what may count as the reply to each commitment.
+// In one DM or thread, a reply after the operator's next request belongs
+// to that request, not to yesterday's: "предупредите, когда будет
+// свободно" answered today's ask, not the one before it. So an item's
+// follow-ups stop at the next item from the same side of the
+// conversation and of the same kind — the operator's next request for a
+// waiting item, their next promise for a promise, the asker's next ask or
+// question for an ask or a question.
+func nextTurnCutoffs(items []*actionItem) map[*actionItem]float64 {
+	type group struct{ channel, root string }
+	byGroup := map[group][]*actionItem{}
+	for _, it := range items {
+		g := group{it.channel(), it.root}
+		if it.dm && it.root == it.hit.Timestamp {
+			g.root = "" // a DM's top level is one conversation
+		}
+		byGroup[g] = append(byGroup[g], it)
+	}
+	out := map[*actionItem]float64{}
+	for _, list := range byGroup {
+		sort.Slice(list, func(i, j int) bool { return list[i].ts < list[j].ts })
+		for i, it := range list {
+			for _, next := range list[i+1:] {
+				if next.hit.User == it.hit.User && family(next.kind) == family(it.kind) {
+					out[it] = next.ts
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// family groups the kinds whose replies look alike: an ask and a
+// question both wait on the operator's answer.
+func family(k actions.Kind) actions.Kind {
+	if k == actions.Question {
+		return actions.Ask
+	}
+	return k
 }
 
 func toActionMsg(m goslack.Message) actions.Msg {

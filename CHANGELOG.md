@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the reply. `due=today` (default) lists what is overdue or due today plus
   undated asks and requests nobody answered for `stale_hours` (the ping
   list); `due=week` and `due=all` widen it. Phrase rules in Russian and
-  English, no model. See ADR 133.
+  English, no model. Each search reads up to three pages. See ADR 133.
 
 ## [1.69.0] - 2026-11-03
 

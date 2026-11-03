@@ -67,6 +67,7 @@ type MessageClient interface {
 // results without touching history fakes).
 type SearchClient interface {
 	Messages(ctx context.Context, query string, count int) ([]goslack.SearchMessage, error)
+	MessagesPages(ctx context.Context, query string, count, pages int) ([]goslack.SearchMessage, error)
 }
 
 // UnreadClient is the personal-workflow surface: requires a
