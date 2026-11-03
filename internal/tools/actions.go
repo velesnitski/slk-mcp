@@ -215,11 +215,13 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 // searchPageMax is the most hits one search.messages page returns.
 const searchPageMax = 100
 
-// maxCommitmentRunes bounds what counts as a commitment. A promise or an
-// ask is a sentence or two; a long message is a report — an automated
-// daily digest, a status write-up — whose "urgent" and "сегодня" are
-// content, not deadlines.
-const maxCommitmentRunes = 600
+// isReport reports whether a message is a report — an automated daily
+// digest, a status write-up — whose "urgent" and "сегодня" are content,
+// not deadlines. A commitment is a few sentences, sometimes with a short
+// list; a report runs to many lines or thousands of characters.
+func isReport(text string) bool {
+	return len([]rune(text)) > 2000 || strings.Count(text, "\n") > 15
+}
 
 // classifyHits turns search hits into commitments: own messages that
 // promise or request, and messages to the operator that ask. bots are
@@ -236,7 +238,7 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 		if dm && !m.Channel.IsMPIM {
 			peer = m.Channel.Name
 		}
-		if peer == selfID || bots[peer] || len([]rune(m.Text)) > maxCommitmentRunes {
+		if peer == selfID || bots[peer] || isReport(m.Text) {
 			return // notes to self, bot DMs and reports
 		}
 		ts, err := strconv.ParseFloat(m.Timestamp, 64)
@@ -409,6 +411,11 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 			follow = append(follow, am)
 		}
 		it.outcome = actions.Resolve(it.kind, item, follow, selfID)
+		if !direct(it, selfID) {
+			// Put to several people, it is answered when any of them
+			// answers.
+			it.outcome = actions.AnsweredByOther(it.kind, item, follow, selfID, it.outcome)
+		}
 		it.checked = true
 	}
 }
@@ -466,6 +473,11 @@ func bucketFor(it *actionItem, p actionParams, selfID string) actionBucket {
 		horizon = today.AddDate(0, 0, 7)
 	}
 	if !it.due.IsZero() {
+		// Acknowledged and two days past its date, the moment has passed:
+		// "сможешь на мит сегодня?" — "чуть позже" a week ago.
+		if it.outcome.Status == actions.Acked && it.due.Day.Before(today.AddDate(0, 0, -2)) {
+			return bucketLater
+		}
 		if !it.due.Day.After(horizon) {
 			return bucketDue
 		}

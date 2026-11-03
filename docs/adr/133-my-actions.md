@@ -31,8 +31,9 @@ ignored.
   deadline, is an *ask*; one that only asks a question is a *question*.
 
 **Not commitments**, whatever their words: messages from bot and app
-users and DMs with them, notes to self, messages longer than 600
-characters (reports and digests, whose "urgent" is content), and a group
+users and DMs with them, notes to self, reports (over 2000 characters
+or 15 lines — digests and status write-ups, whose "urgent" is content;
+a commitment with a short list stays in), and a group
 chat's messages unless they @-mention the operator.
 
 **Deadlines** are read relative to the message's own time: "завтра /
@@ -46,14 +47,17 @@ A deadline set with a preposition ("до пятницы", "until tmrw", "by
 15.11") or as urgent is strong; a bare "завтра" or "в пятницу" is weak,
 because it narrates as often ("доклад завтра", "открыли в пятницу"). Only
 a strong deadline makes a message an ask by itself, and a strong deadline
-beats an earlier weak one. Dates without a preposition — the "03.11.26" heading a daily report — are
-not deadlines.
+beats an earlier weak one. Dates without a preposition — the "03.11.26"
+heading a daily report — are not deadlines.
 
 **Status** comes from what followed, read once per thread and once per
 DM from its oldest commitment on: a done reaction, or a later message
 from the responsible side that says done or carries a file, closes it;
 any reply answers a question; any other reply from the responsible side
-only acknowledges it, and the item stays open showing that reply. The
+only acknowledges it, and the item stays open showing that reply. An
+ask or question put to several people is answered when any of them
+other than the operator replies. An acknowledged item two days past its
+date is no longer listed for today: the moment has passed. The
 operator is responsible for promises, asks and questions; anyone else
 for a waiting item. An own promise that is the reply to an ask in the
 list is folded into the ask, which carries the deadline.

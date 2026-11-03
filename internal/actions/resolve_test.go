@@ -45,3 +45,18 @@ func TestStale(t *testing.T) {
 		t.Fatal("2h is not stale")
 	}
 }
+
+func TestAnsweredByOther(t *testing.T) {
+	item := Msg{User: "U2", Text: "подскажите, когда сборка?", TS: 100}
+	o := AnsweredByOther(Question, item, []Msg{{User: "U3", Text: "в пятницу", TS: 101}}, "U1", Outcome{})
+	if o.Status != Answered || o.By != "U3" {
+		t.Fatalf("a colleague's answer settles a shared question: %+v", o)
+	}
+	o = AnsweredByOther(Question, item, []Msg{{User: "U2", Text: "ау?", TS: 101}}, "U1", Outcome{})
+	if o.Status != Open {
+		t.Fatalf("the asker's own nudge is no answer: %+v", o)
+	}
+	if o := AnsweredByOther(Waiting, item, []Msg{{User: "U3", TS: 101}}, "U1", Outcome{}); o.Status != Open {
+		t.Fatalf("waiting items are not settled by others: %+v", o)
+	}
+}

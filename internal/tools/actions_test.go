@@ -106,8 +106,8 @@ func TestClassifyHits_SkipsNoise(t *testing.T) {
 	}
 	bots := map[string]bool{"UBOT": true}
 	own := []goslack.SearchMessage{
-		hit("D9", "U1", false, "U1", "сделаю до пятницы"),                       // a note to self
-		hit("C1", "ops", false, "U1", "<@U5> urgent "+strings.Repeat("x", 700)), // a report
+		hit("D9", "U1", false, "U1", "сделаю до пятницы"),                           // a note to self
+		hit("C1", "ops", false, "U1", "<@U5> urgent "+strings.Repeat("line\n", 20)), // a report
 	}
 	toMe := []goslack.SearchMessage{
 		hit("D8", "UBOT", false, "UBOT", "*Today* — please review"),   // a bot DM

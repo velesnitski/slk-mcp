@@ -90,6 +90,22 @@ func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 	return out
 }
 
+// AnsweredByOther settles an ask or a question put to several people
+// when one of them other than the operator replied after it, and the
+// operator has not: someone else took it. Any other outcome is returned
+// unchanged.
+func AnsweredByOther(kind Kind, item Msg, follow []Msg, self string, o Outcome) Outcome {
+	if (kind != Ask && kind != Question) || o.Status != Open {
+		return o
+	}
+	for _, m := range follow {
+		if m.TS > item.TS && m.User != "" && m.User != self && m.User != item.User && m.User != "USLACKBOT" {
+			return Outcome{Status: Answered, By: m.User, Reply: m.Text, At: m.TS}
+		}
+	}
+	return o
+}
+
 // Stale reports whether an undated commitment has waited long enough to
 // need a nudge: open for at least after, measured from when it was made.
 func Stale(made time.Time, o Outcome, now time.Time, after time.Duration) bool {
