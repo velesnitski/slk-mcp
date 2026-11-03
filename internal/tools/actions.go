@@ -193,7 +193,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 	}
 	toMe = filterOwnMessages(toMe, selfID)
 
-	items := classifyHits(hits[0], toMe, selfID)
+	items := classifyHits(hits[0], toMe, selfID, h.botIDs(ctx))
 	sort.Slice(items, func(i, j int) bool { return items[i].ts > items[j].ts })
 	if len(items) > p.limit {
 		items = items[:p.limit]
@@ -215,26 +215,50 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 // searchPageMax is the most hits one search.messages page returns.
 const searchPageMax = 100
 
+// maxCommitmentRunes bounds what counts as a commitment. A promise or an
+// ask is a sentence or two; a long message is a report — an automated
+// daily digest, a status write-up — whose "urgent" and "сегодня" are
+// content, not deadlines.
+const maxCommitmentRunes = 600
+
 // classifyHits turns search hits into commitments: own messages that
-// promise or request, and messages to the operator that ask.
-func classifyHits(own, toMe []goslack.SearchMessage, selfID string) []*actionItem {
+// promise or request, and messages to the operator that ask. bots are
+// the workspace's bot and app users, whose messages and DMs commit
+// nobody.
+func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[string]bool) []*actionItem {
 	var out []*actionItem
 	add := func(m goslack.SearchMessage, isOwn bool) {
-		if m.User == "" {
+		if m.User == "" || bots[m.User] {
 			return // bots and integrations promise nothing
+		}
+		dm := isDMHit(m)
+		peer := ""
+		if dm && !m.Channel.IsMPIM {
+			peer = m.Channel.Name
+		}
+		if peer == selfID || bots[peer] || len([]rune(m.Text)) > maxCommitmentRunes {
+			return // notes to self, bot DMs and reports
 		}
 		ts, err := strconv.ParseFloat(m.Timestamp, 64)
 		if err != nil {
 			return
 		}
 		at := format.ParseTS(m.Timestamp)
-		dm := isDMHit(m)
-		addressed := dm || !isOwn
-		if isOwn && !dm {
+		var addressed bool
+		switch {
+		case isOwn && dm && !m.Channel.IsMPIM:
+			addressed = true
+		case isOwn:
 			addressed = mentionsOther(m.Text, selfID)
+		case m.Channel.IsMPIM:
+			// A group chat talks to everyone in it; only a mention
+			// singles the operator out.
+			addressed = strings.Contains(m.Text, "<@"+selfID)
+		default:
+			addressed = true
 		}
 		due := actions.Due(m.Text, at)
-		kind := actions.Classify(m.Text, isOwn, addressed, !due.IsZero())
+		kind := actions.Classify(m.Text, isOwn, addressed, due.Strong)
 		if kind == actions.None {
 			return
 		}
@@ -249,6 +273,38 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string) []*actionIte
 		add(m, false)
 	}
 	return out
+}
+
+// botIDs returns the workspace's bot and app users. A failed roster read
+// yields none: bot messages are then judged by their text like any other.
+func (h *Hub) botIDs(ctx context.Context) map[string]bool {
+	users, err := h.Users().List(ctx)
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{"USLACKBOT": true}
+	for _, u := range users {
+		if u.IsBot || u.IsAppUser {
+			out[u.ID] = true
+		}
+	}
+	return out
+}
+
+// direct reports whether a commitment was made to the operator alone: a
+// one-to-one DM, or a channel message whose only mention is them. A
+// question put to five people in a channel is not theirs to answer, so
+// it is not listed for a ping when nobody does.
+func direct(it *actionItem, selfID string) bool {
+	if it.dm {
+		return !it.hit.Channel.IsMPIM
+	}
+	for _, m := range userRefRe.FindAllStringSubmatch(it.hit.Text, -1) {
+		if m[1] != selfID {
+			return false
+		}
+	}
+	return true
 }
 
 func isDMHit(m goslack.SearchMessage) bool {
@@ -400,7 +456,7 @@ const (
 )
 
 // bucketFor decides whether an open item is listed in this view.
-func bucketFor(it *actionItem, p actionParams) actionBucket {
+func bucketFor(it *actionItem, p actionParams, selfID string) actionBucket {
 	if it.outcome.Status.IsClosed() {
 		return bucketSkip
 	}
@@ -416,7 +472,7 @@ func bucketFor(it *actionItem, p actionParams) actionBucket {
 		return bucketLater
 	}
 	stale := actions.Stale(it.at, it.outcome, p.now, time.Duration(p.staleHours)*time.Hour)
-	if stale && it.kind != actions.Promise {
+	if stale && (it.kind == actions.Waiting || (it.kind != actions.Promise && direct(it, selfID))) {
 		return bucketPing
 	}
 	return bucketLater
@@ -451,7 +507,7 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 	var yours, waiting, later []*actionItem
 	closed := 0
 	for _, it := range items {
-		switch bucketFor(it, p) {
+		switch bucketFor(it, p, selfID) {
 		case bucketSkip:
 			closed++
 		case bucketDue, bucketPing:

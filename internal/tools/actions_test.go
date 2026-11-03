@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	goslack "github.com/slack-go/slack"
 )
 
 func actionDefaults() actionParams {
@@ -92,5 +93,34 @@ func TestHandleMyActions_RejectsUnknownDue(t *testing.T) {
 	res, _ := h.handleMyActions(context.Background(), req)
 	if !res.IsError || !strings.Contains(resultText(res), "due must be today, week or all") {
 		t.Fatalf("got %s", resultText(res))
+	}
+}
+
+// ADR 133: what is not a commitment, whatever its words say.
+func TestClassifyHits_SkipsNoise(t *testing.T) {
+	hit := func(ch, name string, mpim bool, user, text string) goslack.SearchMessage {
+		var m goslack.SearchMessage
+		m.Channel.ID, m.Channel.Name, m.Channel.IsMPIM = ch, name, mpim
+		m.User, m.Text, m.Timestamp = user, text, uaTS(-3600, 1)
+		return m
+	}
+	bots := map[string]bool{"UBOT": true}
+	own := []goslack.SearchMessage{
+		hit("D9", "U1", false, "U1", "сделаю до пятницы"),                       // a note to self
+		hit("C1", "ops", false, "U1", "<@U5> urgent "+strings.Repeat("x", 700)), // a report
+	}
+	toMe := []goslack.SearchMessage{
+		hit("D8", "UBOT", false, "UBOT", "*Today* — please review"),   // a bot DM
+		hit("G1", "mpdm-a--b", true, "U2", "Ждем всех, будем завтра"), // group chatter
+		hit("G1", "mpdm-a--b", true, "U2", "<@U1> пришли пожалуйста билеты"),
+		hit("D2", "U2", false, "U2", "У коллег доклад завтра"), // narrative date, no request
+	}
+	got := classifyHits(own, toMe, "U1", bots)
+	if len(got) != 1 || !strings.Contains(got[0].hit.Text, "билеты") {
+		var texts []string
+		for _, it := range got {
+			texts = append(texts, it.hit.Text)
+		}
+		t.Fatalf("want only the mention in the group DM, got %q", texts)
 	}
 }

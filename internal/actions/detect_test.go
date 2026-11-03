@@ -111,3 +111,31 @@ func FuzzDue(f *testing.F) {
 		_ = Classify(s, false, true, !d.IsZero())
 	})
 }
+
+// ADR 133: only a deadline set with a preposition makes a message an ask
+// on its own; a bare "завтра" or "в пятницу" narrates as often.
+func TestDue_Strong(t *testing.T) {
+	cases := []struct {
+		text   string
+		strong bool
+	}{
+		{"and until tmrw the full write-up", true},
+		{"К завтрашнему дню нужен черновик", true},
+		{"пришлю до пятницы", true},
+		{"до 15.11", true},
+		{"срочно", true},
+		{"нужно до конца дня", true},
+		{"У коллег доклад завтра", false},
+		{"аккаунт был открыт в пятницу", false},
+		{"Завтра утром надеюсь приеду", false},
+		{"на следующей неделе", false},
+	}
+	for _, c := range cases {
+		if got := Due(c.text, mon); got.Strong != c.strong {
+			t.Errorf("Due(%q).Strong = %v, want %v", c.text, got.Strong, c.strong)
+		}
+	}
+	if got := Due("в пятницу созвон, а до среды пришли план", mon); !got.Strong || !got.Day.Equal(day(11, 4)) {
+		t.Errorf("a strong deadline beats an earlier weak one: %+v", got)
+	}
+}

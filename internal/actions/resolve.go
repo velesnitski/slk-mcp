@@ -53,6 +53,9 @@ type Outcome struct {
 // responsible side only acknowledges it, and silence leaves it open.
 func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 	responsible := func(user string) bool {
+		if user == "USLACKBOT" {
+			return false // Slackbot's notices are nobody's reply
+		}
 		if kind == Waiting {
 			return user != "" && user != self
 		}

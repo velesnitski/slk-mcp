@@ -30,6 +30,11 @@ ignored.
 - a message to the operator that requests something, or names a
   deadline, is an *ask*; one that only asks a question is a *question*.
 
+**Not commitments**, whatever their words: messages from bot and app
+users and DMs with them, notes to self, messages longer than 600
+characters (reports and digests, whose "urgent" is content), and a group
+chat's messages unless they @-mention the operator.
+
 **Deadlines** are read relative to the message's own time: "завтра /
 tomorrow / tmrw", "послезавтра", weekdays after a preposition ("до
 пятницы", "until frriday", "на среду"), "через N дней", "this / next
@@ -37,7 +42,11 @@ week", dates after a preposition ("до 15.11", "до 10 ноября", "by Nov
 20"), and "asap / срочно / горит" as due the same day. The earliest wins.
 A bare "сегодня / today" counts only when nothing else does, because it
 narrates ("сегодня обсуждали") more often than it sets a deadline.
-Dates without a preposition — the "03.11.26" heading a daily report — are
+A deadline set with a preposition ("до пятницы", "until tmrw", "by
+15.11") or as urgent is strong; a bare "завтра" or "в пятницу" is weak,
+because it narrates as often ("доклад завтра", "открыли в пятницу"). Only
+a strong deadline makes a message an ask by itself, and a strong deadline
+beats an earlier weak one. Dates without a preposition — the "03.11.26" heading a daily report — are
 not deadlines.
 
 **Status** comes from what followed, read once per thread and once per
@@ -50,8 +59,10 @@ for a waiting item. An own promise that is the reply to an ask in the
 list is folded into the ask, which carries the deadline.
 
 **Views.** `due=today` lists what is overdue or due today, plus undated
-asks, questions and requests nobody moved for `stale_hours` (default 24)
-— the ping list; `due=week` looks seven days ahead; `due=all` lists every
+asks and questions made to the operator alone (a one-to-one DM, or a
+channel message mentioning only them) and requests nobody moved for
+`stale_hours` (default 24) — the ping list; Slackbot's notices are no
+one's reply; `due=week` looks seven days ahead; `due=all` lists every
 open item. Each line shows the deadline badge, the kind, who and where,
 the text, the phrase the date was read from, the acknowledging reply if
 any, and the permalink. Counts of closed, undated and unchecked items

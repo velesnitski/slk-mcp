@@ -52,6 +52,11 @@ type Deadline struct {
 	Phrase string
 	// Urgent marks "asap" / "срочно" / "горит": due the day it was said.
 	Urgent bool
+	// Strong marks a deadline set with a preposition — "до пятницы",
+	// "until tmrw", "by 15.11" — or as urgent. A bare "завтра" or "в
+	// пятницу" also narrates ("доклад завтра", "открыли в пятницу"), so
+	// only a strong deadline makes a message an ask on its own.
+	Strong bool
 }
 
 // IsZero reports whether no deadline was found.
@@ -107,23 +112,25 @@ var DoneReactions = map[string]bool{
 func Due(text string, at time.Time) Deadline {
 	t := normalize(text)
 	day := midnight(at)
+	// The earliest strong deadline wins; a weak one counts only when
+	// there is no strong one.
 	var best Deadline
-	consider := func(d time.Time, phrase string) {
+	consider := func(d time.Time, phrase string, strong bool) {
 		if d.IsZero() || d.Before(day) {
 			return
 		}
-		if best.IsZero() || d.Before(best.Day) {
-			best = Deadline{Day: d, Phrase: strings.TrimSpace(phrase), Urgent: best.Urgent}
+		if best.IsZero() || (strong && !best.Strong) || (strong == best.Strong && d.Before(best.Day)) {
+			best = Deadline{Day: d, Phrase: strings.TrimSpace(phrase), Urgent: best.Urgent, Strong: strong}
 		}
 	}
 
 	if m := urgentRe.FindString(t); m != "" {
-		consider(day, m)
+		consider(day, m, true)
 		best.Urgent = true
 	}
 	for _, r := range relativeDays {
 		if m := r.re.FindString(t); m != "" {
-			consider(day.AddDate(0, 0, r.days), m)
+			consider(day.AddDate(0, 0, r.days), m, r.strong || strongPrepRe.MatchString(t[:strings.Index(t, m)+len(m)]))
 		}
 	}
 	if m := inDaysRe.FindStringSubmatch(t); m != nil {
@@ -132,37 +139,37 @@ func Due(text string, at time.Time) Deadline {
 			if strings.HasPrefix(m[2], "нед") || strings.HasPrefix(m[2], "week") {
 				mult = 7
 			}
-			consider(day.AddDate(0, 0, n*mult), m[0])
+			consider(day.AddDate(0, 0, n*mult), m[0], true)
 		}
 	}
 	if m := thisWeekRe.FindString(t); m != "" {
-		consider(weekdayOnOrAfter(day, time.Friday), m)
+		consider(weekdayOnOrAfter(day, time.Friday), m, strongWeekRe.MatchString(m))
 	}
 	if m := nextWeekRe.FindString(t); m != "" {
 		// Friday of the week after this one.
-		consider(weekdayOnOrAfter(day.AddDate(0, 0, 1), time.Monday).AddDate(0, 0, 4), m)
+		consider(weekdayOnOrAfter(day.AddDate(0, 0, 1), time.Monday).AddDate(0, 0, 4), m, false)
 	}
 	for _, m := range weekdayRe.FindAllStringSubmatch(t, -1) {
 		if wd, ok := weekdayOf(m[2]); ok {
-			consider(weekdayOnOrAfter(day, wd), m[0])
+			consider(weekdayOnOrAfter(day, wd), m[0], isStrongPrep(m[1]))
 		}
 	}
 	for _, m := range numericDateRe.FindAllStringSubmatch(t, -1) {
-		consider(dateOf(day, m[2], m[3], m[4]), m[0])
+		consider(dateOf(day, m[2], m[3], m[4]), m[0], true)
 	}
 	for _, m := range monthDayRe.FindAllStringSubmatch(t, -1) {
 		if mon, ok := monthOf(m[3]); ok {
-			consider(dateOf(day, m[2], strconv.Itoa(int(mon)), ""), m[0])
+			consider(dateOf(day, m[2], strconv.Itoa(int(mon)), ""), m[0], true)
 		}
 	}
 	for _, m := range dayMonthEnRe.FindAllStringSubmatch(t, -1) {
 		if mon, ok := monthOf(m[1]); ok {
-			consider(dateOf(day, m[2], strconv.Itoa(int(mon)), ""), m[0])
+			consider(dateOf(day, m[2], strconv.Itoa(int(mon)), ""), m[0], true)
 		}
 	}
 	if best.IsZero() {
 		if m := todayRe.FindString(t); m != "" {
-			consider(day, m)
+			consider(day, m, false)
 		}
 	}
 	return best
@@ -237,7 +244,7 @@ var (
 		`подскажи(?:те)?`, `посмотри(?:те)?`, `проверь(?:те)?`, `сделай(?:те)?`, `пришли(?:те)?`,
 		`скинь(?:те)?`, `глянь(?:те)?`, `ответь(?:те)?`, `согласуй(?:те)?`, `подготовь(?:те)?`,
 		`напиши(?:те)?`, `помоги(?:те)?`, `дай(?:те)?`, `нужно`, `надо`, `нужен`, `нужна`, `нужны`,
-		`требуется`, `жду`, `ждем`,
+		`требуется`, `жду`,
 		`please`, `pls`, `plz`, `can you`, `could you`, `would you`, `need`, `needs`, `let me know`,
 		`lmk`, `give me`, `think about`, `send me`, `make sure`,
 	)
@@ -255,13 +262,18 @@ var (
 	urgentRe = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
 
 	relativeDays = []struct {
-		re   *regexp.Regexp
-		days int
+		re     *regexp.Regexp
+		days   int
+		strong bool
 	}{
-		{words(`послезавтра`, `day after tomorrow`), 2},
-		{regexp.MustCompile(wb + `(?:завтра|завтрашн\p{L}*|tomorrow|tomorow|tmrw|tmr|tmrow)` + web), 1},
-		{words(`tonight`, `eod`, `end of day`, `до конца дня`, `к концу дня`, `до вечера`, `до сегодня`, `by today`), 0},
+		{words(`послезавтра`, `day after tomorrow`), 2, false},
+		{regexp.MustCompile(wb + `(?:завтра|завтрашн\p{L}*|tomorrow|tomorow|tmrw|tmr|tmrow)` + web), 1, false},
+		{words(`tonight`, `eod`, `end of day`, `до конца дня`, `к концу дня`, `до вечера`, `до сегодня`, `by today`), 0, true},
 	}
+	// strongPrepRe finds a deadline preposition right before the end of
+	// the text it is given: "до завтра", "until tmrw", "к завтрашнему".
+	strongPrepRe = regexp.MustCompile(wb + `(?:до|к|ко|by|until|till|til|before|не позже)\s+\p{L}+` + web + `?$`)
+	strongWeekRe = words(`до конца недели`, `к концу недели`, `end of (?:the )?week`, `eow`, `by the weekend`)
 	// todayRe is weak: "сегодня обсуждали" narrates more often than it
 	// sets a deadline, so it counts only when nothing else does.
 	todayRe    = words(`сегодня`, `today`)
@@ -277,6 +289,16 @@ var (
 	monthDayRe    = regexp.MustCompile(wb + `(` + datePrep + `)\s+(\d{1,2})\s+(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[яй]|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*|jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)` + web)
 	dayMonthEnRe  = regexp.MustCompile(wb + `(?:by|until|till|before|on)\s+(jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)\s+(\d{1,2})` + web)
 )
+
+// isStrongPrep reports whether a weekday's preposition sets a deadline
+// ("до пятницы", "by Friday") rather than placing an event ("в пятницу").
+func isStrongPrep(p string) bool {
+	switch p {
+	case "до", "к", "ко", "by", "until", "till", "til", "before", "deadline", "дедлайн", "срок":
+		return true
+	}
+	return false
+}
 
 // monthOf reads a month name, Russian or English, by its stem.
 func monthOf(s string) (time.Month, bool) {
