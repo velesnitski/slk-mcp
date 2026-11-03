@@ -75,7 +75,7 @@ func TestHiddenPayload_rendersTheWholePayload(t *testing.T) {
 // a line — and its truncation stays valid UTF-8.
 func TestRenderHiddenPayloadMarker_digestStillCaps(t *testing.T) {
 	body := strings.Repeat("я", 2000)
-	got := renderHiddenPayloadMarker(payloadMessage(body), HiddenPayloadLimit)
+	got := renderHiddenPayloadMarker(payloadMessage(body), nil, HiddenPayloadLimit)
 	if !strings.Contains(got, "(+1780 chars)") {
 		t.Errorf("digest must still cap the payload and report runes dropped, got %d runes", utf8.RuneCountInString(got))
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -128,10 +129,11 @@ func TestRecentDMActivityAfterUnread_ReusesThePage(t *testing.T) {
 	svDMSweep(f)
 	svc := svUnread(t, f, nil)
 
-	if _, err := svc.UnreadAll(context.Background(), 5); err != nil {
+	ctx := WithSweepPages(context.Background())
+	if _, err := svc.UnreadAll(ctx, 5); err != nil {
 		t.Fatalf("UnreadAll: %v", err)
 	}
-	got, err := svc.RecentDMActivityAfterUnread(context.Background(), 2, 5)
+	got, err := svc.RecentDMActivityAfterUnread(ctx, 2, 5)
 	if err != nil {
 		t.Fatalf("RecentDMActivityAfterUnread: %v", err)
 	}
@@ -163,32 +165,81 @@ func TestRecentDMActivity_NeverReusesAPage(t *testing.T) {
 }
 
 func TestHistoryPages(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	p := historyPages{now: func() time.Time { return now }}
+	ctx := context.Background()
 	msgs := []goslack.Message{threadMsg("A", "3.0"), threadMsg("A", "2.0"), threadMsg("A", "1.0")}
-
-	p.put("D1", msgs, 3)
-	if got, ok := p.get("D1", 2); !ok || len(got) != 2 || got[0].Timestamp != "3.0" {
-		t.Fatalf("a smaller limit takes the newest messages: %v %v", got, ok)
-	}
-	if _, ok := p.get("D1", 2); ok {
-		t.Fatal("a page is lent once")
+	reads := 0
+	fetch := func(limit int) ([]goslack.Message, error) {
+		reads++
+		return head(msgs, limit), nil
 	}
 
-	p.put("D1", msgs, 3)
-	if _, ok := p.get("D1", 4); ok {
+	p := pagesFrom(WithSweepPages(ctx))
+	if got, _ := p.load(ctx, "D1", 3, fetch); len(got) != 3 || reads != 1 {
+		t.Fatalf("first read: %v, reads=%d", got, reads)
+	}
+	if got, _ := p.load(ctx, "D1", 2, fetch); len(got) != 2 || got[0].Timestamp != "3.0" || reads != 1 {
+		t.Fatalf("a smaller limit takes the newest messages of the shared page: %v, reads=%d", got, reads)
+	}
+	if _, _ = p.load(ctx, "D1", 4, fetch); reads != 2 {
 		t.Fatal("a page read with a smaller limit cannot stand in for a larger one")
 	}
-
-	p.put("D1", msgs, 3)
-	now = now.Add(historyPageTTL + time.Second)
-	if _, ok := p.get("D1", 3); ok {
-		t.Fatal("a stale page must be read again")
+	if p.lentCount() != 1 {
+		t.Fatalf("lent = %d, want 1", p.lentCount())
 	}
 
-	p.put("D1", msgs, 3)
-	p.reset()
-	if _, ok := p.get("D1", 3); ok {
-		t.Fatal("reset forgets every page")
+	var none *historyPages
+	if _, _ = none.load(ctx, "D1", 3, fetch); reads != 3 {
+		t.Fatal("outside a sweep every load reads")
+	}
+	if pagesFrom(ctx) != nil {
+		t.Fatal("a plain context carries no pages")
+	}
+}
+
+func TestHistoryPages_WaitsForTheReadInFlight(t *testing.T) {
+	ctx := context.Background()
+	p := pagesFrom(WithSweepPages(ctx))
+	release := make(chan struct{})
+	var reads atomic.Int32
+	fetch := func(limit int) ([]goslack.Message, error) {
+		reads.Add(1)
+		<-release
+		return []goslack.Message{threadMsg("A", "1.0")}, nil
+	}
+	first := make(chan []goslack.Message)
+	go func() {
+		got, _ := p.load(ctx, "D1", 5, fetch)
+		first <- got
+	}()
+	for reads.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	second := make(chan []goslack.Message)
+	go func() {
+		got, _ := p.load(ctx, "D1", 5, fetch)
+		second <- got
+	}()
+	close(release)
+	if a, b := <-first, <-second; len(a) != 1 || len(b) != 1 || reads.Load() != 1 {
+		t.Fatalf("a=%v b=%v reads=%d, want one shared read", a, b, reads.Load())
+	}
+}
+
+func TestHistoryPages_FailedReadIsNotShared(t *testing.T) {
+	ctx := context.Background()
+	p := pagesFrom(WithSweepPages(ctx))
+	calls := 0
+	fetch := func(limit int) ([]goslack.Message, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("boom")
+		}
+		return []goslack.Message{threadMsg("A", "1.0")}, nil
+	}
+	if _, err := p.load(ctx, "D1", 5, fetch); err == nil {
+		t.Fatal("the first read fails")
+	}
+	if got, err := p.load(ctx, "D1", 5, fetch); err != nil || len(got) != 1 {
+		t.Fatalf("the second reader reads for itself: %v %v", got, err)
 	}
 }

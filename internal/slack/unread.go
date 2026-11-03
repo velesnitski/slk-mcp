@@ -31,10 +31,6 @@ type UnreadService struct {
 	search   *SearchService
 	log      *slog.Logger
 
-	// pages lends the unread sweep's DM history to the DM window that
-	// follows it in the same sweep (ADR 125).
-	pages historyPages
-
 	selfMu     sync.RWMutex
 	selfID     string
 	selfHandle string
@@ -56,6 +52,16 @@ type UnreadOpts struct {
 	Counts bool
 	// Report, when set, receives what the counts path did.
 	Report *CountsReport
+	// Stats, when set, receives how the unread pass spent its calls.
+	Stats *UnreadStats
+}
+
+// UnreadStats says how one unread pass spent its calls (ADR 132).
+type UnreadStats struct {
+	Channels     int // conversations checked with conversations.info
+	HistoryReads int // of those, read with conversations.history
+	SkippedIdle  int // read and idle: the history read was skipped
+	Failed       int
 }
 
 // CountsReport says what the counts path did in one sweep.
@@ -182,6 +188,27 @@ type ChannelUnread struct {
 	// the own-thread backstop. Replies there are addressed to the
 	// operator, so the sweep renders them at a fuller cap (ADR 130).
 	OwnThreads map[string]bool
+
+	// skippedIdle marks a conversation whose history read was skipped
+	// because it could hold nothing new (readIdle).
+	skippedIdle bool
+}
+
+// dmsFirst returns channels with the DMs moved to the front, otherwise
+// in order.
+func dmsFirst(channels []goslack.Channel) []goslack.Channel {
+	out := make([]goslack.Channel, 0, len(channels))
+	for _, ch := range channels {
+		if isDirectMessage(ch) {
+			out = append(out, ch)
+		}
+	}
+	for _, ch := range channels {
+		if !isDirectMessage(ch) {
+			out = append(out, ch)
+		}
+	}
+	return out
 }
 
 // JoinedChannels returns channels the user is a member of, useful for
@@ -263,6 +290,10 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	}
 
 	oldest, _ := strconv.ParseFloat(info.LastRead, 64)
+	if readIdle(info.Latest, oldest, s.nowUnix()) {
+		cu.skippedIdle = true
+		return cu, nil
+	}
 
 	// The page is anchored at now and trimmed locally (ADR 111). It used
 	// to be requested with `oldest` = last_read, reached a further 12h
@@ -282,28 +313,20 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	if isDirectMessage(*info) && maxMessages < DMMinMessages {
 		maxMessages = DMMinMessages
 	}
-	params := &goslack.GetConversationHistoryParameters{
-		ChannelID: channelID,
-		Limit:     maxMessages + threadParentHeadroom,
+	limit := maxMessages + threadParentHeadroom
+	read := func(limit int) ([]goslack.Message, error) { return s.newestPage(ctx, channelID, limit) }
+	var page []goslack.Message
+	if isDirectMessage(*info) {
+		// The DM window reads the same page in the same sweep (ADR 132).
+		page, err = pagesFrom(ctx).load(ctx, channelID, limit, read)
+	} else {
+		page, err = read(limit)
 	}
-
-	var resp *goslack.GetConversationHistoryResponse
-	err = ratelimit.Do(ctx, s.log, 0, func() error {
-		r, err := s.api.GetConversationHistoryContext(ctx, params)
-		if err != nil {
-			return err
-		}
-		resp = r
-		return nil
-	})
 	if err != nil {
 		return nil, fmt.Errorf("conversations.history (unread): %w", err)
 	}
-	if isDirectMessage(*info) {
-		s.pages.put(channelID, resp.Messages, params.Limit)
-	}
 
-	for _, msg := range resp.Messages {
+	for _, msg := range page {
 		ts, _ := strconv.ParseFloat(msg.Timestamp, 64)
 		if ts <= oldest {
 			continue
@@ -314,8 +337,8 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 	// Parents come from the page back to the lookback floor (including
 	// already-read messages); cu.Messages stays strictly "new since
 	// last_read".
-	parents := make([]goslack.Message, 0, len(resp.Messages))
-	for _, msg := range resp.Messages {
+	parents := make([]goslack.Message, 0, len(page))
+	for _, msg := range page {
 		if ts, perr := strconv.ParseFloat(msg.Timestamp, 64); perr != nil || ts >= lookbackFloor {
 			parents = append(parents, msg)
 		}
@@ -327,6 +350,51 @@ func (s *UnreadService) Unread(ctx context.Context, channelID string, maxMessage
 		s.log.Warn("fetch thread replies failed", "channel", channelID, "err", err)
 	}
 	return cu, ctx.Err()
+}
+
+// newestPage reads the newest limit messages of a conversation, anchored
+// at now (ADR 111).
+func (s *UnreadService) newestPage(ctx context.Context, channelID string, limit int) ([]goslack.Message, error) {
+	params := &goslack.GetConversationHistoryParameters{ChannelID: channelID, Limit: limit}
+	var msgs []goslack.Message
+	err := ratelimit.Do(ctx, s.log, 0, func() error {
+		r, err := s.api.GetConversationHistoryContext(ctx, params)
+		if err != nil {
+			return err
+		}
+		msgs = r.Messages
+		return nil
+	})
+	return msgs, err
+}
+
+// readIdle reports whether a conversation's history page can hold
+// nothing the unread pass would keep, so reading it is a wasted call —
+// most of a sweep's time went to such reads (ADR 132). latest is the
+// newest top-level message conversations.info returned, nil when Slack
+// sent none (then the page is read as before).
+//
+// The page supplies two things: messages newer than last_read, and
+// thread parents back to min(last_read, now-12h) whose threads may have
+// new replies. When the newest message is read and older than the
+// lookback, there are no new messages, and the only parent that can
+// still be in range is that newest message itself, at exactly last_read
+// — so it is skipped only when it carries no thread. Pure.
+func readIdle(latest *goslack.Message, lastRead float64, now int64) bool {
+	if latest == nil {
+		return false
+	}
+	ts, err := strconv.ParseFloat(latest.Timestamp, 64)
+	if err != nil || ts <= 0 || ts > lastRead {
+		return false
+	}
+	if ts >= float64(now-threadLookbackHours*3600) {
+		return false
+	}
+	if ts < lastRead {
+		return true
+	}
+	return latest.ReplyCount == 0 && latest.LatestReply == "" && latest.ThreadTimestamp == ""
 }
 
 // threadLookbackHours is how far BEFORE last_read the channel history is
@@ -416,7 +484,6 @@ func (s *UnreadService) UnreadAllWith(ctx context.Context, maxPerChannel int, op
 		return nil, ErrNoUserToken
 	}
 	start := time.Now()
-	s.pages.reset() // only this sweep's pages may be lent on
 	channels, err := s.JoinedChannels(ctx)
 	if err != nil {
 		return nil, err
@@ -425,6 +492,9 @@ func (s *UnreadService) UnreadAllWith(ctx context.Context, maxPerChannel int, op
 	if opts.Counts {
 		channels = s.filterByCounts(ctx, channels, opts.Report)
 	}
+	// DMs first: when the deadline cuts the pass, what it has read
+	// should be the conversations written to the operator (ADR 132).
+	channels = dmsFirst(channels)
 
 	// Fetch in parallel, capped to a modest concurrency to stay polite.
 	const workers = 4
@@ -479,9 +549,13 @@ func (s *UnreadService) UnreadAllWith(ctx context.Context, maxPerChannel int, op
 	// One line per sweep: where the time of the "unread" phase goes —
 	// listing, how many channels needed a history read, and the slowest
 	// one. Without it, a slow sweep could only be guessed at. ADR 122.
+	if opts.Stats != nil {
+		*opts.Stats = UnreadStats{Channels: len(channels), HistoryReads: st.historyReads, SkippedIdle: st.skippedIdle, Failed: st.failed}
+	}
 	s.log.Info("unread sweep",
 		"channels", len(channels),
 		"history_reads", st.historyReads,
+		"skipped_idle", st.skippedIdle,
 		"with_unread", len(out),
 		"failed", st.failed,
 		"list_took", listed.Round(time.Millisecond).String(),
@@ -494,15 +568,17 @@ func (s *UnreadService) UnreadAllWith(ctx context.Context, maxPerChannel int, op
 
 // unreadStats tallies one UnreadAll pass for its log line.
 type unreadStats struct {
-	historyReads, failed int
-	slowest              time.Duration
-	slowestID            string
+	historyReads, skippedIdle, failed int
+	slowest                           time.Duration
+	slowestID                         string
 }
 
 func (u *unreadStats) add(id string, took time.Duration, cu *ChannelUnread, err error) {
 	switch {
 	case err != nil:
 		u.failed++
+	case cu != nil && cu.skippedIdle:
+		u.skippedIdle++
 	case cu != nil && cu.LastRead != "":
 		u.historyReads++ // conversations.info short-circuits without last_read
 	}
@@ -525,9 +601,10 @@ func (s *UnreadService) RecentDMActivity(ctx context.Context, hours, maxPerChann
 }
 
 // RecentDMActivityAfterUnread is RecentDMActivity for the DM window of an
-// unread sweep: a DM whose newest page UnreadAll read moments ago in the
-// same sweep is not read again (ADR 125). Only a caller whose delta
-// cursor is capped at the sweep's start may use it — that cap is what
+// unread sweep: a DM page the unread pass of the same sweep reads, or has
+// read, is not read again (ADR 125, ADR 132). The pages are shared only
+// through a context from WithSweepPages, which only a caller whose delta
+// cursor is capped at the sweep's start may create — that cap is what
 // makes a message arriving after the page was read safe to miss here.
 func (s *UnreadService) RecentDMActivityAfterUnread(ctx context.Context, hours, maxPerChannel int) ([]*ChannelUnread, error) {
 	return s.recentDMActivity(ctx, hours, maxPerChannel, true)
@@ -601,7 +678,7 @@ func (s *UnreadService) recentDMActivity(ctx context.Context, hours, maxPerChann
 		}
 	}
 	if reuse {
-		s.log.Info("dm window", "dms", len(probe), "reused_pages", s.pages.lentCount())
+		s.log.Info("dm window", "dms", len(probe), "shared_pages", pagesFrom(ctx).lentCount())
 	}
 	// One conversation failing is tolerated; the deadline passing is not
 	// a per-conversation failure — the caller must hold its cursor.
@@ -616,29 +693,19 @@ func (s *UnreadService) recentActivity(ctx context.Context, ch goslack.Channel, 
 	// with `oldest` is the one adjacent to `oldest` — the stale end of the
 	// window — so a busy DM returned its oldest messages and dropped the
 	// newest (ADR 111; this path carried the same defect).
-	params := &goslack.GetConversationHistoryParameters{
-		ChannelID: ch.ID,
-		Limit:     maxMessages,
-	}
 	var page []goslack.Message
-	cached := false
+	var err error
 	if reuse {
-		page, cached = s.pages.get(ch.ID, maxMessages)
+		// Ask for the page the unread pass reads for a DM, so one read
+		// serves both phases (ADR 132); the call costs the same.
+		read := func(limit int) ([]goslack.Message, error) { return s.newestPage(ctx, ch.ID, limit) }
+		page, err = pagesFrom(ctx).load(ctx, ch.ID, maxMessages+threadParentHeadroom, read)
+		page = head(page, maxMessages)
+	} else {
+		page, err = s.newestPage(ctx, ch.ID, maxMessages)
 	}
-	if !cached {
-		var resp *goslack.GetConversationHistoryResponse
-		err := ratelimit.Do(ctx, s.log, 0, func() error {
-			r, err := s.api.GetConversationHistoryContext(ctx, params)
-			if err != nil {
-				return err
-			}
-			resp = r
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("conversations.history (recent activity): %w", err)
-		}
-		page = resp.Messages
+	if err != nil {
+		return nil, fmt.Errorf("conversations.history (recent activity): %w", err)
 	}
 
 	cu := &ChannelUnread{Channel: ch, LastRead: ch.LastRead}

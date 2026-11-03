@@ -726,9 +726,9 @@ var userIDRe = regexp.MustCompile(`^[UW][A-Z0-9]{8,}$`)
 
 // rankUnread / channelMentions moved to internal/digest (rank.go).
 
-// filterMentions returns only ChannelUnread entries that contain at
-// least one direct mention of selfID, in either a top-level message
-// or a thread reply. selfID must be non-empty; pass through unchanged
+// filterMentions returns only ChannelUnread entries addressed to selfID:
+// DMs, and channels with at least one direct mention of selfID in
+// either a top-level message or a thread reply. selfID must be non-empty; pass through unchanged
 // if filtering should be a no-op.
 func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.ChannelUnread {
 	if selfID == "" {
@@ -736,7 +736,10 @@ func filterMentions(results []*slack.ChannelUnread, selfID string) []*slack.Chan
 	}
 	out := results[:0]
 	for _, r := range results {
-		if digest.ChannelMentions(r, selfID) {
+		// A DM is addressed to the operator by being one: nobody writes
+		// @you to the person they are writing to, so a mention test alone
+		// dropped every DM from a mentions_only sweep (ADR 132).
+		if slack.IsDirectMessage(r.Channel) || digest.ChannelMentions(r, selfID) {
 			out = append(out, r)
 		}
 	}
@@ -775,6 +778,23 @@ func newestTS(results []*slack.ChannelUnread) string {
 
 // dmCap is the per-conversation cap for a DM in the unread sweep: the
 // caller's cap, but never below slack.DMMinMessages (ADR 128). Pure.
+// omittedCount is the volume a channel cut by the max_chars cap is
+// listed with: its messages and thread replies. Counting only top-level
+// messages listed a channel whose news was all in threads as "(0)".
+func omittedCount(r *slack.ChannelUnread) string {
+	replies := 0
+	for _, rs := range r.Replies {
+		replies += len(rs)
+	}
+	switch {
+	case replies == 0:
+		return strconv.Itoa(len(r.Messages))
+	case len(r.Messages) == 0:
+		return fmt.Sprintf("%d replies", replies)
+	}
+	return fmt.Sprintf("%d+%d replies", len(r.Messages), replies)
+}
+
 func dmCap(maxPer int) int {
 	if maxPer < slack.DMMinMessages {
 		return slack.DMMinMessages

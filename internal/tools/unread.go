@@ -116,7 +116,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 			mcp.NewTool("get_unread_summary",
 				mcp.WithDescription("Smart summary of all unread messages across joined channels. Requires SLACK_USER_TOKEN. With multiple workspaces configured, merges every workspace under a [label] heading. Fetching is time-bounded (SLACK_SWEEP_TIMEOUT): an 'incomplete:' line names what was not read, and that workspace's cursor is not advanced, so passing the returned cursor re-reads it."),
 				mcp.WithNumber("max_per_channel", mcp.Description("Max unread messages to inline per channel (default: 20)")),
-				mcp.WithBoolean("mentions_only", mcp.Description("If true, return only channels that contain a direct mention of the authenticated user (default: false)")),
+				mcp.WithBoolean("mentions_only", mcp.Description("If true, return only conversations addressed to you: DMs and group DMs, and channels that contain a direct mention of the authenticated user (default: false)")),
 				mcp.WithNumber("thread_preview_replies", mcp.Description("Max thread replies inlined per parent (default: 3)")),
 				mcp.WithNumber("urgency_weight", mcp.Description("Multiplier on the urgency score before ranking (default: 1.0). Pass 0 or negative to use the default; pass 0.5 to dampen, 2.0 to amplify.")),
 				mcp.WithString("urgency_keywords", mcp.Description("Comma-separated extra urgency keywords (case-insensitive substrings). Additive to the built-in en/ru list — e.g. 'asap, critical, p0, prod down'.")),
@@ -300,7 +300,10 @@ func (h *Hub) runUnreadSummary(ctx context.Context, p unreadParams, workspace st
 		// with the incoming cursor (ADR 121).
 		pws := p
 		pws.afterTS = r.after
-		sw := newSweep(fetchCtx, scoped.log, "get_unread_summary", ws.Name)
+		// The sweep's DM pages are shared between its phases, per
+		// workspace; the delta cursor is capped at the sweep's start,
+		// which is what makes the sharing safe (ADR 132).
+		sw := newSweep(slack.WithSweepPages(fetchCtx), scoped.log, "get_unread_summary", ws.Name)
 		t0 := time.Now()
 		r.body, r.cursor, r.err = scoped.sweepUnread(ctx, sw, pws)
 		scoped.log.Info("sweep workspace", "tool", "get_unread_summary", "workspace", ws.Name,
@@ -456,10 +459,10 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	}
 
 	// The fetch phases run concurrently (ADR 131). They used to run one
-	// after another, so a sweep took the sum of its phases; only the DM
-	// window depends on another phase — it reuses the unread pass's pages
-	// (ADR 125) — so the two run as one chain while the backstops, the
-	// priority channels and the canvas delta run beside it. Slack rate
+	// after another, so a sweep took the sum of its phases. The DM window
+	// shares the unread pass's DM pages as both go (ADR 125, ADR 132), so
+	// it runs beside the pass like the backstops, the priority channels
+	// and the canvas delta. Slack rate
 	// limits are per method, and the phases call different methods, so
 	// running them together does not make them wait on each other.
 	// Results are merged below in the same order as before, so the output
@@ -472,6 +475,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		canvasHits                                   []canvasHit
 	)
 	var countsRep slack.CountsReport
+	var unreadStats slack.UnreadStats
 	spawn := func(fn func()) {
 		wg.Add(1)
 		go func() {
@@ -482,22 +486,30 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 
 	spawn(func() {
 		unreadErr = sw.run("unread", func(c context.Context) error {
-			r, e := h.Unread().UnreadAllWith(c, p.maxPer, slack.UnreadOpts{Counts: p.unreadSource == "counts", Report: &countsRep})
+			r, e := h.Unread().UnreadAllWith(c, p.maxPer, slack.UnreadOpts{
+				Counts: p.unreadSource == "counts", Report: &countsRep, Stats: &unreadStats,
+			})
 			results = r
 			return e
 		})
-		// DM time-window override: when the operator wants to see DMs
-		// they've already opened (executive syncs, side chats with
-		// decisions), pull recent activity regardless of last_read and
-		// merge it on top of the unread sweep.
-		if unreadErr == nil && p.dmWindowHours > 0 {
+	})
+
+	// DM time-window override: when the operator wants to see DMs
+	// they've already opened (executive syncs, side chats with
+	// decisions), pull recent activity regardless of last_read and
+	// merge it on top of the unread sweep. It used to wait for the whole
+	// unread pass to reuse its DM pages, so a pass the deadline cut left
+	// no DM window at all; the two now share the pages as they go
+	// (ADR 132).
+	if p.dmWindowHours > 0 {
+		spawn(func() {
 			dmErr = sw.run("dm-window", func(c context.Context) error {
 				r, e := h.Unread().RecentDMActivityAfterUnread(c, p.dmWindowHours, dmCap(p.maxPer))
 				dmResults = r
 				return e
 			})
-		}
-	})
+		})
+	}
 
 	// Priority channels (ADR 112): shown for their window whether or not
 	// they have been read. The sweep above is last_read-based, so a channel
@@ -658,6 +670,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	deadlineNote := sw.note(true)
 	if p.showTimings || p.unreadSource == "counts" {
 		deadlineNote += sw.timings()
+		deadlineNote += unreadStatsLine(unreadStats)
 	}
 	if p.unreadSource == "counts" {
 		deadlineNote += countsLine(countsRep)
@@ -810,7 +823,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		if !budgetAppend(&b, rendered, p.maxChars) {
 			// Carry the volume: a bare name doesn't say whether the
 			// channel is worth a drill-in call.
-			dropped = append(dropped, fmt.Sprintf("%s (%d)", label, len(r.Messages)))
+			dropped = append(dropped, fmt.Sprintf("%s (%s)", label, omittedCount(r)))
 			continue
 		}
 	}
@@ -1145,4 +1158,14 @@ func countsLine(r slack.CountsReport) string {
 	}
 	return fmt.Sprintf("client.counts: %s · %d of %d conversations skipped as read · %d not listed, checked as before\n",
 		r.Took.Round(10*time.Millisecond), r.Skipped, r.Channels, r.Unlisted)
+}
+
+// unreadStatsLine reports how the unread pass spent its calls, so the
+// effect of skipping idle conversations can be read off a sweep (ADR 132).
+func unreadStatsLine(st slack.UnreadStats) string {
+	if st.Channels == 0 {
+		return ""
+	}
+	return fmt.Sprintf("unread pass: %d conversations · %d history reads · %d skipped as read and idle · %d failed\n",
+		st.Channels, st.HistoryReads, st.SkippedIdle, st.Failed)
 }

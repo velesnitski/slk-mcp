@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.69.0] - 2026-11-03
+
+### Fixed
+
+- **`mentions_only` no longer hides DMs.** DMs and group DMs are addressed
+  to you without an @-mention, so they are kept.
+- **Forwarded messages name their author.** A forward used to read as the
+  forwarder's own words, sometimes twice; it now renders as
+  `↪ <author>: <text>`, and a forward with a comment keeps the forwarded
+  text.
+- **The omitted-channel list counts thread replies**, instead of showing
+  `(0)` for a channel whose news is all in threads.
+
+### Changed
+
+- **The unread pass skips conversations with nothing new.** When a
+  conversation's newest message is read and older than the 12-hour thread
+  lookback, its history page is not read. DMs are read first.
+- **The DM window no longer waits for the unread pass.** The two run side
+  by side and share each DM page, so a deadline in the unread pass no
+  longer drops the DM window. `show_timings` adds a line with the unread
+  pass's history reads and skips. See ADR 132.
+
 ## [1.68.0] - 2026-11-01
 
 ### Changed

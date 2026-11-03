@@ -681,6 +681,74 @@ func attachmentText(a goslack.Attachment) []string {
 	return out
 }
 
+// IsForwardedAttachment reports whether a carries a Slack message shared
+// into this one — a forward, or the unfurl of a pasted message link —
+// rather than a bot card or a URL preview. Slack points those at the
+// original with a from_url permalink under /archives/ and stamps the
+// original's ts; a bot card may set ts or author_name, but not a
+// permalink. Pure.
+func IsForwardedAttachment(a goslack.Attachment) bool {
+	return strings.TrimSpace(a.Ts.String()) != "" && strings.Contains(a.FromURL, "/archives/")
+}
+
+// forwardLabel names the author of a forwarded message: the id resolved
+// through users first, then the name Slack copied into the attachment.
+func forwardLabel(a goslack.Attachment, users map[string]string) string {
+	name := users[a.AuthorID]
+	if name == "" {
+		name = a.AuthorName
+	}
+	if name == "" {
+		name = a.AuthorSubname
+	}
+	if name == "" {
+		return "↪ forwarded: "
+	}
+	return "↪ " + name + ": "
+}
+
+// forwardedText is the forwarded message's own text, its mentions and
+// links resolved. Slack also puts it in fallback, prefixed with a date
+// and the author, so fallback is used only when the text is empty.
+func forwardedText(a goslack.Attachment, users map[string]string) string {
+	if strings.TrimSpace(a.Text) != "" {
+		return RenderText(a.Text, users)
+	}
+	return a.Fallback
+}
+
+// renderForwards renders the forwarded messages a message carries next
+// to its own text, each labelled with its author, or "" when it carries
+// none. limit caps each forwarded text in runes; limit <= 0 renders it
+// whole.
+func renderForwards(msg goslack.Message, users map[string]string, limit int) string {
+	var parts []string
+	for _, a := range msg.Attachments {
+		if !IsForwardedAttachment(a) {
+			continue
+		}
+		text := collapseWhitespace(forwardedText(a, users))
+		if text == "" {
+			continue
+		}
+		if cut, over := truncateRunes(text, limit); over > 0 {
+			text = cut + fmt.Sprintf(" (+%d chars)", over)
+		}
+		parts = append(parts, forwardLabel(a, users)+text)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// dedupKey is the form two payload strings are compared in: Slack
+// renders the same text with and without skin-tone modifiers in
+// different fields of one message, so ":ok_hand::skin-tone-2:" and
+// ":ok_hand:" must count as one. Pure.
+func dedupKey(s string) string {
+	return skinTone.ReplaceAllString(s, "")
+}
+
+var skinTone = regexp.MustCompile(`:skin-tone-[2-6]:`)
+
 // anyNonEmpty reports whether any string has non-space content. Pure.
 func anyNonEmpty(ss []string) bool {
 	for _, s := range ss {
@@ -703,7 +771,7 @@ func anyNonEmpty(ss []string) bool {
 // a clipped body clip it again — and for a message whose text field is
 // empty, the payload is the entire message.
 func HiddenPayload(msg goslack.Message) string {
-	return renderHiddenPayloadMarker(msg, 0)
+	return renderHiddenPayloadMarker(msg, nil, 0)
 }
 
 // ForwardedOrigin returns the timestamp of the message this one shares,
@@ -742,7 +810,8 @@ func ForwardedOrigin(msg goslack.Message) string {
 // when there is text, and the count remains only as the honest answer
 // when there genuinely isn't one. See ADR 092.
 // limit caps the lifted text in runes; limit <= 0 renders it whole.
-func renderHiddenPayloadMarker(msg goslack.Message, limit int) string {
+// users resolves a forward's author id to a name; it may be nil.
+func renderHiddenPayloadMarker(msg goslack.Message, users map[string]string, limit int) string {
 	// A huddle (audio room) arrives as a block-kit message with empty
 	// text — without this it would render as a meaningless "[blocks: 1]"
 	// and a real call would be invisible in the digest. slack-go's typed
@@ -754,24 +823,31 @@ func renderHiddenPayloadMarker(msg goslack.Message, limit int) string {
 
 	var parts []string
 	seen := map[string]struct{}{}
-	add := func(raw string) {
+	add := func(label, raw string) {
 		s := collapseWhitespace(raw)
 		if s == "" {
 			return
 		}
-		if _, dup := seen[s]; dup {
+		key := dedupKey(s)
+		if _, dup := seen[key]; dup {
 			return
 		}
-		seen[s] = struct{}{}
-		parts = append(parts, s)
+		seen[key] = struct{}{}
+		parts = append(parts, label+s)
 	}
 	for _, a := range msg.Attachments {
+		if IsForwardedAttachment(a) {
+			// A forward is someone else's words: without the author the
+			// line reads as the forwarder saying them (ADR 132).
+			add(forwardLabel(a, users), forwardedText(a, users))
+			continue
+		}
 		for _, s := range attachmentText(a) {
-			add(s)
+			add("", s)
 		}
 	}
 	for _, s := range blocksText(msg.Blocks) {
-		add(s)
+		add("", s)
 	}
 
 	if len(parts) > 0 {
@@ -916,9 +992,14 @@ func messageLineImpl(msg goslack.Message, userName string, users map[string]stri
 		// non-text payload (Block Kit, legacy Attachments) so the
 		// line isn't silently empty. URL-preview messages with text
 		// stay clean because this branch only fires when body == "".
-		if marker := renderHiddenPayloadMarker(msg, HiddenPayloadLimit); marker != "" {
+		if marker := renderHiddenPayloadMarker(msg, users, HiddenPayloadLimit); marker != "" {
 			b.WriteString(marker)
 		}
+	} else if fwd := renderForwards(msg, users, HiddenPayloadLimit); fwd != "" {
+		// A forward with a comment: the comment is the body, and the
+		// forwarded message used to be dropped from the line entirely.
+		b.WriteByte(' ')
+		b.WriteString(fwd)
 	}
 	if rs := renderReactions(msg.Reactions); rs != "" {
 		b.WriteByte(' ')

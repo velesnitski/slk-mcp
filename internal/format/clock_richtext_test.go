@@ -60,7 +60,7 @@ func TestBlocksText_RichTextBodyIsRendered(t *testing.T) {
 			{"type":"rich_text_section","elements":[{"type":"text","text":"first item"}]},
 			{"type":"rich_text_section","elements":[{"type":"text","text":"second item"}]}]}]}]`)
 
-	got := renderHiddenPayloadMarker(m, 0)
+	got := renderHiddenPayloadMarker(m, nil, 0)
 
 	for _, want := range []string{"Reminder: <@U0PEER0001> check the report:eyes:", "• first item", "• second item"} {
 		if !strings.Contains(got, want) {
@@ -75,7 +75,7 @@ func TestBlocksText_RichTextBodyIsRendered(t *testing.T) {
 func TestBlocksText_EmptyRichTextStillCounts(t *testing.T) {
 	m := richTextMessage(t, `[{"type":"rich_text","elements":[]}]`)
 
-	if got := renderHiddenPayloadMarker(m, 0); got != "[blocks: 1]" {
+	if got := renderHiddenPayloadMarker(m, nil, 0); got != "[blocks: 1]" {
 		t.Fatalf("no prose must keep the honest count, got %q", got)
 	}
 }

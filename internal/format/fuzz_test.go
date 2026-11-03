@@ -30,7 +30,7 @@ func FuzzRenderBlocks(f *testing.F) {
 		if json.Unmarshal([]byte(`{"type":"message","ts":"1700000000.000100","blocks":`+blocks+`}`), &m) != nil {
 			return
 		}
-		_ = renderHiddenPayloadMarker(m, 200)
+		_ = renderHiddenPayloadMarker(m, nil, 200)
 		_ = MessageLine(m, "sam")
 	})
 }
