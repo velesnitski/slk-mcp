@@ -83,6 +83,8 @@ func TestClassify(t *testing.T) {
 		{"for both teams", false, true, false, None},
 		{"больше ничего нет", true, true, false, None},
 		{"Пётр, возьму полдня больничного сегодня", true, true, false, None},
+		{"норм, дедлайн до завтра) мерси!", false, true, true, None},
+		{"спасибо, пришли пожалуйста до завтра", false, true, true, Ask},
 		{"беру отгул в пятницу, посмотри пожалуйста за меня", true, true, false, None},
 	}
 	for _, c := range cases {

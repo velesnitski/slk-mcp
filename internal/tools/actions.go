@@ -415,7 +415,7 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 	}
 	wg.Wait()
 
-	cutoffs := nextTurnCutoffs(items)
+	candidates := nextTurnCandidates(items)
 	for _, it := range items {
 		var msgs []goslack.Message
 		var ok bool
@@ -428,14 +428,19 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 			continue
 		}
 		item := actions.Msg{User: it.hit.User, Text: it.hit.Text, TS: it.ts}
-		follow := make([]actions.Msg, 0, len(msgs))
+		all := make([]actions.Msg, 0, len(msgs))
 		for _, m := range msgs {
 			am := toActionMsg(m)
 			if m.Timestamp == it.hit.Timestamp {
 				item.Reactions = am.Reactions
 				continue
 			}
-			if cut := cutoffs[it]; cut > 0 && am.TS >= cut {
+			all = append(all, am)
+		}
+		cut := turnCutoff(it, candidates[it], all, selfID)
+		follow := all[:0:0]
+		for _, am := range all {
+			if cut > 0 && am.TS >= cut {
 				continue // the next turn's reply, not this one's
 			}
 			follow = append(follow, am)
@@ -472,15 +477,11 @@ func channelAnswers(msgs []goslack.Message, ts float64, selfID string) []actions
 	return out
 }
 
-// nextTurnCutoffs bounds what may count as the reply to each commitment.
-// In one DM or thread, a reply after the operator's next request belongs
-// to that request, not to yesterday's: "предупредите, когда будет
-// свободно" answered today's ask, not the one before it. So an item's
-// follow-ups stop at the next item from the same side of the
-// conversation and of the same kind — the operator's next request for a
-// waiting item, their next promise for a promise, the asker's next ask or
-// question for an ask or a question.
-func nextTurnCutoffs(items []*actionItem) map[*actionItem]float64 {
+// nextTurnCandidates lists, per commitment, the later commitments that
+// may start a new turn: the next items of the same kind from the same
+// person in the same DM or thread. Whether one actually does depends on
+// what was said in between (turnCutoff).
+func nextTurnCandidates(items []*actionItem) map[*actionItem][]float64 {
 	type group struct{ channel, root string }
 	byGroup := map[group][]*actionItem{}
 	for _, it := range items {
@@ -490,19 +491,46 @@ func nextTurnCutoffs(items []*actionItem) map[*actionItem]float64 {
 		}
 		byGroup[g] = append(byGroup[g], it)
 	}
-	out := map[*actionItem]float64{}
+	out := map[*actionItem][]float64{}
 	for _, list := range byGroup {
 		sort.Slice(list, func(i, j int) bool { return list[i].ts < list[j].ts })
 		for i, it := range list {
 			for _, next := range list[i+1:] {
 				if next.hit.User == it.hit.User && family(next.kind) == family(it.kind) {
-					out[it] = next.ts
-					break
+					out[it] = append(out[it], next.ts)
 				}
 			}
 		}
 	}
 	return out
+}
+
+// turnCutoff bounds what may count as the reply to a commitment. A reply
+// after the next turn belongs to that turn: "предупредите, когда будет
+// свободно" answered today's ask, not yesterday's. But a follow-up from
+// the same person before the other side has said anything is the same
+// turn continued — a clarification after a question ("мы так и написали,
+// надо сказать что-то") must not cut the answer that came after both.
+// So the cutoff is the first candidate that the other side answered
+// something before; 0 means no cutoff.
+func turnCutoff(it *actionItem, candidates []float64, msgs []actions.Msg, selfID string) float64 {
+	otherSide := func(user string) bool {
+		if user == "" || user == "USLACKBOT" {
+			return false
+		}
+		if it.kind == actions.Ask || it.kind == actions.Question {
+			return user == selfID
+		}
+		return user != selfID
+	}
+	for _, c := range candidates {
+		for _, m := range msgs {
+			if m.TS > it.ts && m.TS < c && otherSide(m.User) {
+				return c
+			}
+		}
+	}
+	return 0
 }
 
 // family groups the kinds whose replies look alike: an ask and a

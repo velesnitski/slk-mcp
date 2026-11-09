@@ -88,7 +88,12 @@ func Classify(text string, own, addressed, dated bool) Kind {
 	if !addressed {
 		return None
 	}
-	if requestRe.MatchString(t) || dated {
+	if requestRe.MatchString(t) {
+		return Ask
+	}
+	if dated && !thanksRe.MatchString(t) {
+		// "норм, дедлайн до завтра) мерси!" thanks for something already
+		// delivered; the deadline is the writer's own, not a request.
 		return Ask
 	}
 	if strings.Contains(t, "?") {
@@ -265,6 +270,7 @@ var (
 	// absenceRe is a notice of time off: it reuses promise verbs ("возьму",
 	// "беру") but commits to nothing.
 	absenceRe = words(`больничн\p{L}*`, `отгул\p{L}*`, `отпуск\p{L}*`, `выходн\p{L}*`, `day off`, `sick leave`, `sick day`, `pto`, `vacation`, `out of office`)
+	thanksRe = words(`спасибо`, `спс`, `мерси`, `благодарю`, `thanks`, `thank you`, `thx`, `ty`)
 	urgentRe = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
 
 	relativeDays = []struct {

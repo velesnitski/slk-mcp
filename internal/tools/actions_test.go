@@ -217,3 +217,34 @@ func TestChannelAnswers(t *testing.T) {
 		t.Fatalf("got %+v, want only the post 10 minutes later", got)
 	}
 }
+
+// ADR 133: a follow-up from the asker before the operator has answered is
+// the same turn, so the answer after both settles the first question too.
+func TestRunMyActions_ClarificationIsTheSameTurn(t *testing.T) {
+	f := uaNewFakeSlack(t)
+	f.On("auth.test", uaAuthOK)
+	f.uaUsers(map[string]string{"U2": "alice"})
+	qTS := uaTS(-30*3600, 100)       // a question to me
+	clarTS := uaTS(-30*3600+60, 200) // her clarification with a request word
+	ansTS := uaTS(-30*3600+240, 300) // my answer after both
+	f.uaSearchByQuery(t, map[string][]map[string]any{
+		"to:me": {
+			uaHit("D2", "U2", clarTS, "U2", "мы так и написали, надо сказать что-то конкретное", ""),
+			uaHit("D2", "U2", qTS, "U2", "а общими словами это как?", ""),
+		},
+	})
+	f.uaHistory(t, map[string][]map[string]any{
+		"D2": {
+			uaMsg(ansTS, "U1", "тогда убираем, отвечу завтра подробно", nil),
+			uaMsg(clarTS, "U2", "мы так и написали, надо сказать что-то конкретное", nil),
+			uaMsg(qTS, "U2", "а общими словами это как?", nil),
+		},
+	})
+	h := uaHub(t, f)
+	p := actionDefaults()
+	p.due = "all"
+	out := resultText(h.runMyActions(context.Background(), p, ""))
+	if strings.Contains(out, "общими словами") {
+		t.Fatalf("the question was answered after the clarification:\n%s", out)
+	}
+}

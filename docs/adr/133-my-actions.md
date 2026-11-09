@@ -30,7 +30,7 @@ ignored.
   *waiting*; otherwise one that promises ("сделаю", "пришлю", "will
   investigate", "in process") is a *promise*;
 - a message to the operator that requests something, or names a
-  deadline, is an *ask*; one that only asks a question is a *question*.
+  deadline and does not just say thanks, is an *ask*; one that only asks a question is a *question*.
 
 **Not commitments**, whatever their words: messages from bot and app
 users and DMs with them, notes to self, reports (over 2000 characters
@@ -60,8 +60,10 @@ from the responsible side that says done or carries a file, closes it;
 any reply answers a question; any other reply from the responsible side
 only acknowledges it, and the item stays open showing that reply. In
 one DM or thread, an item's follow-ups stop at the next item of the
-same kind from the same person: a reply after the operator's next
-request answers that request, not the one before it. An ask or a
+same kind from the same person that the other side answered something
+before: a reply after the operator's next request answers that request,
+not the one before it, while a clarification sent before any answer is
+the same turn continued, and the answer after both settles both. An ask or a
 question at a channel's top level is also answered by the operator's own
 top-level post in that channel within three hours: such questions are
 usually answered in the channel, not in a thread. An
