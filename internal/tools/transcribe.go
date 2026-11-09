@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -188,15 +189,65 @@ func (p *sttPipeline) transcribeFile(ctx context.Context, audioPath, language st
 		wArgs = append(wArgs, "-l", language)
 	}
 	wArgs = append(wArgs, wav)
-	so, se, err := runCommand(ctx, p.whisper, wArgs...)
+	so, se, err := p.runWhisper(ctx, wArgs)
 	if err != nil {
-		return "", fmt.Errorf("whisper: %v: %s", err, firstErrLine(se))
+		return "", fmt.Errorf("whisper: %v: %s", err, whisperErrLine(se))
 	}
 	text := stripTimestamps(string(so))
 	if text == "" {
 		return "", fmt.Errorf("whisper produced no transcript (stderr: %s)", firstErrLine(se))
 	}
 	return text, nil
+}
+
+// whisperGPUBroken records that whisper's GPU backend failed on this
+// host and the CPU did not, so later runs go straight to the CPU instead
+// of paying for the crash every time.
+var whisperGPUBroken atomic.Bool
+
+// runWhisper runs whisper on the GPU and, when that fails, once more on
+// the CPU (-ng). A whisper.cpp build whose Metal backend cannot run the
+// model aborts while loading it ("pre-allocated tensor … in a buffer
+// (MTL0) that cannot run the operation"), for every file, while the CPU
+// path works. Only a CPU success marks the GPU broken: a bad model or
+// file fails both ways and leaves the GPU in use.
+func (p *sttPipeline) runWhisper(ctx context.Context, args []string) (stdout, stderr []byte, err error) {
+	cpu := append([]string{"-ng"}, args...)
+	if whisperGPUBroken.Load() {
+		return runCommand(ctx, p.whisper, cpu...)
+	}
+	so, se, err := runCommand(ctx, p.whisper, args...)
+	if err == nil || ctx.Err() != nil {
+		return so, se, err
+	}
+	cso, cse, cerr := runCommand(ctx, p.whisper, cpu...)
+	if cerr != nil {
+		return so, se, err // the GPU's error: the CPU's adds nothing
+	}
+	whisperGPUBroken.Store(true)
+	return cso, cse, nil
+}
+
+// assertLine is ggml's abort message: "src/ggml-backend.cpp:1089: …".
+var assertLine = regexp.MustCompile(`^\S+\.(?:c|cc|cpp|h|m|mm):\d+: `)
+
+// whisperErrLine picks the line of whisper's stderr that says what went
+// wrong. Its first line is model-loading noise ("whisper_init_from_file…
+// loading model"), so firstErrLine alone hides the cause: prefer ggml's
+// abort message, then a line naming an error, then the first line.
+func whisperErrLine(b []byte) string {
+	lines := strings.Split(string(b), "\n")
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); assertLine.MatchString(l) {
+			return l
+		}
+	}
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); strings.Contains(strings.ToLower(l), "error") {
+			return l
+		}
+	}
+	return firstErrLine(b)
 }
 
 // timestampPrefix matches the "[00:00:00.000 --> 00:00:07.000]" lead-in

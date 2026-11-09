@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such items stop showing as due today. Strong deadlines ("до завтра",
   "by Friday") are unchanged, and promises keep their own dates. See
   ADR 133.
+- **`transcribe_audio` works when whisper's GPU backend is broken.** A
+  whisper.cpp build that aborts loading the model on Metal failed every
+  transcription; a failed run is now retried once on the CPU, and once
+  the CPU works the GPU is skipped for the rest of the session. The
+  error names whisper's actual cause instead of its first, unrelated
+  log line. See ADR 134.
 
 ## [1.70.3] - 2026-11-09
 

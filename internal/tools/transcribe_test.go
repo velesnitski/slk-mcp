@@ -422,3 +422,72 @@ func TestTranscribeFile_SingleStreamKeepsPlainConversion(t *testing.T) {
 		t.Fatalf("single stream should use the plain -vn conversion, got: %v", convertArgs)
 	}
 }
+
+// metalAbort is the stderr of a whisper.cpp build whose GPU backend
+// cannot run the model: loading noise first, the cause in the middle.
+const metalAbort = "whisper_init_from_file_with_params_no_state: loading model from '/m'\n" +
+	"whisper_backend_init_gpu: using MTL0 backend\n" +
+	"src/ggml-backend.cpp:1089: pre-allocated tensor (leaf_0) in a buffer (MTL0) that cannot run the operation (NONE)\n" +
+	"WARNING: Using native backtrace.\n" +
+	"1   libggml-base.dylib  0x0 ggml_abort + 156\n"
+
+func TestTranscribeFile_FallsBackToCPUWhenTheGPUAborts(t *testing.T) {
+	t.Cleanup(func() { whisperGPUBroken.Store(false) })
+	var whisperArgs [][]string
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if !strings.Contains(name, "whisper") {
+			return nil, nil, nil
+		}
+		whisperArgs = append(whisperArgs, args)
+		if args[0] != "-ng" {
+			return nil, []byte(metalAbort), errors.New("signal: abort trap")
+		}
+		return []byte("[00:00:00.000 --> 00:00:02.000]  привет\n"), nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/whisper-cli", model: "/m"}
+
+	text, err := p.transcribeFile(context.Background(), "/tmp/a.m4a", "ru")
+	if err != nil || text != "привет" {
+		t.Fatalf("the CPU run should give the transcript, got %q, %v", text, err)
+	}
+	if len(whisperArgs) != 2 {
+		t.Fatalf("want a GPU run then a CPU run, got %v", whisperArgs)
+	}
+	// The next file goes straight to the CPU.
+	if _, err := p.transcribeFile(context.Background(), "/tmp/b.m4a", "ru"); err != nil {
+		t.Fatal(err)
+	}
+	if len(whisperArgs) != 3 || whisperArgs[2][0] != "-ng" {
+		t.Fatalf("a broken GPU is not tried again, got %v", whisperArgs)
+	}
+}
+
+func TestTranscribeFile_FailingBothWaysNamesTheCause(t *testing.T) {
+	t.Cleanup(func() { whisperGPUBroken.Store(false) })
+	withSTTStubs(t, nil, func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if strings.Contains(name, "whisper") {
+			return nil, []byte(metalAbort), errors.New("signal: abort trap")
+		}
+		return nil, nil, nil
+	})
+	p := &sttPipeline{ffmpeg: "/bin/ffmpeg", whisper: "/bin/whisper-cli", model: "/m"}
+	_, err := p.transcribeFile(context.Background(), "/tmp/a.m4a", "ru")
+	if err == nil || !strings.Contains(err.Error(), "pre-allocated tensor") {
+		t.Fatalf("the error should carry ggml's abort message, got %v", err)
+	}
+	if whisperGPUBroken.Load() {
+		t.Fatal("a failure on both backends says nothing about the GPU")
+	}
+}
+
+func TestWhisperErrLine(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{metalAbort, "src/ggml-backend.cpp:1089: pre-allocated tensor (leaf_0) in a buffer (MTL0) that cannot run the operation (NONE)"},
+		{"whisper_init: loading\nerror: failed to open 'x.wav'\n", "error: failed to open 'x.wav'"},
+		{"just one line\n", "just one line"},
+	} {
+		if got := whisperErrLine([]byte(c.in)); got != c.want {
+			t.Errorf("whisperErrLine(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
