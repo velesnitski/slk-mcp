@@ -337,9 +337,17 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 	type key struct{ channel, root string }
 	threads := map[key]bool{}
 	dmOldest := map[string]float64{}
+	chanOldest := map[string]float64{}
 	for _, it := range items {
 		if !it.dm || it.root != it.hit.Timestamp {
 			threads[key{it.channel(), it.root}] = true
+			if !it.dm && it.root == it.hit.Timestamp && (it.kind == actions.Ask || it.kind == actions.Question) {
+				// Asked at a channel's top level, it is often answered
+				// there too rather than in a thread.
+				if o, ok := chanOldest[it.channel()]; !ok || it.ts < o {
+					chanOldest[it.channel()] = it.ts
+				}
+			}
 			continue
 		}
 		if o, ok := dmOldest[it.channel()]; !ok || it.ts < o {
@@ -350,7 +358,20 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 	var mu sync.Mutex
 	threadMsgs := map[key][]goslack.Message{}
 	dmMsgs := map[string][]goslack.Message{}
-	jobs := make(chan func(), len(threads)+len(dmOldest))
+	chanMsgs := map[string][]goslack.Message{}
+	jobs := make(chan func(), len(threads)+len(dmOldest)+len(chanOldest))
+	for ch, oldest := range chanOldest {
+		ch, oldest := ch, oldest
+		jobs <- func() {
+			msgs, err := h.Messages().History(ctx, slack.HistoryParams{ChannelID: ch, OldestTS: oldest, Limit: 200})
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			chanMsgs[ch] = msgs
+			mu.Unlock()
+		}
+	}
 	for k := range threads {
 		k := k
 		jobs <- func() {
@@ -419,6 +440,9 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 			}
 			follow = append(follow, am)
 		}
+		if !it.dm && it.root == it.hit.Timestamp {
+			follow = append(follow, channelAnswers(chanMsgs[it.channel()], it.ts, selfID)...)
+		}
 		it.outcome = actions.Resolve(it.kind, item, follow, selfID)
 		if !direct(it, selfID) {
 			// Put to several people, it is answered when any of them
@@ -427,6 +451,25 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 		}
 		it.checked = true
 	}
+}
+
+// channelAnswerWindow is how soon after a top-level channel question the
+// operator's own top-level message in that channel counts as the answer.
+// Longer, and an unrelated later post would settle it.
+const channelAnswerWindow = 3 * 3600.0
+
+// channelAnswers picks the operator's top-level posts in a channel within
+// channelAnswerWindow after ts: "демка на 11:30?" is usually answered in
+// the channel, not in a thread, and the thread read alone missed it.
+func channelAnswers(msgs []goslack.Message, ts float64, selfID string) []actions.Msg {
+	var out []actions.Msg
+	for _, m := range msgs {
+		am := toActionMsg(m)
+		if m.User == selfID && am.TS > ts && am.TS <= ts+channelAnswerWindow && (m.ThreadTimestamp == "" || m.ThreadTimestamp == m.Timestamp) {
+			out = append(out, am)
+		}
+	}
+	return out
 }
 
 // nextTurnCutoffs bounds what may count as the reply to each commitment.

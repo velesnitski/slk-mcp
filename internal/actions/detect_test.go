@@ -82,6 +82,8 @@ func TestClassify(t *testing.T) {
 		{"прошу проверить", false, false, false, None},
 		{"for both teams", false, true, false, None},
 		{"больше ничего нет", true, true, false, None},
+		{"Пётр, возьму полдня больничного сегодня", true, true, false, None},
+		{"беру отгул в пятницу, посмотри пожалуйста за меня", true, true, false, None},
 	}
 	for _, c := range cases {
 		if got := Classify(c.text, c.own, c.addr, c.dated); got != c.want {

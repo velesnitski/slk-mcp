@@ -36,7 +36,9 @@ ignored.
 users and DMs with them, notes to self, reports (over 2000 characters
 or 15 lines — digests and status write-ups, whose "urgent" is content;
 a commitment with a short list stays in), and a group
-chat's messages unless they @-mention the operator.
+chat's messages unless they @-mention the operator. A notice of time
+off ("возьму полдня больничного", "беру отгул") reuses promise verbs but
+owes nothing, so it is not a promise.
 
 **Deadlines** are read relative to the message's own time: "завтра /
 tomorrow / tmrw", "послезавтра", weekdays after a preposition ("до
@@ -56,9 +58,13 @@ heading a daily report — are not deadlines.
 DM from its oldest commitment on: a done reaction, or a later message
 from the responsible side that says done or carries a file, closes it;
 any reply answers a question; any other reply from the responsible side
-only acknowledges it, and the item stays open showing that reply. In one DM or thread, an item's follow-ups stop at the next item of the
+only acknowledges it, and the item stays open showing that reply. In
+one DM or thread, an item's follow-ups stop at the next item of the
 same kind from the same person: a reply after the operator's next
-request answers that request, not the one before it. An
+request answers that request, not the one before it. An ask or a
+question at a channel's top level is also answered by the operator's own
+top-level post in that channel within three hours: such questions are
+usually answered in the channel, not in a thread. An
 ask or question put to several people is answered when any of them
 other than the operator replies. An acknowledged item two days past its
 date is no longer listed for today: the moment has passed. The
@@ -82,12 +88,13 @@ and the output says that an unusually worded commitment can be missed.
 ## Consequences
 
 - One call answers "what do I owe today and whom do I ping".
-- In a DM, a later reply is matched to every commitment before it, so
-  "готово" about one thing can close another in the same DM. Channel
-  commitments are judged from their thread only; a reply posted to the
-  channel instead of the thread is not seen.
+- In a DM, a reply counts only until the next commitment of the same
+  kind from the same person, so "готово" about one thing rarely closes
+  another. A channel commitment is judged from its thread, plus, for a
+  top-level ask or question, the operator's top-level posts in the next
+  three hours; a later unrelated post is not taken for an answer.
 - A query reads at most 300 hits; when the operator's own messages fill
   them, the output says older commitments may be missing.
-- The calls are bounded: three searches of up to three pages, plus one read per thread and per
-  DM holding a commitment, capped by `limit` (default 60) and the sweep
+- The calls are bounded: three searches of up to three pages, plus one
+  read per thread, per DM and per channel holding a commitment, capped by `limit` (default 60) and the sweep
   deadline.

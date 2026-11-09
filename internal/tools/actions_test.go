@@ -196,3 +196,24 @@ func TestRunMyActions_ReadsSeveralSearchPages(t *testing.T) {
 		t.Fatalf("300 own messages still fill the window, and the output says so:\n%s", out)
 	}
 }
+
+// ADR 133: a question asked at a channel's top level is answered by the
+// operator's own top-level post there soon after, not only in a thread.
+func TestChannelAnswers(t *testing.T) {
+	msg := func(ts, user, threadTS string) goslack.Message {
+		var m goslack.Message
+		m.Timestamp, m.User, m.ThreadTimestamp = ts, user, threadTS
+		return m
+	}
+	msgs := []goslack.Message{
+		msg("1000.000100", "U1", ""),            // before the question
+		msg("2000.000100", "U2", ""),            // someone else
+		msg("2600.000100", "U1", ""),            // my answer, 10 min later
+		msg("2700.000100", "U1", "2650.000100"), // my reply in another thread
+		msg("20000.000100", "U1", ""),           // hours later, unrelated
+	}
+	got := channelAnswers(msgs, 2000.0001, "U1")
+	if len(got) != 1 || got[0].TS != 2600.0001 {
+		t.Fatalf("got %+v, want only the post 10 minutes later", got)
+	}
+}

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.70.1] - 2026-11-09
+
+### Fixed
+
+- **`get_my_actions` no longer lists a notice of time off as a promise.**
+  "возьму полдня больничного" or "беру отгул" commits to nothing.
+- **A question asked at a channel's top level counts as answered** when
+  the operator posts in that channel within three hours, not only when
+  they reply in its thread. See ADR 133.
+
 ## [1.70.0] - 2026-11-03
 
 ### Added
