@@ -17,7 +17,7 @@ morning unless someone converts it to a date.
 A tool, `get_my_actions`, built on a pure package `internal/actions`.
 
 **Sources.** Per workspace, three searches run side by side, each read
-up to three pages of 100 (an active operator sends more than 100
+up to five pages of 100 (an active operator sends several hundred
 messages a week): `from:me`
 and the two mention queries (`to:me` and the operator's @handle, see
 `slack.MentionQueries`), over the last `days` (default 7). Bot messages are
@@ -81,7 +81,8 @@ channel message mentioning only them) and requests nobody moved for
 one's reply; `due=week` looks seven days ahead; `due=all` lists every
 open item. Each line shows the deadline badge, the kind, who and where,
 the text, the phrase the date was read from, the acknowledging reply if
-any, and the permalink. Counts of closed, undated and unchecked items
+any – the first reply, which is the one that answers it, or the reply
+that closed it – and the permalink. Counts of closed, undated and unchecked items
 follow.
 
 No model is used: the rules are fast, free, deterministic and testable,
@@ -95,8 +96,9 @@ and the output says that an unusually worded commitment can be missed.
   another. A channel commitment is judged from its thread, plus, for a
   top-level ask or question, the operator's top-level posts in the next
   three hours; a later unrelated post is not taken for an answer.
-- A query reads at most 300 hits; when the operator's own messages fill
-  them, the output says older commitments may be missing.
+- A query reads at most 500 hits; when a search fills them, the output
+  names the date it actually reached back to, so the reader knows how
+  much of the window was covered.
 - The calls are bounded: three searches of up to three pages, plus one
   read per thread, per DM and per channel holding a commitment, capped by `limit` (default 60) and the sweep
   deadline.

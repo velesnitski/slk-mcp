@@ -206,8 +206,15 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 	items = dropAnsweringPromises(items)
 
 	var truncated []string
-	if len(hits[0]) >= searchPageMax*searchPages {
-		truncated = append(truncated, "your messages")
+	for i, hs := range hits {
+		if len(hs) < searchPageMax*searchPages {
+			continue
+		}
+		what := "messages to you"
+		if i == 0 {
+			what = "your messages"
+		}
+		truncated = append(truncated, fmt.Sprintf("%s only since %s", what, oldestHit(hs).Format("02.01 15:04")))
 	}
 	return h.renderActions(ctx, items, p, selfID, truncated) + sw.note(false), nil
 }
@@ -217,7 +224,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 // than 100 messages in a week.
 const (
 	searchPageMax = 100
-	searchPages   = 3
+	searchPages   = 5
 )
 
 // isReport reports whether a message is a report — an automated daily
@@ -226,6 +233,18 @@ const (
 // list; a report runs to many lines or thousands of characters.
 func isReport(text string) bool {
 	return len([]rune(text)) > 2000 || strings.Count(text, "\n") > 15
+}
+
+// oldestHit is the time of the oldest search hit, the real start of the
+// window a truncated search covered.
+func oldestHit(hits []goslack.SearchMessage) time.Time {
+	var oldest time.Time
+	for _, m := range hits {
+		if t := format.ParseTS(m.Timestamp); !t.IsZero() && (oldest.IsZero() || t.Before(oldest)) {
+			oldest = t
+		}
+	}
+	return oldest
 }
 
 // classifyHits turns search hits into commitments: own messages that
@@ -711,7 +730,7 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 		notes = append(notes, fmt.Sprintf("%d not checked for replies (shown as open)", unchecked))
 	}
 	if len(truncated) > 0 {
-		notes = append(notes, "search hit its page limit for "+strings.Join(truncated, ", ")+" — older commitments may be missing; lower days")
+		notes = append(notes, fmt.Sprintf("search page limit (%d hits) reached: read %s — older commitments may be missing; lower days to cover the window fully", searchPageMax*searchPages, strings.Join(truncated, ", ")))
 	}
 	if len(notes) > 0 {
 		b.WriteString(strings.Join(notes, " · "))

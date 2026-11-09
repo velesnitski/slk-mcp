@@ -60,3 +60,22 @@ func TestAnsweredByOther(t *testing.T) {
 		t.Fatalf("waiting items are not settled by others: %+v", o)
 	}
 }
+
+// ADR 133: the reply shown is the first one, which answers the item; a
+// later reply in a running DM is as often about something else.
+func TestResolve_ShowsTheFirstReply(t *testing.T) {
+	o := Resolve(Waiting, Msg{User: "U1", TS: 100}, []Msg{
+		{User: "U2", Text: "Токио – гуд, для основной планеты?", TS: 101},
+		{User: "U2", Text: "не понимает, чего не работает", TS: 105},
+	}, "U1")
+	if o.Status != Acked || o.Reply != "Токио – гуд, для основной планеты?" || o.Replies != 2 {
+		t.Fatalf("got %+v", o)
+	}
+	o = Resolve(Waiting, Msg{User: "U1", TS: 100}, []Msg{
+		{User: "U2", Text: "смотрю", TS: 101},
+		{User: "U2", Text: "готово", TS: 105},
+	}, "U1")
+	if o.Status != Closed || o.Reply != "готово" {
+		t.Fatalf("a done reply is the one shown: %+v", o)
+	}
+}

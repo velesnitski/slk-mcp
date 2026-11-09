@@ -270,8 +270,8 @@ var (
 	// absenceRe is a notice of time off: it reuses promise verbs ("возьму",
 	// "беру") but commits to nothing.
 	absenceRe = words(`больничн\p{L}*`, `отгул\p{L}*`, `отпуск\p{L}*`, `выходн\p{L}*`, `day off`, `sick leave`, `sick day`, `pto`, `vacation`, `out of office`)
-	thanksRe = words(`спасибо`, `спс`, `мерси`, `благодарю`, `thanks`, `thank you`, `thx`, `ty`)
-	urgentRe = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
+	thanksRe  = words(`спасибо`, `спс`, `мерси`, `благодарю`, `thanks`, `thank you`, `thx`, `ty`)
+	urgentRe  = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
 
 	relativeDays = []struct {
 		re     *regexp.Regexp

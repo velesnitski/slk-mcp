@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.70.3] - 2026-11-09
+
+### Fixed
+
+- **`get_my_actions` shows the reply that answered an item**, the first
+  one, instead of the latest message in a running DM, which was often
+  about something else. A reply that closed the item is still the one
+  shown.
+- **A truncated search says how far back it reached.** Searches read up
+  to five pages of 100 instead of three, and when a search still fills
+  them the output names the date of its oldest hit instead of a generic
+  warning. See ADR 133.
+
 ## [1.70.2] - 2026-11-09
 
 ### Fixed

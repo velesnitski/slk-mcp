@@ -166,7 +166,7 @@ func TestRunMyActions_ReadsSeveralSearchPages(t *testing.T) {
 	f := uaNewFakeSlack(t)
 	f.On("auth.test", uaAuthOK)
 	pages := map[string][]map[string]any{}
-	for p := 1; p <= 3; p++ {
+	for p := 1; p <= searchPages; p++ {
 		var hits []map[string]any
 		for i := 0; i < searchPageMax; i++ {
 			hits = append(hits, uaHit("C1", "alpha", uaTS(-int64(p*1000+i), i), "U1", "plain note", ""))
@@ -183,16 +183,17 @@ func TestRunMyActions_ReadsSeveralSearchPages(t *testing.T) {
 			page = "1" // slack-go leaves the default page out
 		}
 		return uaJSON(t, map[string]any{"ok": true, "messages": map[string]any{
-			"matches": pages[page], "total": 300,
-			"paging": map[string]any{"count": 100, "total": 300, "page": 1, "pages": 3},
+			"matches": pages[page], "total": searchPageMax * searchPages,
+			"paging": map[string]any{"count": searchPageMax, "total": searchPageMax * searchPages, "page": 1, "pages": searchPages},
 		}})
 	})
 	h := uaHub(t, f)
 	out := resultText(h.runMyActions(context.Background(), actionDefaults(), ""))
-	if n := f.CountOf("search.messages"); n != 3+2 {
-		t.Fatalf("search.messages called %d times, want 3 pages of from:me + 2 mention queries", n)
+	if n := f.CountOf("search.messages"); n != searchPages+2 {
+		t.Fatalf("search.messages called %d times, want %d pages of from:me + 2 mention queries", n, searchPages)
 	}
-	if !strings.Contains(out, "search hit its page limit") {
+	// The note says how far back the truncated search actually reached.
+	if !strings.Contains(out, "search page limit") || !strings.Contains(out, "your messages only since ") {
 		t.Fatalf("300 own messages still fill the window, and the output says so:\n%s", out)
 	}
 }

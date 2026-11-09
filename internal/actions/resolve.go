@@ -75,10 +75,15 @@ func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 			continue
 		}
 		out.Replies++
-		out.By, out.Reply, out.At = m.User, m.Text, m.TS
+		if out.Replies == 1 {
+			// The first reply is the one that answers it; later ones in a
+			// running DM are as often about something else.
+			out.By, out.Reply, out.At = m.User, m.Text, m.TS
+		}
 		switch {
 		case Done(m.Text) || m.Files:
 			out.Status = Closed
+			out.By, out.Reply, out.At = m.User, m.Text, m.TS
 			return out
 		case kind == Question:
 			out.Status = Answered
