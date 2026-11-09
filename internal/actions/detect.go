@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Kind is what a message commits someone to.
@@ -117,7 +119,16 @@ var DoneReactions = map[string]bool{
 
 // Due finds the earliest deadline the text names, read relative to when
 // it was written: "до завтра" said yesterday is due today.
-func Due(text string, at time.Time) Deadline {
+func Due(text string, at time.Time) Deadline { return due(text, at, false) }
+
+// DueOfRequest is Due for a request — an ask, a question or the
+// operator's own request of someone — where a weak date often belongs to
+// something other than the request: the writer's own plan ("завтра
+// вышлю файл, посмотри") or the topic of a question ("обзор завтра?").
+// Such a weak date is not a deadline; strong ones stand.
+func DueOfRequest(text string, at time.Time) Deadline { return due(text, at, true) }
+
+func due(text string, at time.Time, request bool) Deadline {
 	t := normalize(text)
 	day := midnight(at)
 	// The earliest strong deadline wins; a weak one counts only when
@@ -125,6 +136,9 @@ func Due(text string, at time.Time) Deadline {
 	var best Deadline
 	consider := func(d time.Time, phrase string, strong bool) {
 		if d.IsZero() || d.Before(day) {
+			return
+		}
+		if request && !strong && weakNarrates(t, phrase) {
 			return
 		}
 		if best.IsZero() || (strong && !best.Strong) || (strong == best.Strong && d.Before(best.Day)) {
@@ -181,6 +195,43 @@ func Due(text string, at time.Time) Deadline {
 		}
 	}
 	return best
+}
+
+// weakNarrates reports whether a weak date phrase in a request belongs
+// to something else: a clause where the writer promises their own action
+// ("мы сегодня отправим"), or a question that asks for nothing ("мит
+// сегодня?" asks about the meeting; "можешь сегодня?" sets a deadline).
+func weakNarrates(t, phrase string) bool {
+	// The match carries its boundary characters: "сегодня?" → "сегодня".
+	phrase = strings.TrimFunc(phrase, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	i := strings.Index(t, phrase)
+	if i < 0 {
+		return false
+	}
+	j := i + len(phrase)
+	// " - " joins clauses like a comma; the swap keeps byte offsets.
+	if promiseRe.MatchString(clause(strings.ReplaceAll(t, " - ", " ; "), i, j, ".!?\n;,—–")) {
+		return true
+	}
+	end := strings.IndexAny(t[j:], ".!?\n")
+	if end < 0 || t[j+end] != '?' {
+		return false
+	}
+	return !requestRe.MatchString(clause(t, i, j, ".!?\n"))
+}
+
+// clause is the part of t around [i, j) between the nearest separators
+// from seps on either side.
+func clause(t string, i, j int, seps string) string {
+	start := 0
+	if k := strings.LastIndexAny(t[:i], seps); k >= 0 {
+		_, size := utf8.DecodeRuneInString(t[k:])
+		start = k + size
+	}
+	if k := strings.IndexAny(t[j:], seps); k >= 0 {
+		return t[start : j+k]
+	}
+	return t[start:]
 }
 
 func normalize(s string) string {
@@ -243,7 +294,7 @@ var (
 		`сделаю`, `пришлю`, `подготовлю`, `посмотрю`, `проверю`, `отправлю`, `напишу`,
 		`скину`, `дам знать`, `вернусь`, `займусь`, `беру`, `возьму`, `уточню`, `уточняю`,
 		`разберусь`, `доделаю`, `допишу`, `соберу`, `оформлю`, `передам`, `подготовим`,
-		`сделаем`, `пришлем`, `посмотрим`, `проверим`, `в процессе`, `в работе`, `принял`,
+		`сделаем`, `пришлем`, `посмотрим`, `отправим`, `вышлем`, `вышлю`, `скинем`, `напишем`, `сообщим`, `сообщу`, `проверим`, `в процессе`, `в работе`, `принял`,
 		`i'?ll`, `i will`, `we'?ll`, `we will`, `will (?:do|send|check|look|investigate|prepare|share|update|follow up|get back|ping|fix|review|come back)`,
 		`on it`, `let me (?:check|look|see)`, `in process`, `in progress`, `will do`,
 	)

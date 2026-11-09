@@ -104,7 +104,7 @@ func TestDoneAndAck(t *testing.T) {
 }
 
 func FuzzDue(f *testing.F) {
-	for _, s := range []string{"до 31.02", "через 99 дней", "until frriday", "deadline: 5/13/2026", "к 0 ноября"} {
+	for _, s := range []string{"до 31.02", "через 99 дней", "until frriday", "deadline: 5/13/2026", "к 0 ноября", "мы — сегодня отправим?"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
@@ -113,6 +113,9 @@ func FuzzDue(f *testing.F) {
 			t.Fatalf("Due(%q) = %v, before the message", s, d.Day)
 		}
 		_ = Classify(s, false, true, !d.IsZero())
+		if r := DueOfRequest(s, mon); !r.IsZero() && r.Day.Before(day(11, 2)) {
+			t.Fatalf("DueOfRequest(%q) = %v, before the message", s, r.Day)
+		}
 	})
 }
 
@@ -141,5 +144,31 @@ func TestDue_Strong(t *testing.T) {
 	}
 	if got := Due("в пятницу созвон, а до среды пришли план", mon); !got.Strong || !got.Day.Equal(day(11, 4)) {
 		t.Errorf("a strong deadline beats an earlier weak one: %+v", got)
+	}
+}
+
+// ADR 133: in a request, a weak date that belongs to the writer's own
+// plan or to the topic of a question is not the request's deadline.
+func TestDueOfRequest(t *testing.T) {
+	cases := []struct {
+		text string
+		due  bool
+	}{
+		{"Коллеги, сегодня вышлем макеты - гляньте потом", false},
+		{"я завтра вышлю файл, посмотри потом", false},
+		{"доброе утро - демо в пятницу? что показываем?", false},
+		{"обзор завтра?", false},
+		{"можешь посмотреть сегодня?", true},
+		{"посмотри завтра, я пришлю ссылку", true},
+		{"нужен отчёт сегодня", true},
+		{"мы отправим, а ты пришли до завтра", true}, // a strong deadline stands
+	}
+	for _, c := range cases {
+		if got := DueOfRequest(c.text, mon); got.IsZero() == c.due {
+			t.Errorf("DueOfRequest(%q) = %+v, want a deadline: %v", c.text, got, c.due)
+		}
+	}
+	if got := Due("я завтра вышлю файл", mon); got.IsZero() {
+		t.Error("a promise keeps its own date")
 	}
 }

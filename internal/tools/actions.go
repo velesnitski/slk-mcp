@@ -288,6 +288,9 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 		if kind == actions.None {
 			return
 		}
+		if kind != actions.Promise && !due.Strong {
+			due = actions.DueOfRequest(m.Text, at)
+		}
 		out = append(out, &actionItem{
 			kind: kind, hit: m, ts: ts, at: at, root: format.ExtractThreadTS(m), dm: dm, due: due,
 		})

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.70.4] - 2026-11-09
+
+### Fixed
+
+- **`get_my_actions` no longer reads a request's deadline from a date
+  that belongs to something else.** In a request, a weak date ("сегодня",
+  "завтра", "в пятницу") in a clause where the writer promises their own
+  action ("we'll send the mockups today, take a look") or in a question
+  that asks for nothing ("the demo on Friday?") is not the deadline, so
+  such items stop showing as due today. Strong deadlines ("до завтра",
+  "by Friday") are unchanged, and promises keep their own dates. See
+  ADR 133.
+
 ## [1.70.3] - 2026-11-09
 
 ### Fixed

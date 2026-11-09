@@ -51,7 +51,14 @@ A deadline set with a preposition ("до пятницы", "until tmrw", "by
 15.11") or as urgent is strong; a bare "завтра" or "в пятницу" is weak,
 because it narrates as often ("доклад завтра", "открыли в пятницу"). Only
 a strong deadline makes a message an ask by itself, and a strong deadline
-beats an earlier weak one. Dates without a preposition — the "03.11.26"
+beats an earlier weak one. In a request – an ask, a question, or the
+operator's own request of someone – a weak date often belongs to
+something else, so it is dropped when its clause promises the writer's
+own action ("сегодня вышлем макеты, гляньте": the sending is
+theirs, the review has no date) or when it sits in a question that asks
+for nothing ("демо в пятницу?" asks about the demo; "можешь
+сегодня?" still sets a deadline). A promise keeps its weak date: there
+the date is the promise. Dates without a preposition — the "03.11.26"
 heading a daily report — are not deadlines.
 
 **Status** comes from what followed, read once per thread and once per
@@ -99,6 +106,6 @@ and the output says that an unusually worded commitment can be missed.
 - A query reads at most 500 hits; when a search fills them, the output
   names the date it actually reached back to, so the reader knows how
   much of the window was covered.
-- The calls are bounded: three searches of up to three pages, plus one
+- The calls are bounded: three searches of up to five pages, plus one
   read per thread, per DM and per channel holding a commitment, capped by `limit` (default 60) and the sweep
   deadline.
