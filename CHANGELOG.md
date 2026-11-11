@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`post_message` tags user groups.** `@tech-leads` becomes a group
   mention when no person has that name.
 
+### Fixed
+
+- **The user list loads on large workspaces again.** Slack failed
+  `users.list` with `fatal_error` once profiles carried emails, which
+  broke `list_users`, mentions and user groups. A failed listing now
+  retries with smaller pages. See ADR 139.
+
 ## [1.72.0] - 2026-11-11
 
 ### Added

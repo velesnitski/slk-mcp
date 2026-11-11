@@ -22,6 +22,20 @@ import (
 // See ADR 093.
 const userResolveRetryAfter = time.Minute
 
+// userPageSize is the users.list page Slack documents; userPageFloor is
+// the smallest page List falls back to when Slack fails a heavy page.
+const (
+	userPageSize  = 200
+	userPageFloor = 25
+)
+
+// pageTooHeavy reports a users.list failure that a smaller page can
+// avoid: Slack's server-side errors, not auth, scope or rate limits.
+func pageTooHeavy(err error) bool {
+	e := err.Error()
+	return strings.Contains(e, "fatal_error") || strings.Contains(e, "internal_error") || strings.Contains(e, "request_timeout")
+}
+
 // UserService resolves Slack user IDs to display names with an in-memory cache.
 //
 // Successful resolutions are cached for the life of the process — display
@@ -101,9 +115,22 @@ func (s *UserService) NamesFor(ctx context.Context, userIDs []string) map[string
 // List returns all non-deleted workspace users. Pagination is
 // handled internally; one users.list call per 200-user page.
 func (s *UserService) List(ctx context.Context) ([]goslack.User, error) {
-	us, err := ratelimit.DoR(ctx, s.log, func() ([]goslack.User, error) {
-		return s.api.GetUsersContext(ctx, goslack.GetUsersOptionLimit(200))
-	})
+	var us []goslack.User
+	var err error
+	// Slack answers users.list with fatal_error when a page of profiles is
+	// too heavy for it – seen on a large workspace once users:read.email
+	// was granted and every profile grew an email. A smaller page goes
+	// through, so a failed listing starts over at half the page size,
+	// down to userPageFloor. See ADR 139.
+	for limit := userPageSize; ; limit /= 2 {
+		us, err = ratelimit.DoR(ctx, s.log, func() ([]goslack.User, error) {
+			return s.api.GetUsersContext(ctx, goslack.GetUsersOptionLimit(limit))
+		})
+		if err == nil || !pageTooHeavy(err) || limit/2 < userPageFloor || ctx.Err() != nil {
+			break
+		}
+		s.log.Warn("users.list failed; retrying with smaller pages", "limit", limit/2, "err", err)
+	}
 	if err != nil {
 		return nil, err
 	}
