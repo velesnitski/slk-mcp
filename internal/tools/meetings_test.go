@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,10 +175,15 @@ func TestRunMyActions_MergesMeetings(t *testing.T) {
 
 	slackPromise := uaHit("D2", "U2", promiseTS, "U1", "Pat, пришлю бюджет по серверам завтра", "https://x.slack.com/archives/D2/p1")
 	linkDM := uaHit("D3", "U3", linkTS, "U1", "вот: https://example.com/video", "https://x.slack.com/archives/D3/p2")
-	var queries []string
+	var (
+		queriesMu sync.Mutex
+		queries   []string
+	)
 	f.OnFunc("search.messages", func(r *http.Request) string {
 		q := r.Form.Get("query")
+		queriesMu.Lock()
 		queries = append(queries, q)
+		queriesMu.Unlock()
 		switch {
 		case strings.Contains(q, "in:@sam.lee"):
 			return uaJSON(t, map[string]any{"ok": true, "messages": map[string]any{"matches": []any{linkDM}, "total": 1}})
@@ -224,7 +230,10 @@ func TestRunMyActions_MergesMeetings(t *testing.T) {
 			t.Errorf("%q must not be listed:\n%s", not, out)
 		}
 	}
-	if !strings.Contains(strings.Join(queries, "|"), "from:me in:@sam.lee after:") {
+	queriesMu.Lock()
+	joined := strings.Join(queries, "|")
+	queriesMu.Unlock()
+	if !strings.Contains(joined, "from:me in:@sam.lee after:") {
 		t.Errorf("the DM with the counterpart must be searched, queries=%v", queries)
 	}
 }
