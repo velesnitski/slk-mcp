@@ -171,6 +171,10 @@ func due(text string, at time.Time, request bool) Deadline {
 		// Friday of the week after this one.
 		consider(weekdayOnOrAfter(day.AddDate(0, 0, 1), time.Monday).AddDate(0, 0, 4), m, false)
 	}
+	if m := monthEndRe.FindString(t); m != "" {
+		// Day 0 of next month is the last day of this one.
+		consider(time.Date(day.Year(), day.Month()+1, 0, 0, 0, 0, 0, day.Location()), m, true)
+	}
 	for _, m := range weekdayRe.FindAllStringSubmatch(t, -1) {
 		if wd, ok := weekdayOf(m[2]); ok {
 			consider(weekdayOnOrAfter(day, wd), m[0], isStrongPrep(m[1]))
@@ -331,7 +335,7 @@ var (
 	}{
 		{words(`послезавтра`, `day after tomorrow`), 2, false},
 		{regexp.MustCompile(wb + `(?:завтра|завтрашн\p{L}*|tomorrow|tomorow|tmrw|tmr|tmrow)` + web), 1, false},
-		{words(`tonight`, `eod`, `end of day`, `до конца дня`, `к концу дня`, `до вечера`, `до сегодня`, `by today`), 0, true},
+		{words(`tonight`, `eod`, `end of day`, `до конца дня`, `к концу дня`, `до вечера`, `к вечеру`, `до сегодня`, `by today`), 0, true},
 	}
 	// strongPrepRe finds a deadline preposition right before the end of
 	// the text it is given: "до завтра", "until tmrw", "к завтрашнему".
@@ -343,6 +347,8 @@ var (
 	inDaysRe   = regexp.MustCompile(wb + `(?:через|in|within)\s+(\d{1,2})\s+(дн\p{L}*|день|days?|недел\p{L}*|weeks?)` + web)
 	thisWeekRe = words(`на этой неделе`, `до конца недели`, `к концу недели`, `this week`, `end of (?:the )?week`, `eow`, `by the weekend`)
 	nextWeekRe = words(`на следующей неделе`, `next week`)
+	// monthEndRe is an explicit end: the month's last day.
+	monthEndRe = words(`до конца месяца`, `к концу месяца`, `end of (?:the |this )?month`, `eom`)
 
 	prep      = `(?:до|к|ко|в|во|на|by|until|till|til|before|on|this|next|deadline|дедлайн|срок)`
 	datePrep  = `(?:до|к|ко|by|until|till|til|before|on|deadline|дедлайн|срок)`

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.73.1] - 2026-11-11
+
+### Fixed
+
+- **Deadline parity with wispr-mcp.** «к вечеру», «к концу месяца» and
+  "by end of month" now resolve to a due day, as they already did in
+  wispr-mcp. Both repositories test the same phrase table, so a
+  commitment made in a meeting and repeated in Slack gets one deadline
+  (ADR 140).
+
 ## [1.73.0] - 2026-11-11
 
 ### Added

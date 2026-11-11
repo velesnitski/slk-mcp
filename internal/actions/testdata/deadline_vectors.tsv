@@ -1,0 +1,25 @@
+# Shared deadline vectors: wispr-mcp tests/data/ and slk-mcp internal/actions/testdata/
+# hold the same file. A row that fails in one server is a bug there.
+# phrase<TAB>anchor (the day it was said)<TAB>expected due date or -<TAB>approx (fuzzy span: end of the span)
+сделать сегодня	2026-11-11	2026-11-11	false
+прислать завтра	2026-11-11	2026-11-12	false
+закончить к вечеру	2026-11-11	2026-11-11	false
+созвониться в пятницу	2026-11-11	2026-11-13	false
+подготовить до пятницы	2026-11-11	2026-11-13	false
+сделать к четвергу	2026-11-11	2026-11-12	false
+закрыть на этой неделе	2026-11-11	2026-11-13	true
+закрыть до конца недели	2026-11-11	2026-11-13	false
+обсудить на следующей неделе	2026-11-11	2026-11-20	true
+сдать к концу месяца	2026-11-11	2026-11-30	true
+отправить отчёт	2026-11-11	-	false
+send it today	2026-11-11	2026-11-11	false
+send it tomorrow	2026-11-11	2026-11-12	false
+finish by end of day	2026-11-11	2026-11-11	false
+call on Friday	2026-11-11	2026-11-13	false
+prepare by Friday	2026-11-11	2026-11-13	false
+ready by Thursday	2026-11-11	2026-11-12	false
+close this week	2026-11-11	2026-11-13	true
+close by end of week	2026-11-11	2026-11-13	false
+discuss next week	2026-11-11	2026-11-20	true
+deliver by end of month	2026-11-11	2026-11-30	true
+send the report	2026-11-11	-	false
