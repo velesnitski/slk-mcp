@@ -185,3 +185,16 @@ func TestPostMessage_GroupsAreNotReadWhenEveryoneResolved(t *testing.T) {
 		t.Fatalf("groups are read only for words no person answers to, calls=%v", f.Calls())
 	}
 }
+
+// When users.list fails, members are still named through users.info.
+func TestListUserGroups_RosterFailureFallsBackToLookups(t *testing.T) {
+	f := newFakeSlack(t)
+	f.OnError("users.list", "fatal_error")
+	tmUsers(f, map[string]string{"U01": "sam.lee", "U02": "pat"})
+	f.On("usergroups.list", ugGroups(ugLeads))
+	h := newFakeHub(t, f)
+
+	out := resultText(h.runListUserGroups(context.Background(), "", ""))
+
+	tmWant(t, out, "@leads | Leads | S01 | 2 members: @sam.lee @pat")
+}

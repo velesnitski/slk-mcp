@@ -22,15 +22,15 @@ import (
 // See ADR 093.
 const userResolveRetryAfter = time.Minute
 
-// userPageSize is the users.list page Slack documents; userPageFloor is
-// the smallest page List falls back to when Slack fails a heavy page.
+// userPageSize is the users.list page Slack documents; a page Slack
+// fails on its side is requested userPageAttempts times in all.
 const (
-	userPageSize  = 200
-	userPageFloor = 25
+	userPageSize     = 200
+	userPageAttempts = 3
 )
 
-// pageTooHeavy reports a users.list failure that a smaller page can
-// avoid: Slack's server-side errors, not auth, scope or rate limits.
+// pageTooHeavy reports a users.list failure worth retrying: Slack's
+// server-side errors, not auth, scope or rate limits.
 func pageTooHeavy(err error) bool {
 	e := err.Error()
 	return strings.Contains(e, "fatal_error") || strings.Contains(e, "internal_error") || strings.Contains(e, "request_timeout")
@@ -112,27 +112,40 @@ func (s *UserService) NamesFor(ctx context.Context, userIDs []string) map[string
 	return out
 }
 
-// List returns all non-deleted workspace users. Pagination is
-// handled internally; one users.list call per 200-user page.
+// List returns all non-deleted workspace users, one users.list call per
+// page. It pages by hand rather than through GetUsersContext so that a
+// failed page is retried on its own cursor (a paginator value is a
+// snapshot: calling Next on it again re-requests the same page) and so
+// that the error says where the listing broke – which page, after how
+// many users and how long – instead of a bare "fatal_error" after two
+// minutes of silence. See ADR 139.
 func (s *UserService) List(ctx context.Context) ([]goslack.User, error) {
+	started := time.Now()
+	p := s.api.GetUsersPaginated(goslack.GetUsersOptionLimit(userPageSize))
 	var us []goslack.User
-	var err error
-	// Slack answers users.list with fatal_error when a page of profiles is
-	// too heavy for it – seen on a large workspace once users:read.email
-	// was granted and every profile grew an email. A smaller page goes
-	// through, so a failed listing starts over at half the page size,
-	// down to userPageFloor. See ADR 139.
-	for limit := userPageSize; ; limit /= 2 {
-		us, err = ratelimit.DoR(ctx, s.log, func() ([]goslack.User, error) {
-			return s.api.GetUsersContext(ctx, goslack.GetUsersOptionLimit(limit))
-		})
-		if err == nil || !pageTooHeavy(err) || limit/2 < userPageFloor || ctx.Err() != nil {
+	for page := 1; ; page++ {
+		var next goslack.UserPagination
+		var err error
+		for attempt := 1; ; attempt++ {
+			pageStart := time.Now()
+			next, err = ratelimit.DoR(ctx, s.log, func() (goslack.UserPagination, error) {
+				return p.Next(ctx)
+			})
+			if err == nil || p.Done(err) || !pageTooHeavy(err) || attempt == userPageAttempts || ctx.Err() != nil {
+				break
+			}
+			s.log.Warn("users.list page failed; retrying it", "page", page, "attempt", attempt,
+				"took", time.Since(pageStart).Round(time.Millisecond).String(), "err", err)
+		}
+		if p.Done(err) {
 			break
 		}
-		s.log.Warn("users.list failed; retrying with smaller pages", "limit", limit/2, "err", err)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, fmt.Errorf("users.list page %d (after %d users, %s): %w",
+				page, len(us), time.Since(started).Round(time.Second), err)
+		}
+		us = append(us, next.Users...)
+		p = next
 	}
 	out := us[:0]
 	for _, u := range us {

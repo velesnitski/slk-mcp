@@ -74,10 +74,19 @@ func (h *Hub) runListUserGroups(ctx context.Context, workspace, filter string) *
 	if err != nil {
 		return mcp.NewToolResultError(groupErrorHint(err, "usergroups:read"))
 	}
-	users, _ := scoped.Users().List(ctx) // names only; IDs stand in if unreadable
 	names := map[string]string{}
-	for _, u := range users {
-		names[u.ID] = firstNonEmpty(u.Name, u.RealName, u.ID)
+	if users, err := scoped.Users().List(ctx); err == nil {
+		for _, u := range users {
+			names[u.ID] = firstNonEmpty(u.Name, u.RealName, u.ID)
+		}
+	} else {
+		// The roster can fail on Slack's side while the groups load; fall
+		// back to per-ID lookups (cached) so members still read as names.
+		var ids []string
+		for _, g := range groups {
+			ids = append(ids, g.Users...)
+		}
+		names = scoped.Users().NamesFor(ctx, ids)
 	}
 	filter = strings.ToLower(strings.TrimSpace(filter))
 

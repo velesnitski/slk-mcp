@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.73.2] - 2026-11-11
+
+### Fixed
+
+- **A failed page of the user list is retried, not the whole list.**
+  Slack sometimes answers `users.list` with `fatal_error`; the page is
+  now requested again on its own cursor, and a listing that still fails
+  says which page broke, after how many users and how long. Before, the
+  whole listing was lost and the error said only `fatal_error`.
+- **`list_usergroups` shows member names when the user list fails,**
+  through per-person lookups instead of raw IDs. See ADR 139.
+
 ## [1.73.1] - 2026-11-11
 
 ### Fixed
@@ -27,13 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `usergroups:read` and `usergroups:write` scopes. See ADR 138.
 - **`post_message` tags user groups.** `@tech-leads` becomes a group
   mention when no person has that name.
-
-### Fixed
-
-- **The user list loads on large workspaces again.** Slack failed
-  `users.list` with `fatal_error` once profiles carried emails, which
-  broke `list_users`, mentions and user groups. A failed listing now
-  retries with smaller pages. See ADR 139.
 
 ## [1.72.0] - 2026-11-11
 
