@@ -36,6 +36,22 @@ promised to accept a user token or to keep its shape; `client.counts`
   follow VIP ones in `get_unread_summary`, are marked `☆`, and are not
   collapsed as low-signal.
 
+## Addendum (1.76.1): what Slack actually answers
+
+Tried on two live workspaces with a user token: `users.prefs.get` needs
+the legacy `read` scope and `stars.list` the `stars:read` scope; neither
+is offered to apps created today (stars were retired for Saved items),
+and `users.channelSections.list` refuses app tokens. So for most
+operators Slack gives none of it. Therefore:
+
+- A refusal that retrying cannot change (`missing_scope`,
+  `not_allowed_token_type`, …) is stored like a result and asked again a
+  day later, not every half hour. A transient failure is not stored.
+- The tool says what each refusal means, and never tells the operator to
+  add those scopes – they are not in the list.
+- `SLACK_STARRED_CHANNELS` (names or IDs) sets starred conversations by
+  hand, as `SLACK_VIP_USERS` does for people; both always apply.
+
 ## Consequences
 
 - Without the state directory (tests, `off`) nothing is read or written.

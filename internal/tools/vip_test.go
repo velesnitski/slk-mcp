@@ -130,3 +130,35 @@ func TestRunMyActions_VIPAskIsPingedAtOnce(t *testing.T) {
 		t.Fatalf("only the VIP's item is marked:\n%s", out)
 	}
 }
+
+// A channel in SLACK_STARRED_CHANNELS comes before a busier one and is
+// marked ☆.
+func TestRunUnreadSummary_StarredChannelLeads(t *testing.T) {
+	resetPrefsCaches()
+	f := uaNewFakeSlack(t)
+	f.On("auth.test", uaAuthOK)
+	f.uaNoSearch()
+	f.uaNoCanvas()
+	f.uaUsers(map[string]string{"U1": "alex", "U2": "sam"})
+	f.uaConversations(t, uaChannel("C0BUSY0001", "busy", nil), uaChannel("C0QUIET001", "quiet", nil))
+	f.uaInfo(t, map[string]map[string]any{
+		"C0BUSY0001": uaChannel("C0BUSY0001", "busy", map[string]any{"last_read": "1700000000.000000"}),
+		"C0QUIET001": uaChannel("C0QUIET001", "quiet", map[string]any{"last_read": "1700000000.000000"}),
+	})
+	busy := []map[string]any{}
+	for i := 0; i < 6; i++ {
+		busy = append(busy, uaMsg(uaTS(int64(-60*(i+1)), 100+i), "U2", "<@U1> urgent please look at this now", nil))
+	}
+	f.uaHistory(t, map[string][]map[string]any{
+		"C0BUSY0001": busy,
+		"C0QUIET001": {uaMsg(uaTS(-3000, 900), "U2", "fyi, notes are up", nil)},
+	})
+	h := uaHub(t, f, func(c *config.Config) { c.StarredChannels = []string{"C0QUIET001"} })
+
+	out := resultText(h.runUnreadSummary(context.Background(), uaUnreadDefaults(), ""))
+
+	q, b := strings.Index(out, "#quiet"), strings.Index(out, "#busy")
+	if q < 0 || b < 0 || q > b || !strings.Contains(out, "☆ ") {
+		t.Fatalf("the starred channel must lead, marked ☆:\n%s", out)
+	}
+}

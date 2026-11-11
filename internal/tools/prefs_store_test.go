@@ -61,8 +61,8 @@ func TestSlackPrefs_SyncStoreAndUse(t *testing.T) {
 	}
 }
 
-// A workspace that refuses every source is tried once, then left alone
-// for the back-off; tools keep working without priorities.
+// A workspace that refuses every source for good is asked once a day,
+// not on every call; tools keep working without Slack's priorities.
 func TestSlackPrefs_RefusalBacksOff(t *testing.T) {
 	resetPrefsCaches()
 	f := uaNewFakeSlack(t)
@@ -77,7 +77,62 @@ func TestSlackPrefs_RefusalBacksOff(t *testing.T) {
 		}
 	}
 	if n := f.CountOf("users.prefs.get"); n != 1 {
-		t.Fatalf("users.prefs.get called %d times, want 1 (back-off)", n)
+		t.Fatalf("users.prefs.get called %d times, want 1 (refusal stored)", n)
+	}
+}
+
+// What the operator sees when Slack refuses everything: no error, and no
+// advice to add scopes that cannot be granted.
+func TestSyncSlackPrefs_RefusalIsExplained(t *testing.T) {
+	resetPrefsCaches()
+	f := uaNewFakeSlack(t)
+	f.OnError("users.prefs.get", "missing_scope")
+	f.OnError("users.channelSections.list", "not_allowed_token_type")
+	f.OnError("stars.list", "missing_scope")
+	h := uaHub(t, f, func(c *config.Config) { c.StateDir = t.TempDir() })
+
+	res := h.runSyncPrefs(context.Background(), "")
+	if res.IsError {
+		t.Fatalf("a refusal is an answer, not an error: %s", resultText(res))
+	}
+	out := resultText(res)
+	tmWant(t, out, "nothing readable from Slack", "VIP list: not available to apps", "retired stars", "SLACK_VIP_USERS (people) and SLACK_STARRED_CHANNELS")
+	if strings.Contains(out, "stars:read") || strings.Contains(out, "needs scope") {
+		t.Fatalf("must not send the operator after scopes Slack no longer grants:\n%s", out)
+	}
+}
+
+// A transient failure is not stored: the next call tries again (after the
+// back-off), so an outage does not hide Slack's answer for a day.
+func TestSlackPrefs_TransientFailureIsNotStored(t *testing.T) {
+	resetPrefsCaches()
+	dir := t.TempDir()
+	f := uaNewFakeSlack(t)
+	f.OnError("users.prefs.get", "fatal_error")
+	f.OnError("users.channelSections.list", "fatal_error")
+	f.OnError("stars.list", "fatal_error")
+	h := uaHub(t, f, func(c *config.Config) { c.StateDir = dir })
+
+	_ = h.slackPrefs(context.Background(), "primary")
+	if _, err := os.Stat(filepath.Join(dir, "slack-prefs-primary.json")); err == nil {
+		t.Fatal("a transient failure must not be written down as Slack's answer")
+	}
+}
+
+// SLACK_STARRED_CHANNELS puts a channel next after VIP conversations,
+// with no Slack preference read at all.
+func TestStarredSet_FromConfig(t *testing.T) {
+	resetPrefsCaches()
+	f := uaNewFakeSlack(t)
+	f.On("conversations.list", `{"ok":true,"channels":[{"id":"C0ALERTS01","name":"alerts"}],"response_metadata":{"next_cursor":""}}`)
+	h := uaHub(t, f, func(c *config.Config) { c.StarredChannels = []string{"#alerts", "C0DIRECT01", "#no-such-channel"} })
+
+	got := h.starredSet(context.Background(), "primary")
+	if !got["C0ALERTS01"] || !got["C0DIRECT01"] || len(got) != 2 {
+		t.Fatalf("starred=%v", got)
+	}
+	if f.Called("users.prefs.get") {
+		t.Fatal("no state dir: Slack's preferences are not read")
 	}
 }
 
@@ -102,7 +157,7 @@ func TestSyncSlackPrefs_ReportsWhatItFound(t *testing.T) {
 	h := uaHub(t, f, func(c *config.Config) { c.StateDir = t.TempDir() })
 
 	out := resultText(h.runSyncPrefs(context.Background(), ""))
-	tmWant(t, out, "synced", "1 VIP, 1 starred", "VIP: pat", "starred: #alerts", "not available: users.channelSections.list")
+	tmWant(t, out, "synced", "1 VIP, 1 starred", "VIP: pat", "starred: #alerts", "sidebar Starred section: closed to app tokens")
 }
 
 // pat is a user ID of real length: Slack's are nine characters or more,

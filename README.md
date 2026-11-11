@@ -133,7 +133,7 @@ Or via config file (`~/.claude.json`):
 | `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
 | `get_user_messages` | Recent messages from a specific user |
 | `list_users` | Active workspace users with Slack ID, handle, real name, title and role flags; `with_email` adds emails, `email_domain` filters by domain |
-| `sync_slack_prefs` | Read your Slack VIP list and starred conversations and keep them locally (IDs only), so they lead `get_unread_summary` and `get_my_actions`; refreshes on its own daily |
+| `sync_slack_prefs` | Try to read your Slack VIP list and starred conversations and keep them locally (IDs only); Slack refuses most apps, and the tool says so – `SLACK_VIP_USERS` and `SLACK_STARRED_CHANNELS` set the same by hand |
 | `list_usergroups` | User groups (the `@handle` that tags a team at once) with their members |
 | `manage_usergroup` | Create a user group or set, add or remove its members by handle or name (disabled in `SLACK_READ_ONLY`) |
 | `post_message` | Post a message; `@handle`, `@Full Name` or `@group` becomes a real mention (disabled in `SLACK_READ_ONLY`) |
@@ -285,6 +285,7 @@ slk-mcp run get_my_actions due=today drafts=true --post @me   # morning digest i
 | `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
 | `SLACK_VIP_USERS` | No | Names or handles whose messages come first, as in Slack's VIP list (which has no API): their conversations lead `get_unread_summary`, their asks lead `get_my_actions` and are listed for a reply at once, e.g. `Pat Novak,sam.lee` |
+| `SLACK_STARRED_CHANNELS` | No | Channels (names or IDs) that come right after VIP conversations in `get_unread_summary`, marked `☆` – Slack does not give its own starred list to apps |
 | `SLACK_STATE_DIR` | No | Where slk-mcp keeps your Slack VIP list and starred conversations between runs (default: the user cache directory + `/slk-mcp`; `off` disables it) |
 | `SLACK_MEETING_ITEMS_CMD` | No | Command printing your meeting commitments as JSON for `get_my_actions`, run without a shell with `since=<days>d` appended, e.g. `/path/to/wispr-mcp run list_action_items owner=me format=json --json` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |

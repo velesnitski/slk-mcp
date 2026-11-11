@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.76.1] - 2026-11-11
+
+### Fixed
+
+- **`sync_slack_prefs` no longer asks for scopes that cannot be
+  granted.** Slack refuses its VIP list and stars to apps (they need
+  legacy scopes no current app gets); the tool now says that plainly,
+  stores the refusal and asks again a day later instead of every half
+  hour.
+
+### Added
+
+- **`SLACK_STARRED_CHANNELS`.** Channels that come right after VIP
+  conversations in `get_unread_summary`, marked `☆` – set by hand, since
+  Slack does not give its starred list to apps. See ADR 143.
+
 ## [1.76.0] - 2026-11-11
 
 ### Added

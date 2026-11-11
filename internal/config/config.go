@@ -87,6 +87,11 @@ type Config struct {
 	// API, so it is mirrored here. See ADR 142.
 	VIPUsers []string
 
+	// StarredChannels are conversations that come next after VIP ones in
+	// get_unread_summary – names or IDs, one list for all workspaces. Slack
+	// does not give its own starred list to apps (ADR 143).
+	StarredChannels []string
+
 	// StateDir holds what slk-mcp keeps between runs: the VIP list and
 	// starred conversations read from Slack (ADR 143). Default: the user
 	// cache directory + "/slk-mcp"; SLACK_STATE_DIR overrides it, "off"
@@ -173,6 +178,7 @@ func Load() *Config {
 		WhisperModel:          os.Getenv("SLACK_WHISPER_MODEL"),
 		MeetingItemsCmd:       os.Getenv("SLACK_MEETING_ITEMS_CMD"),
 		VIPUsers:              parseCSV(os.Getenv("SLACK_VIP_USERS")),
+		StarredChannels:       parseCSV(os.Getenv("SLACK_STARRED_CHANNELS")),
 		StateDir:              stateDir(os.Getenv("SLACK_STATE_DIR")),
 
 		DecisionKeywords: []string{

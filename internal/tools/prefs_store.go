@@ -102,9 +102,12 @@ func (h *Hub) slackPrefs(ctx context.Context, workspace string) storedPrefs {
 // syncPrefs reads Slack now and stores the result.
 func (h *Hub) syncPrefs(ctx context.Context, workspace string) (storedPrefs, error) {
 	p, err := h.Canvas().FetchPrefs(ctx)
-	if err != nil {
+	if err != nil && !allRefused(p.Failures) {
 		return storedPrefs{}, err
 	}
+	// A refusal Slack will repeat (a scope no app can be granted, a method
+	// closed to user tokens) is an answer, not an outage: it is stored like
+	// a result, so the next attempt is a day away rather than half an hour.
 	sp := storedPrefs{
 		Workspace: workspace, FetchedAt: time.Now().UTC(),
 		VIPs: p.VIPs, VIPKeys: p.VIPKeys, Starred: p.Starred,
@@ -169,20 +172,70 @@ func writePrefsFile(path string, sp storedPrefs) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// starredSet is the stored starred conversations of this workspace.
+// starredSet is the starred conversations of this workspace: the ones
+// read from Slack plus SLACK_STARRED_CHANNELS, resolved here (names or
+// IDs; a name this workspace does not have is skipped).
 func (h *Hub) starredSet(ctx context.Context, workspace string) map[string]bool {
 	out := map[string]bool{}
 	for _, id := range h.slackPrefs(ctx, workspace).Starred {
 		out[id] = true
 	}
+	for _, ref := range h.cfg.StarredChannels {
+		if id, err := h.Channels().ResolveID(ctx, ref); err == nil {
+			out[id] = true
+		}
+	}
 	return out
+}
+
+// permanentRefusal reports a Slack answer that will not change by
+// retrying: the method needs a scope no current app can be granted
+// ("read", "stars:read"), or is closed to user tokens.
+func permanentRefusal(failure string) bool {
+	for _, s := range []string{"missing_scope", "not_allowed_token_type", "unknown_method", "method_deprecated", "invalid_auth_type"} {
+		if strings.Contains(failure, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// allRefused reports whether every failed source refused for good.
+func allRefused(failures []string) bool {
+	if len(failures) == 0 {
+		return false
+	}
+	for _, f := range failures {
+		if !permanentRefusal(f) {
+			return false
+		}
+	}
+	return true
+}
+
+// explainFailure turns a refused source into what it means for the
+// operator. The scopes Slack names in these errors ("read" for the
+// preferences, "stars:read" for stars) are legacy: an app created today
+// cannot be granted them, so asking for them would send the operator
+// looking for options that are not in the list.
+func explainFailure(f string) string {
+	method, _, _ := strings.Cut(f, ":")
+	switch {
+	case method == "users.prefs.get" && permanentRefusal(f):
+		return "Slack's VIP list: not available to apps (Slack's own preferences need a legacy scope it no longer grants)"
+	case method == "stars.list" && permanentRefusal(f):
+		return "stars: not available (Slack retired stars for Saved items, with their scope)"
+	case method == "users.channelSections.list" && permanentRefusal(f):
+		return "sidebar Starred section: closed to app tokens"
+	}
+	return f
 }
 
 // registerPrefsTools wires sync_slack_prefs.
 func (h *Hub) registerPrefsTools(s *server.MCPServer) {
 	h.register(s, toolDef{
 		Name:        "sync_slack_prefs",
-		Description: "Read your Slack VIP list (people whose messages ring through Do Not Disturb) and your starred conversations from Slack, and keep them locally so get_unread_summary and get_my_actions put them first. Runs on its own once a day; call it after changing VIPs or stars in Slack. Uses Slack's client endpoints, which are not part of the documented API: each source is reported, and any that refuses is skipped. Stores only IDs. SLACK_VIP_USERS adds people on top.",
+		Description: "Read your Slack VIP list (people whose messages ring through Do Not Disturb) and your starred conversations from Slack, and keep them locally so get_unread_summary and get_my_actions put them first. Runs on its own once a day; call it after changing VIPs or stars in Slack. Uses Slack's client endpoints, which are not part of the documented API and are usually refused to apps (they need legacy scopes Slack no longer grants): each source is reported, and any that refuses is skipped. Stores only IDs. SLACK_VIP_USERS and SLACK_STARRED_CHANNELS set the same priorities by hand and always apply.",
 		Opts: []mcp.ToolOption{
 			mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
 		},
@@ -215,6 +268,17 @@ func (h *Hub) runSyncPrefs(ctx context.Context, workspace string) *mcp.CallToolR
 			out = append(out, fmt.Sprintf("- error%s: %s", label, err))
 			continue
 		}
+		if len(sp.Sources) == 0 {
+			// Every source refused for good: report it plainly, not as an error.
+			lines := []string{fmt.Sprintf("- nothing readable from Slack%s", label)}
+			for _, f := range sp.Failures {
+				lines = append(lines, "  "+explainFailure(f))
+			}
+			lines = append(lines, "  set them instead: SLACK_VIP_USERS (people) and SLACK_STARRED_CHANNELS (channels)")
+			out = append(out, strings.Join(lines, "\n"))
+			ok++
+			continue
+		}
 		ok++
 		names := scoped.Users().NamesFor(ctx, sp.VIPs)
 		chans := scoped.Channels().NamesForIDs(ctx, sp.Starred)
@@ -232,17 +296,18 @@ func (h *Hub) runSyncPrefs(ctx context.Context, workspace string) *mcp.CallToolR
 			}
 			starNames = append(starNames, n)
 		}
-		line := fmt.Sprintf("- synced%s: %d VIP, %d starred", label, len(sp.VIPs), len(sp.Starred))
+		line := fmt.Sprintf("- synced%s: %d VIP, %d starred from Slack", label, len(sp.VIPs), len(sp.Starred))
 		if len(vipNames) > 0 {
 			line += "\n  VIP: " + strings.Join(vipNames, ", ")
-		} else if !containsString(sp.Sources, "users.prefs.get") {
-			line += "\n  VIP list not readable here – SLACK_VIP_USERS still applies"
 		}
 		if len(starNames) > 0 {
 			line += "\n  starred: " + strings.Join(starNames, ", ")
 		}
-		if len(sp.Failures) > 0 {
-			line += "\n  not available: " + strings.Join(sp.Failures, "; ")
+		for _, f := range sp.Failures {
+			line += "\n  " + explainFailure(f)
+		}
+		if len(sp.VIPs) == 0 || len(sp.Starred) == 0 {
+			line += "\n  set them instead: SLACK_VIP_USERS (people) and SLACK_STARRED_CHANNELS (channels)"
 		}
 		out = append(out, line)
 	}
