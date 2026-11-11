@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-33-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-35-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -33,6 +33,8 @@ Under **OAuth & Permissions → User Token Scopes**, add:
 - `im:history`, `im:read`, `mpim:history`, `mpim:read`
 - `users:read`
 - `users:read.email` (optional — email column in `list_users with_email` / `email_domain`)
+- `usergroups:read` (optional — for `list_usergroups`, and `@group` mentions in `post_message`)
+- `usergroups:write` (optional — for `manage_usergroup`)
 - `search:read`
 - `chat:write` (optional — for `post_message`)
 - `reactions:write` (optional — for `add_reaction`)
@@ -131,7 +133,9 @@ Or via config file (`~/.claude.json`):
 | `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
 | `get_user_messages` | Recent messages from a specific user |
 | `list_users` | Active workspace users with Slack ID, handle, real name, title and role flags; `with_email` adds emails, `email_domain` filters by domain |
-| `post_message` | Post a message; `@handle` or `@Full Name` becomes a real mention (disabled in `SLACK_READ_ONLY`) |
+| `list_usergroups` | User groups (the `@handle` that tags a team at once) with their members |
+| `manage_usergroup` | Create a user group or set, add or remove its members by handle or name (disabled in `SLACK_READ_ONLY`) |
+| `post_message` | Post a message; `@handle`, `@Full Name` or `@group` becomes a real mention (disabled in `SLACK_READ_ONLY`) |
 | `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |
 | `delete_message` | Delete a message by permalink or channel+ts — only ones this token posted (disabled in `SLACK_READ_ONLY`) |
 | `set_status` | Set/clear your custom status (text + emoji + auto-expiry) and optional presence; you-global by default (disabled in `SLACK_READ_ONLY`, needs user token) |
@@ -266,7 +270,7 @@ echo '{"channel":"#general","hours":4}' | slk-mcp run get_channel_digest --args 
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
 | `SLACK_PRIORITY_CHANNELS` | No | Channels (names or IDs, comma-separated) that `get_unread_summary` always shows for its window, even when you have already read them — first in the output, marked `★`, with `· read` when nothing in them is new to you. Window: `priority_hours` (default 24) or everything after the `after` cursor. Channels it cannot find are named in the output. Per extra workspace: `priority_channels`. ADR 112. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
-| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read`, `edit_canvas`, `set_status`, `set_presence`, `set_dnd`, `archive_channel`, `unarchive_channel` |
+| `SLACK_READ_ONLY` | No | `true` to disable `post_message`, `add_reaction`, `delete_message`, `mark_read`, `manage_usergroup`, `edit_canvas`, `set_status`, `set_presence`, `set_dnd`, `archive_channel`, `unarchive_channel` |
 | `SLACK_FFMPEG_BIN` | No | ffmpeg binary for `transcribe_audio` (default: `ffmpeg` from PATH) |
 | `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |

@@ -32,6 +32,7 @@ type Client struct {
 	DND       *DNDService
 	Scheduled *ScheduledService
 	Canvas    *CanvasService
+	Groups    *UserGroupService
 }
 
 // New constructs a Client from a validated config.
@@ -82,6 +83,7 @@ func New(cfg *config.Config, log *slog.Logger) *Client {
 	c.DND = newDNDService(user, log)
 	c.Scheduled = newScheduledService(user, log)
 	c.Canvas = newCanvasService(primary, user, cfg.UserToken, log)
+	c.Groups = newUserGroupService(primary, user, log)
 
 	// Lists and Canvas call Slack over raw HTTP rather than through
 	// slack-go, so OptionAPIURL does not reach them; point their own

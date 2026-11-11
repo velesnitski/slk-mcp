@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.73.0] - 2026-11-11
+
+### Added
+
+- **User groups.** `list_usergroups` lists the workspace's groups with
+  their members; `manage_usergroup` creates a group or sets, adds or
+  removes its members by handle or name, so one `@handle` tags a whole
+  team in any message, typed or sent. A member that matches nobody, or
+  more than one person, refuses the edit; `dry_run` previews it. Needs
+  the `usergroups:read` and `usergroups:write` scopes. See ADR 138.
+- **`post_message` tags user groups.** `@tech-leads` becomes a group
+  mention when no person has that name.
+
 ## [1.72.0] - 2026-11-11
 
 ### Added

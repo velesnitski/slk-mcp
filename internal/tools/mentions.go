@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
@@ -40,12 +41,12 @@ type mentionName struct {
 // `code` or ```blocks``` or <…> (existing mentions and links), and the
 // broadcast words @here, @channel and @everyone, which notify a whole
 // channel and should not be produced by accident. Pure.
-func resolveMentions(text string, users []goslack.User) mentionResult {
+func resolveMentions(text string, users []goslack.User, groups ...goslack.UserGroup) mentionResult {
 	res := mentionResult{text: text}
 	if !strings.Contains(text, "@") {
 		return res
 	}
-	names, label := mentionIndex(users)
+	names, label := mentionIndex(users, groups...)
 
 	var b strings.Builder
 	seenUnresolved := map[string]bool{}
@@ -88,7 +89,7 @@ func resolveMentions(text string, users []goslack.User) mentionResult {
 			b.WriteString(text[i : i+1+n])
 			i += 1 + n
 		default:
-			b.WriteString("<@" + ids[0] + ">")
+			b.WriteString(mentionToken(ids[0]))
 			res.resolved = append(res.resolved, "@"+rest[:n]+" → "+label[ids[0]])
 			i += 1 + n
 		}
@@ -99,7 +100,7 @@ func resolveMentions(text string, users []goslack.User) mentionResult {
 
 // mentionIndex lists every name each user can be written by, longest
 // first, plus the label used to report who a mention went to.
-func mentionIndex(users []goslack.User) ([]mentionName, map[string]string) {
+func mentionIndex(users []goslack.User, groups ...goslack.UserGroup) ([]mentionName, map[string]string) {
 	var names []mentionName
 	label := map[string]string{}
 	for _, u := range users {
@@ -117,6 +118,15 @@ func mentionIndex(users []goslack.User) ([]mentionName, map[string]string) {
 			names = append(names, mentionName{name: n, id: u.ID})
 		}
 		label[u.ID] = firstNonEmpty(u.RealName, u.Profile.RealName, u.Profile.DisplayName, u.Name, u.ID)
+	}
+	// A group answers to its handle only: its display name ("Tech leads")
+	// reads like prose and would catch ordinary words. ADR 138.
+	for _, g := range groups {
+		if g.ID == "" || g.Handle == "" || g.DateDelete.Time().Unix() > 0 {
+			continue
+		}
+		names = append(names, mentionName{name: g.Handle, id: g.ID})
+		label[g.ID] = fmt.Sprintf("group, %d people", len(g.Users))
 	}
 	sort.SliceStable(names, func(a, b int) bool { return len(names[a].name) > len(names[b].name) })
 	return names, label
@@ -144,6 +154,15 @@ func longestName(rest string, names []mentionName) (int, []string) {
 		}
 	}
 	return best, ids
+}
+
+// mentionToken is the Slack markup that notifies id: a person (U…/W…)
+// or a user group (S…).
+func mentionToken(id string) string {
+	if strings.HasPrefix(id, "S") {
+		return "<!subteam^" + id + ">"
+	}
+	return "<@" + id + ">"
 }
 
 // mentionStart reports whether the "@" at i opens a mention: it must not

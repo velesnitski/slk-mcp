@@ -376,6 +376,13 @@ func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, thre
 			note = "mentions not resolved, the user list could not be read: " + err.Error()
 		} else {
 			m := resolveMentions(text, users)
+			// Words no person answers to may be user groups; read them only
+			// then, and quietly skip them when the token cannot (ADR 138).
+			if len(m.unresolved) > 0 {
+				if groups, gerr := scoped.Groups().List(ctx); gerr == nil {
+					m = resolveMentions(text, users, groups...)
+				}
+			}
 			text, note = m.text, mentionNote(m)
 		}
 	}

@@ -245,6 +245,7 @@ func (h *Hub) Status() StatusClient       { return h.client.Status }
 func (h *Hub) DND() DNDClient             { return h.client.DND }
 func (h *Hub) Scheduled() ScheduledClient { return h.client.Scheduled }
 func (h *Hub) Canvas() CanvasClient       { return h.client.Canvas }
+func (h *Hub) Groups() UserGroupClient    { return h.client.Groups }
 
 // RegisterAll wires every tool category onto s. Order is not
 // significant; tools register themselves conditionally based on
@@ -269,6 +270,7 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerTranscribeTools(s)
 	h.registerUnreadTools(s)
 	h.registerUserTools(s)
+	h.registerUserGroupTools(s)
 }
 
 // toolDef is the table-driven shape used to register a tool with the

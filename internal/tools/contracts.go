@@ -118,6 +118,15 @@ type DNDClient interface {
 	EndSnooze(ctx context.Context) error
 }
 
+// UserGroupClient reads and edits user groups (usergroups.list,
+// usergroups.create, usergroups.users.update). Reading needs
+// usergroups:read, editing usergroups:write. ADR 138.
+type UserGroupClient interface {
+	List(ctx context.Context) ([]goslack.UserGroup, error)
+	Create(ctx context.Context, name, handle, description string) (goslack.UserGroup, error)
+	SetMembers(ctx context.Context, groupID string, ids []string) (goslack.UserGroup, error)
+}
+
 // ScheduledClient lists the authenticated user's pending scheduled
 // messages (chat.scheduledMessages.list) — a read, but per-identity, so
 // it needs a user token; handlers gate on Enabled() per workspace.
@@ -155,4 +164,5 @@ var (
 	_ DNDClient       = (*slack.DNDService)(nil)
 	_ ScheduledClient = (*slack.ScheduledService)(nil)
 	_ CanvasClient    = (*slack.CanvasService)(nil)
+	_ UserGroupClient = (*slack.UserGroupService)(nil)
 )
