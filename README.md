@@ -153,7 +153,7 @@ Or via config file (`~/.claude.json`):
 |---|---|
 | `get_unread_summary` | Unread messages across all joined channels and every configured workspace, most urgent first with DMs on top; returns a delta cursor so the next call shows only what is new, and skips conversations idle since you last read them |
 | `get_mentions` | Messages that mention you; `summary=true` returns load stats (by sender / channel, DM split) instead of the list |
-| `get_my_actions` | Your open commitments: what you promised, what others asked of you, and what you asked of others — with the deadline each names ("until tomorrow" said yesterday is due today), judged open or done from what followed; `due=today` (default) also lists what needs a ping |
+| `get_my_actions` | Your open commitments: what you promised, what others asked of you, and what you asked of others — with the deadline each names ("until tomorrow" said yesterday is due today), judged open or done from what followed; `due=today` (default) also lists what needs a ping; with `SLACK_MEETING_ITEMS_CMD` set, also what you promised on calls, marked when Slack already holds it or a later DM seems to deliver it |
 | `mark_read` | Mark a channel read through a given timestamp |
 | `edit_canvas` | Edit a canvas as you: append/prepend, insert before/after, replace or delete a section found by its text, replace the whole canvas, rename; `dry_run` previews (disabled in `SLACK_READ_ONLY`, needs `canvases:write`) |
 | `get_list_items` | Read the items of a Slack List by its `list_id` (needs `lists:read`) |
@@ -274,6 +274,7 @@ echo '{"channel":"#general","hours":4}' | slk-mcp run get_channel_digest --args 
 | `SLACK_FFMPEG_BIN` | No | ffmpeg binary for `transcribe_audio` (default: `ffmpeg` from PATH) |
 | `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
+| `SLACK_MEETING_ITEMS_CMD` | No | Command printing your meeting commitments as JSON for `get_my_actions`, run without a shell with `since=<days>d` appended, e.g. `/path/to/wispr-mcp run list_action_items owner=me format=json --json` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
 | `SLACK_SWEEP_TIMEOUT` | No | Seconds `get_unread_summary` / `get_mentions` may spend fetching before returning what they have, naming what they skipped (default: `100`; `0` = no limit). A workspace that did not finish keeps its delta cursor |

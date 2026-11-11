@@ -73,6 +73,13 @@ type Config struct {
 	WhisperBin   string
 	WhisperModel string
 
+	// MeetingItemsCmd is a command (split on spaces, no shell) that prints
+	// the operator's meeting commitments as JSON – wispr-mcp's
+	// `run list_action_items owner=me format=json --json`, or anything
+	// with the same item fields. get_my_actions appends since=<days>d.
+	// Empty: meetings are not included. See ADR 141.
+	MeetingItemsCmd string
+
 	// APIURL redirects the Slack Web API to another base URL (must end
 	// in "/"). It exists so handler tests can drive the whole stack —
 	// tool handler down through the service layer and slack-go — against
@@ -151,6 +158,7 @@ func Load() *Config {
 		FFmpegBin:             os.Getenv("SLACK_FFMPEG_BIN"),
 		WhisperBin:            os.Getenv("SLACK_WHISPER_BIN"),
 		WhisperModel:          os.Getenv("SLACK_WHISPER_MODEL"),
+		MeetingItemsCmd:       os.Getenv("SLACK_MEETING_ITEMS_CMD"),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",

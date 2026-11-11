@@ -36,6 +36,7 @@ func (h *Hub) registerActionTools(s *server.MCPServer) {
 			mcp.WithNumber("stale_hours", mcp.Description("An undated ask or request with no reply for this long is listed for a ping (default: 24)")),
 			mcp.WithNumber("limit", mcp.Description("Max commitments checked per workspace, newest first (default: 60)")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
+			mcp.WithBoolean("include_meetings", mcp.Description("Also list what you promised on calls, from the meeting-notes command in SLACK_MEETING_ITEMS_CMD (default: true when it is set). A meeting item already restated in Slack is counted, not repeated; one a later DM to its addressee seems to deliver is listed as probably done, with that message.")),
 		},
 		RequiresUserToken: true,
 		Handle:            h.handleMyActions,
@@ -48,6 +49,7 @@ type actionParams struct {
 	staleHours int
 	limit      int
 	now        time.Time
+	meetings   meetingSource // nil: meetings not included
 }
 
 func (h *Hub) handleMyActions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -77,6 +79,9 @@ func (h *Hub) handleMyActions(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if p.limit <= 0 {
 		p.limit = 60
 	}
+	if req.GetBool("include_meetings", true) {
+		p.meetings = commandMeetingSource(h.cfg.MeetingItemsCmd)
+	}
 	return h.runMyActions(ctx, p, req.GetString("workspace", "")), nil
 }
 
@@ -91,6 +96,8 @@ func (h *Hub) runMyActions(ctx context.Context, p actionParams, workspace string
 	type wsActions struct {
 		noToken bool
 		body    string
+		items   []*actionItem
+		hub     *Hub
 		err     error
 	}
 	results := fanOut(targets, func(ws slack.Workspace) wsActions {
@@ -99,8 +106,8 @@ func (h *Hub) runMyActions(ctx context.Context, p actionParams, workspace string
 			return wsActions{noToken: true}
 		}
 		sw := newSweep(fetchCtx, scoped.log, "get_my_actions", ws.Name)
-		body, err := scoped.myActions(ctx, sw, p)
-		return wsActions{body: body, err: err}
+		body, items, err := scoped.myActions(ctx, sw, p)
+		return wsActions{body: body, items: items, hub: scoped, err: err}
 	})
 
 	multi := len(targets) > 1 || len(excluded) > 0
@@ -121,6 +128,15 @@ func (h *Hub) runMyActions(ctx context.Context, p actionParams, workspace string
 			continue
 		}
 		sections = append(sections, workspaceSection(ws.Name, body))
+	}
+	var rosters []wsRoster
+	for i, ws := range targets {
+		if r := results[i]; r.hub != nil && r.err == nil {
+			rosters = append(rosters, rosterFor(ws.Name, r.hub, r.items))
+		}
+	}
+	if m := h.meetingsSection(fetchCtx, p, rosters, multi); m != "" {
+		sections = append(sections, "## Meetings\n"+m)
 	}
 	header := fmt.Sprintf("# My actions — %s · %s", dueLabel(p.due), p.now.Format("Mon 02.01"))
 	out := header + "\n\n" + strings.Join(sections, "\n\n")
@@ -157,10 +173,10 @@ type actionItem struct {
 func (it *actionItem) channel() string { return it.hit.Channel.ID }
 
 // myActions collects, resolves and renders one workspace's commitments.
-func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string, error) {
+func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string, []*actionItem, error) {
 	selfID, err := h.Unread().Self(ctx)
 	if err != nil || selfID == "" {
-		return "", fmt.Errorf("get_my_actions needs auth.test to name you: %v", err)
+		return "", nil, fmt.Errorf("get_my_actions needs auth.test to name you: %v", err)
 	}
 	handle, _ := h.Unread().SelfHandle(ctx)
 	after := p.now.AddDate(0, 0, -p.days-1).Format("2006-01-02")
@@ -184,7 +200,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 	wg.Wait()
 	for _, e := range errs {
 		if e != nil && !sw.incomplete() {
-			return "", e
+			return "", nil, e
 		}
 	}
 	var toMe []goslack.SearchMessage
@@ -216,7 +232,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 		}
 		truncated = append(truncated, fmt.Sprintf("%s only since %s", what, oldestHit(hs).Format("02.01 15:04")))
 	}
-	return h.renderActions(ctx, items, p, selfID, truncated) + sw.note(false), nil
+	return h.renderActions(ctx, items, p, selfID, truncated) + sw.note(false), items, nil
 }
 
 // searchPageMax is the most hits one search.messages page returns, and

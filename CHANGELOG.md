@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.74.0] - 2026-11-11
+
+### Added
+
+- **`get_my_actions` includes what you promised on calls.** Set
+  `SLACK_MEETING_ITEMS_CMD` to a meeting-notes command that prints JSON
+  (wispr-mcp in headless mode fits). Your own action items appear under
+  "From meetings"; one already written down in Slack is counted instead
+  of listed twice, and one that a later DM to its addressee seems to
+  deliver is listed as "probably done" with that message. A failing
+  command adds a note and never costs the Slack part.
+  `include_meetings=false` skips it. See ADR 141.
+
 ## [1.73.2] - 2026-11-11
 
 ### Fixed
