@@ -168,6 +168,7 @@ type actionItem struct {
 	due     actions.Deadline
 	outcome actions.Outcome
 	checked bool // its follow-ups were read
+	vip     bool // a VIP asked it, it is in a DM with one, or names one (ADR 142)
 }
 
 func (it *actionItem) channel() string { return it.hit.Channel.ID }
@@ -701,6 +702,11 @@ func bucketFor(it *actionItem, p actionParams, selfID string) actionBucket {
 		}
 		return bucketLater
 	}
+	// A VIP's ask or question nobody answered is on the list at once,
+	// not after stale_hours: these are the messages that ring through DND.
+	if it.vip && (it.kind == actions.Ask || it.kind == actions.Question) && it.outcome.Status == actions.Open {
+		return bucketPing
+	}
 	stale := actions.Stale(it.at, it.outcome, p.now, time.Duration(p.staleHours)*time.Hour)
 	if stale && (it.kind == actions.Waiting || (it.kind != actions.Promise && direct(it, selfID))) {
 		return bucketPing
@@ -733,6 +739,10 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 		}
 	}
 	names := h.Users().NamesFor(ctx, idList)
+	vips := h.vips(ctx)
+	for _, it := range items {
+		it.vip = actionHasVIP(it, vips)
+	}
 
 	var yours, waiting, later []*actionItem
 	closed := 0
@@ -753,6 +763,9 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 	order := func(list []*actionItem) {
 		sort.SliceStable(list, func(i, j int) bool {
 			a, b := list[i], list[j]
+			if a.vip != b.vip {
+				return a.vip
+			}
 			if a.due.Urgent != b.due.Urgent {
 				return a.due.Urgent
 			}
@@ -806,6 +819,9 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 	if unchecked > 0 {
 		notes = append(notes, fmt.Sprintf("%d not checked for replies (shown as open)", unchecked))
 	}
+	if n := vipNote(vips); n != "" {
+		notes = append(notes, n)
+	}
 	if len(truncated) > 0 {
 		notes = append(notes, fmt.Sprintf("search page limit (%d hits) reached: read %s — older commitments may be missing; lower days to cover the window fully", searchPageMax*searchPages, strings.Join(truncated, ", ")))
 	}
@@ -822,6 +838,9 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 func actionLine(it *actionItem, p actionParams, names map[string]string, selfID string) string {
 	var b strings.Builder
 	b.WriteString("- ")
+	if it.vip {
+		b.WriteString("⭐ VIP · ")
+	}
 	b.WriteString(dueBadge(it, p))
 	b.WriteString(" · ")
 	b.WriteString(kindLabel(it, names, selfID))

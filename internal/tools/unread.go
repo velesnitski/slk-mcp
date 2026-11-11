@@ -689,11 +689,22 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	}
 
 	now := time.Now()
+	// VIP conversations follow the priority channels and lead everything
+	// else: under max_chars the tail is dropped, and a VIP's message must
+	// not be what falls off (ADR 142).
+	vips := h.vips(ctx)
+	vipOf := make(map[*slack.ChannelUnread]bool, len(results))
+	for _, r := range results {
+		vipOf[r] = unreadHasVIP(r, vips)
+	}
 	sort.SliceStable(results, func(i, j int) bool {
 		// Priority channels lead regardless of score: the operator named
 		// them, and under max_chars the tail is what gets dropped.
 		if results[i].Priority != results[j].Priority {
 			return results[i].Priority
+		}
+		if vipOf[results[i]] != vipOf[results[j]] {
+			return vipOf[results[i]]
 		}
 		return digest.RankUnread(results[i], selfID, now, p.urg) > digest.RankUnread(results[j], selfID, now, p.urg)
 	})
@@ -712,6 +723,9 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	b.WriteString(deadlineNote)
 	if priorityNote != "" {
 		b.WriteString(priorityNote)
+	}
+	if len(vips.missing) > 0 {
+		b.WriteString("VIP not matched here (no one, or more than one person): " + strings.Join(vips.missing, ", ") + "\n")
 	}
 	if answeredNote != "" {
 		b.WriteString(answeredNote)
@@ -741,9 +755,12 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		if r.Priority {
 			label = priorityLabel(label, r)
 		}
+		if vipOf[r] {
+			label = "⭐ VIP · " + label
+		}
 		isGit := p.logMode != "off" && digest.DetectGitChannel(r)
 		isLog := !isGit && p.logMode != "off" && digest.DetectLogChannel(r)
-		lowSignal := !isGit && !isLog && !r.Priority && digest.DetectLowSignalChannel(r)
+		lowSignal := !isGit && !isLog && !r.Priority && !vipOf[r] && digest.DetectLowSignalChannel(r)
 		// skip_git_mode / skip_log_mode hide the bot feed, not a human
 		// reply in it: a channel that carries thread replies keeps them.
 		skipped := (p.skipGit && isGit) || (p.skipLog && isLog)

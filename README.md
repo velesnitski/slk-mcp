@@ -274,6 +274,7 @@ echo '{"channel":"#general","hours":4}' | slk-mcp run get_channel_digest --args 
 | `SLACK_FFMPEG_BIN` | No | ffmpeg binary for `transcribe_audio` (default: `ffmpeg` from PATH) |
 | `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
+| `SLACK_VIP_USERS` | No | Names or handles whose messages come first, as in Slack's VIP list (which has no API): their conversations lead `get_unread_summary`, their asks lead `get_my_actions` and are listed for a reply at once, e.g. `Pat Novak,sam.lee` |
 | `SLACK_MEETING_ITEMS_CMD` | No | Command printing your meeting commitments as JSON for `get_my_actions`, run without a shell with `since=<days>d` appended, e.g. `/path/to/wispr-mcp run list_action_items owner=me format=json --json` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |

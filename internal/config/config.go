@@ -80,6 +80,12 @@ type Config struct {
 	// Empty: meetings are not included. See ADR 141.
 	MeetingItemsCmd string
 
+	// VIPUsers are the people whose messages come first in
+	// get_unread_summary and get_my_actions – names or handles, matched to
+	// one person in each workspace. Slack's own VIP list has no public
+	// API, so it is mirrored here. See ADR 142.
+	VIPUsers []string
+
 	// APIURL redirects the Slack Web API to another base URL (must end
 	// in "/"). It exists so handler tests can drive the whole stack —
 	// tool handler down through the service layer and slack-go — against
@@ -159,6 +165,7 @@ func Load() *Config {
 		WhisperBin:            os.Getenv("SLACK_WHISPER_BIN"),
 		WhisperModel:          os.Getenv("SLACK_WHISPER_MODEL"),
 		MeetingItemsCmd:       os.Getenv("SLACK_MEETING_ITEMS_CMD"),
+		VIPUsers:              parseCSV(os.Getenv("SLACK_VIP_USERS")),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",

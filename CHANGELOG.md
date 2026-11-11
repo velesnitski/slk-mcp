@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.75.0] - 2026-11-11
+
+### Added
+
+- **VIPs come first.** `SLACK_VIP_USERS` lists the people Slack lets
+  through Do Not Disturb (Slack's own VIP list has no API). Their
+  conversations follow the priority channels in `get_unread_summary`
+  and are never collapsed; their asks lead `get_my_actions` and are
+  listed for a reply at once, without waiting for `stale_hours`. Both
+  are marked `⭐ VIP`. A name that matches nobody, or more than one
+  person, is reported instead of guessed. See ADR 142.
+
 ## [1.74.0] - 2026-11-11
 
 ### Added
