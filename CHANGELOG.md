@@ -5,12 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.71.0] - 2026-11-11
+
+### Added
+
+- **Headless mode: `slk-mcp run <tool>` and `slk-mcp tools`.** Any tool
+  runs once from the command line for cron, launchd, CI or another bot,
+  through the same in-process MCP server, so output and read-only
+  gating match an MCP client exactly. `key=value` arguments typed by the
+  tool's schema, `--args` JSON or stdin, `--json` with the delta cursor
+  lifted out, and exit codes 0/1/2 a scheduler can branch on. See
+  ADR 136.
 
 ### Documentation
 
-- **README brought up to date with the tool surface.** Four tools were
-  missing from the tables and the badge counted 24 of 28; descriptions of
+- **README brought up to date with the tool surface.** Five tools were
+  missing from the tables and the badge counted 24 of 33; descriptions of
   the unread summary, per-call workspaces and the read-only switch are
   corrected, and the whisper CPU fallback is documented. A test now fails
   when a tool is not listed or the count is wrong. See ADR 135.

@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-28-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-33-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -152,6 +152,7 @@ Or via config file (`~/.claude.json`):
 | `get_my_actions` | Your open commitments: what you promised, what others asked of you, and what you asked of others — with the deadline each names ("until tomorrow" said yesterday is due today), judged open or done from what followed; `due=today` (default) also lists what needs a ping |
 | `mark_read` | Mark a channel read through a given timestamp |
 | `edit_canvas` | Edit a canvas as you: append/prepend, insert before/after, replace or delete a section found by its text, replace the whole canvas, rename; `dry_run` previews (disabled in `SLACK_READ_ONLY`, needs `canvases:write`) |
+| `get_list_items` | Read the items of a Slack List by its `list_id` (needs `lists:read`) |
 | `list_scheduled_messages` | Your pending scheduled (queued-to-send) messages with send time + channel; you-global by default |
 | `export_conversations` | Append conversations to a local append-only JSONL corpus, losslessly: threads, reactions with their actors, edit flags, attachments, permalinks — for knowledge bases and audits |
 | `archive_channel` | Archive a channel; reversible (disabled in `SLACK_READ_ONLY`, needs `channels:manage` or `groups:write`) |
@@ -226,6 +227,33 @@ Model sizes trade accuracy for speed: `ggml-base.bin` (142 MB, fast),
 (1.5 GB), `ggml-large-v3.bin` (3 GB, best). For typical voice notes,
 `small` is enough. An MCP client (e.g. Claude Code) can run the whole
 chain from a single message permalink.
+
+## Headless mode (scripts and schedulers)
+
+The same binary runs any tool once from the command line, for cron,
+launchd, CI jobs or another bot. It calls the MCP server in-process, so
+the tools, their output and the `SLACK_READ_ONLY` / `DISABLED_TOOLS`
+gating are exactly what an MCP client gets.
+
+```bash
+slk-mcp tools                      # what is available (--json: full schemas)
+slk-mcp run get_my_actions due=today
+slk-mcp run get_unread_summary after="$CURSOR" --json   # .cursor feeds the next run
+slk-mcp run transcribe_audio permalink=https://<workspace>.slack.com/archives/D…/p… language=ru
+echo '{"channel":"#general","hours":4}' | slk-mcp run get_channel_digest --args -
+```
+
+- Arguments are `key=value`, typed by the tool's schema; unknown keys are
+  refused with the list of valid ones. `--args` takes a JSON object
+  (or `-` for stdin); pairs override it.
+- `--json` prints one object: `tool`, `args`, `ok`, `text`, `cursor`
+  (the delta token from a trailing `cursor:` line), `images` (base64).
+- Exit codes: `0` success, `1` the tool reported an error, `2` a usage
+  error (unknown tool, bad argument, missing token).
+- Logs go to stderr at `warn` by default, so stdout carries only the
+  result. `--timeout` (default `5m`) bounds the call.
+- For scheduled reads, set `SLACK_READ_ONLY=true`: write tools then do
+  not exist at all.
 
 ## Environment variables
 

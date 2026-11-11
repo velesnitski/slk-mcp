@@ -27,11 +27,14 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "1.70.4"
+var version = "1.71.0"
 
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	if isHeadless(os.Args[1:]) {
+		os.Exit(runHeadless(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
