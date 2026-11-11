@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **README brought up to date with the tool surface.** Four tools were
+  missing from the tables and the badge counted 24 of 28; descriptions of
+  the unread summary, per-call workspaces and the read-only switch are
+  corrected, and the whisper CPU fallback is documented. A test now fails
+  when a tool is not listed or the count is wrong. See ADR 135.
+
 ## [1.70.4] - 2026-11-09
 
 ### Fixed
