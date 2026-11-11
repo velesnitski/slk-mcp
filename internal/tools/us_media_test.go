@@ -18,7 +18,7 @@ import (
 // url_private_download the API hands back.
 const (
 	usFileLink     = "https://example.slack.com/files/U1/F1/note.m4a"
-	usDownloadURL  = "https://files.example.invalid/F1"
+	usDownloadURL  = "https://files.slack.com/files-pri/T0EXAMPLE-F1/note.m4a"
 	usMsgPermalink = "https://example.slack.com/archives/C0ALPHA01/p1700000000000100"
 	usMsgTS        = "1700000000.000100"
 	usAudioBytes   = "ID3-not-really-audio"
@@ -287,7 +287,7 @@ func TestRunDownloadAudio_ReportsWhatItSkipped(t *testing.T) {
 	f := usNewFakeSlack(t)
 	f.On("conversations.history", `{"ok":true,"messages":[{"ts":"`+usMsgTS+`","user":"U1","text":"note","files":[
 		{"id":"F1","name":"note.m4a","mimetype":"audio/mp4","url_private_download":"`+usDownloadURL+`"},
-		{"id":"F2","name":"shot.png","mimetype":"image/png","url_private_download":"https://files.example.invalid/F2"}]}]}`)
+		{"id":"F2","name":"shot.png","mimetype":"image/png","url_private_download":"https://files.slack.com/files-pri/T0EXAMPLE-F2/shot.png"}]}]}`)
 	f.OnAsset(usDownloadURL, usAudioBytes)
 	h := f.hub(t)
 

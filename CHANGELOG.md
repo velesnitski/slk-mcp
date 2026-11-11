@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.77.0] - 2026-11-11
+
+### Changed
+
+- **Dependencies to their latest releases:** slack-go 0.15 → 0.35,
+  mcp-go 0.32 → 1.5, every indirect module, and the CI actions. Closes
+  the two open security advisories. Building from source now needs
+  Go 1.26 or newer. See ADR 145.
+
+### Security
+
+- **File downloads send the token only to Slack.** A file whose download
+  URL is not an https Slack host (or the configured API host) is no
+  longer fetched with the token. Real Slack files are unaffected.
+
 ## [1.76.1] - 2026-11-11
 
 ### Fixed

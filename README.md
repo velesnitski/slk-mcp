@@ -1,7 +1,7 @@
 # slk-mcp
 
 [![Tests](https://github.com/velesnitski/slk-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/slk-mcp/actions/workflows/test.yml)
-[![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
 [![Tools](https://img.shields.io/badge/tools-36-purple.svg)](#tools)

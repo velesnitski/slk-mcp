@@ -21,14 +21,15 @@ jobs:
       # — knowing which version regressed is half the diagnosis.
       fail-fast: false
       matrix:
-        # 1.23 is the floor (mcp-go requirement); newer is the moving
-        # target. Bump the upper bound on each new stable release.
-        go: ['1.23', '1.24']
+        # 1.26 is the floor (the go directive the dependencies require);
+        # newer is the moving target. Bump the upper bound on each new
+        # stable release.
+        go: ['1.26', '1.27']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -49,16 +50,16 @@ jobs:
     name: Lint (golangci-lint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version: '1.27'
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           # The config lives at .golangci.yml — only the selective rules
@@ -69,7 +70,7 @@ jobs:
     name: Sweep (sensitive data)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The history scan reads every blob and commit message, so the
           # default shallow clone would silently cover almost nothing.

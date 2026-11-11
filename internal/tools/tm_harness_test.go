@@ -49,11 +49,11 @@ func tmInvoke(t *testing.T, s *server.MCPServer, name string, args map[string]an
 	}
 	switch v := s.HandleMessage(context.Background(), raw).(type) {
 	case mcp.JSONRPCResponse:
-		res, ok := v.Result.(mcp.CallToolResult)
+		res, ok := toolResult(v.Result)
 		if !ok {
 			t.Fatalf("tools/call returned %T, want mcp.CallToolResult", v.Result)
 		}
-		return &res, true
+		return res, true
 	case mcp.JSONRPCError:
 		return nil, false
 	default:
@@ -185,4 +185,16 @@ func tmSearchBody(matches ...string) string {
 // envelope (also the shape conversations.replies answers with).
 func tmHistoryBody(msgs ...string) string {
 	return `{"ok":true,"has_more":false,"messages":[` + strings.Join(msgs, ",") + `]}`
+}
+
+// toolResult accepts the tools/call result by value or by pointer:
+// mcp-go 1.x returns a pointer, earlier versions a value.
+func toolResult(v any) (*mcp.CallToolResult, bool) {
+	switch r := v.(type) {
+	case *mcp.CallToolResult:
+		return r, r != nil
+	case mcp.CallToolResult:
+		return &r, true
+	}
+	return nil, false
 }

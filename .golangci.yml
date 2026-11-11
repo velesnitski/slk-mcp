@@ -5,11 +5,13 @@
 # (gocritic / gocognit / etc.) are deliberately omitted to avoid
 # churn-on-CI; run them locally if curious.
 
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
-  disable-all: true
+  default: none
   enable:
     # Catches unhandled errors — the most common Go bug class.
     - errcheck
@@ -27,11 +29,21 @@ linters:
     # Common typos in identifiers, strings, comments.
     - misspell
 
-issues:
-  exclude-rules:
-    # _test.go files can keep variables they declare-but-don't-use
-    # when iterating on tests; we want signal in production code,
-    # not friction during test development.
-    - path: _test\.go
-      linters:
-        - unused
+  settings:
+    staticcheck:
+      # v1's staticcheck ran the SA (correctness) checks only; v2 folds in
+      # the simple/style/quickfix families. Keep the v1 scope.
+      checks: ["SA*"]
+  exclusions:
+    # The exclusions v1 applied by default (unchecked Close/Flush on
+    # deferred cleanup, fmt.Print*, os.Setenv in tests, ...).
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      # _test.go files can keep variables they declare-but-don't-use
+      # when iterating on tests; we want signal in production code,
+      # not friction during test development.
+      - path: _test\.go
+        linters:
+          - unused

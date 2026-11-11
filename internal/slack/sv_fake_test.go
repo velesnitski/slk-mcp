@@ -143,6 +143,14 @@ func (f *svFake) form(t *testing.T, method string, n int) url.Values {
 // the method name directly, so the trailing slash matters.
 func (f *svFake) url() string { return f.server.URL + "/" }
 
+// svFileHost points the fake's clients at a file server. slack-go 0.16+
+// attaches a token only to an https Slack host or to the configured API
+// host, so a test that serves downloads from its own httptest server has
+// to make that server the API host as well.
+func svFileHost(_ *svFake, files *httptest.Server) *svFake {
+	return &svFake{handlers: make(map[string]func(*http.Request) svJSON), server: files}
+}
+
 // svLogger discards log output; the services log warnings liberally.
 func svLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 

@@ -503,7 +503,9 @@ func (s *MessageService) Reactions(ctx context.Context, channelID, ts string) ([
 	params := goslack.GetReactionsParameters{Full: true}
 	get := func(api *goslack.Client) ([]goslack.ItemReaction, error) {
 		return ratelimit.DoR(ctx, s.log, func() ([]goslack.ItemReaction, error) {
-			return api.GetReactionsContext(ctx, ref, params)
+			// slack-go 0.16+ returns the reacted item with its reactions.
+			item, err := api.GetReactionsContext(ctx, ref, params)
+			return item.Reactions, err
 		})
 	}
 	out, err := get(s.api)

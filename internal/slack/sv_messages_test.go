@@ -595,6 +595,7 @@ func TestDownloadFile_StreamsTheBytesWithThePrimaryToken(t *testing.T) {
 		_, _ = w.Write([]byte("alpha-bytes"))
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	var buf bytes.Buffer
 	if err := svMessages(t, f).DownloadFile(context.Background(), files.URL+"/f", &buf); err != nil {
@@ -626,6 +627,7 @@ func TestDownloadFile_AuthRefusalRetriesWithTheUserToken(t *testing.T) {
 		_, _ = w.Write([]byte("private-bytes"))
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	svc := svMessagesWithFallback(t, f, "xoxb-test", "xoxp-test")
 	var buf bytes.Buffer
@@ -653,6 +655,7 @@ func TestDownloadFile_NonAuthFailureIsNotRetried(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	svc := svMessagesWithFallback(t, f, "xoxb-test", "xoxp-test")
 	var buf bytes.Buffer
@@ -673,6 +676,7 @@ func TestDownloadFile_BothIdentitiesRefusedReportsBoth(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	svc := svMessagesWithFallback(t, f, "xoxb-test", "xoxp-test")
 	var buf bytes.Buffer
@@ -691,6 +695,7 @@ func TestDownloadFile_SingleIdentityRefusalIsReportedOnce(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	var buf bytes.Buffer
 	err := svMessages(t, f).DownloadFile(context.Background(), files.URL+"/f", &buf)
@@ -728,6 +733,7 @@ func TestDownloadFile_TruncatableSinkIsResetBeforeTheRetry(t *testing.T) {
 		_, _ = w.Write([]byte("real-bytes"))
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	path := filepath.Join(t.TempDir(), "download.bin")
 	sink, err := os.Create(path)
@@ -758,6 +764,7 @@ func TestDownloadFile_UnresettableSinkIsReportedInsteadOfAppendedTo(t *testing.T
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	svc := svMessagesWithFallback(t, f, "xoxb-test", "xoxp-test")
 	err := svc.DownloadFile(context.Background(), files.URL+"/f", svBadTruncate{io.Discard})
@@ -775,6 +782,7 @@ func TestDownloadFile_UnrewindableSinkIsReportedInsteadOfAppendedTo(t *testing.T
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(files.Close)
+	f = svFileHost(f, files) // slack-go sends a token only to Slack or the API host
 
 	svc := svMessagesWithFallback(t, f, "xoxb-test", "xoxp-test")
 	err := svc.DownloadFile(context.Background(), files.URL+"/f", svBadSeek{io.Discard})

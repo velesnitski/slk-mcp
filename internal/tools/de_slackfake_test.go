@@ -263,11 +263,11 @@ func deCall(t *testing.T, hub *Hub, name string, args map[string]any) *mcp.CallT
 	if !ok {
 		t.Fatalf("de: %s did not return a result: %+v", name, msg)
 	}
-	res, ok := resp.Result.(mcp.CallToolResult)
+	res, ok := toolResult(resp.Result)
 	if !ok {
 		t.Fatalf("de: %s returned %T, want mcp.CallToolResult", name, resp.Result)
 	}
-	return &res
+	return res
 }
 
 // deTS renders a Slack timestamp d before now.
