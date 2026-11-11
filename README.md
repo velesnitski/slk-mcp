@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/slk-mcp)](https://github.com/velesnitski/slk-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-35-purple.svg)](#tools)
+[![Tools](https://img.shields.io/badge/tools-36-purple.svg)](#tools)
 [![Stars](https://img.shields.io/github/stars/velesnitski/slk-mcp?style=social)](https://github.com/velesnitski/slk-mcp/stargazers)
 
 Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), and any MCP-compatible client.
@@ -133,6 +133,7 @@ Or via config file (`~/.claude.json`):
 | `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
 | `get_user_messages` | Recent messages from a specific user |
 | `list_users` | Active workspace users with Slack ID, handle, real name, title and role flags; `with_email` adds emails, `email_domain` filters by domain |
+| `sync_slack_prefs` | Read your Slack VIP list and starred conversations and keep them locally (IDs only), so they lead `get_unread_summary` and `get_my_actions`; refreshes on its own daily |
 | `list_usergroups` | User groups (the `@handle` that tags a team at once) with their members |
 | `manage_usergroup` | Create a user group or set, add or remove its members by handle or name (disabled in `SLACK_READ_ONLY`) |
 | `post_message` | Post a message; `@handle`, `@Full Name` or `@group` becomes a real mention (disabled in `SLACK_READ_ONLY`) |
@@ -245,7 +246,16 @@ slk-mcp run get_my_actions due=today
 slk-mcp run get_unread_summary after="$CURSOR" --json   # .cursor feeds the next run
 slk-mcp run transcribe_audio permalink=https://<workspace>.slack.com/archives/D…/p… language=ru
 echo '{"channel":"#general","hours":4}' | slk-mcp run get_channel_digest --args -
+slk-mcp run get_my_actions due=today drafts=true --post @me   # morning digest in your own DM
 ```
+
+- `--post @me` (or `--post '#channel'`) also sends the result to Slack
+  through `post_message`, with mentions left as text so a digest pings
+  no one. An all-clear result is not posted unless `--post-empty` is
+  given; a result longer than a Slack message is cut at a line break.
+  A morning digest from launchd or cron needs the same environment the
+  MCP server gets (tokens, `SLACK_VIP_USERS`, `SLACK_MEETING_ITEMS_CMD`):
+  keep it in a file only you can read and source it in the job.
 
 - Arguments are `key=value`, typed by the tool's schema; unknown keys are
   refused with the list of valid ones. `--args` takes a JSON object
@@ -275,6 +285,7 @@ echo '{"channel":"#general","hours":4}' | slk-mcp run get_channel_digest --args 
 | `SLACK_WHISPER_BIN` | No | whisper.cpp binary for `transcribe_audio` (default: `whisper-cli` from PATH) |
 | `SLACK_WHISPER_MODEL` | No | ggml model file for `transcribe_audio` (default: `~/.cache/whisper/ggml-small.bin`) |
 | `SLACK_VIP_USERS` | No | Names or handles whose messages come first, as in Slack's VIP list (which has no API): their conversations lead `get_unread_summary`, their asks lead `get_my_actions` and are listed for a reply at once, e.g. `Pat Novak,sam.lee` |
+| `SLACK_STATE_DIR` | No | Where slk-mcp keeps your Slack VIP list and starred conversations between runs (default: the user cache directory + `/slk-mcp`; `off` disables it) |
 | `SLACK_MEETING_ITEMS_CMD` | No | Command printing your meeting commitments as JSON for `get_my_actions`, run without a shell with `since=<days>d` appended, e.g. `/path/to/wispr-mcp run list_action_items owner=me format=json --json` |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |

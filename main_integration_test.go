@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 type itSlack struct {
 	mu    sync.Mutex
 	calls []string
+	forms map[string]url.Values // last request form per method
 	srv   *httptest.Server
 }
 
@@ -39,8 +41,13 @@ func newITSlack(t *testing.T) *itSlack {
 	f := &itSlack{}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method := strings.TrimPrefix(r.URL.Path, "/")
+		_ = r.ParseForm()
 		f.mu.Lock()
 		f.calls = append(f.calls, method)
+		if f.forms == nil {
+			f.forms = map[string]url.Values{}
+		}
+		f.forms[method] = r.Form
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, itSlackBody(method))
@@ -77,9 +84,11 @@ func itSlackBody(method string) string {
 	case "conversations.history":
 		return `{"ok":true,"has_more":false,"messages":[` +
 			`{"type":"message","user":"U0AUTHOR01","ts":"` + ts(60) + `","text":"release is green, shipping now"},` +
-			`{"type":"message","user":"U0AUTHOR01","ts":"` + ts(0) + `","text":"starting the release checklist"}]}`
+			`{"type":"message","user":"U0AUTHOR01","ts":"` + ts(0) + `","text":"starting the release checklist, cc @sam"}]}`
 	case "conversations.replies":
 		return `{"ok":true,"messages":[]}`
+	case "chat.postMessage":
+		return `{"ok":true,"channel":"D0SELFDM01","ts":"1700000000.000100"}`
 	}
 	return `{"ok":false,"error":"not_mocked"}`
 }
@@ -93,6 +102,9 @@ func itServe(t *testing.T, slackURL string, readOnly bool) *client.Client {
 	t.Setenv("SLACK_USER_TOKEN", "xox"+"p-"+"integration")
 	t.Setenv("SLACK_WORKSPACES", "")
 	t.Setenv("SLACK_PRIORITY_CHANNELS", "")
+	t.Setenv("SLACK_STATE_DIR", "off") // never the operator's real state
+	t.Setenv("SLACK_VIP_USERS", "")
+	t.Setenv("SLACK_MEETING_ITEMS_CMD", "")
 	if readOnly {
 		t.Setenv("SLACK_READ_ONLY", "true")
 	} else {
@@ -291,5 +303,52 @@ func TestIntegration_HeadlessCarriesTheUnreadCursor(t *testing.T) {
 	}
 	if !fake.called("conversations.history") {
 		t.Fatal("the run reached the fake Slack")
+	}
+}
+
+func (f *itSlack) form(method string) url.Values {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forms[method]
+}
+
+// ADR 144: --post @me sends the result to the operator's own DM, through
+// post_message, with mentions left as text.
+func TestIntegration_HeadlessPostsToSelf(t *testing.T) {
+	fake := newITSlack(t)
+	_ = itServe(t, fake.srv.URL, false)
+	cfg := config.Load()
+	cfg.APIURL = fake.srv.URL + "/"
+	var out, errOut bytes.Buffer
+	code := headlessWith(cfg, []string{"run", "get_unread_summary", "--post", "@me"}, strings.NewReader(""), &out, &errOut)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	form := fake.form("chat.postMessage")
+	if form == nil {
+		t.Fatalf("nothing posted; calls=%v", fake.calls)
+	}
+	if form.Get("channel") != "U0OPERATOR" {
+		t.Fatalf("posted to %q, want the operator's own ID", form.Get("channel"))
+	}
+	// A digest names people; posting it must not ping them.
+	if !strings.Contains(form.Get("text"), "@sam") || strings.Contains(form.Get("text"), "<@") {
+		t.Fatalf("mentions must stay text in a posted digest:\n%s", form.Get("text"))
+	}
+	if !strings.Contains(form.Get("text"), "release is green") || strings.TrimSpace(form.Get("text")) != strings.TrimSpace(out.String()) {
+		t.Fatalf("the posted text must be the printed result:\n%s\n---\n%s", form.Get("text"), out.String())
+	}
+}
+
+// Read-only hides post_message, so --post fails instead of writing.
+func TestIntegration_HeadlessPostRespectsReadOnly(t *testing.T) {
+	fake := newITSlack(t)
+	_ = itServe(t, fake.srv.URL, true)
+	cfg := config.Load()
+	cfg.APIURL = fake.srv.URL + "/"
+	var out, errOut bytes.Buffer
+	code := headlessWith(cfg, []string{"run", "get_unread_summary", "--post", "@me"}, strings.NewReader(""), &out, &errOut)
+	if code == exitOK || fake.called("chat.postMessage") {
+		t.Fatalf("read-only must refuse the post: exit %d, stderr %q", code, errOut.String())
 	}
 }

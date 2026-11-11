@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -85,6 +86,12 @@ type Config struct {
 	// one person in each workspace. Slack's own VIP list has no public
 	// API, so it is mirrored here. See ADR 142.
 	VIPUsers []string
+
+	// StateDir holds what slk-mcp keeps between runs: the VIP list and
+	// starred conversations read from Slack (ADR 143). Default: the user
+	// cache directory + "/slk-mcp"; SLACK_STATE_DIR overrides it, "off"
+	// disables it. Empty in a hand-built Config, so tests never touch disk.
+	StateDir string
 
 	// APIURL redirects the Slack Web API to another base URL (must end
 	// in "/"). It exists so handler tests can drive the whole stack —
@@ -166,6 +173,7 @@ func Load() *Config {
 		WhisperModel:          os.Getenv("SLACK_WHISPER_MODEL"),
 		MeetingItemsCmd:       os.Getenv("SLACK_MEETING_ITEMS_CMD"),
 		VIPUsers:              parseCSV(os.Getenv("SLACK_VIP_USERS")),
+		StateDir:              stateDir(os.Getenv("SLACK_STATE_DIR")),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",
@@ -401,4 +409,21 @@ func parseNonNegativeDefault(s string, def int) int {
 
 func normalizeToolName(s string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), "-", "_"))
+}
+
+// stateDir resolves SLACK_STATE_DIR: "off" disables local state, a path is
+// used as given, and empty means the user cache directory.
+func stateDir(v string) string {
+	v = strings.TrimSpace(v)
+	switch {
+	case strings.EqualFold(v, "off"):
+		return ""
+	case v != "":
+		return v
+	}
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "slk-mcp")
 }

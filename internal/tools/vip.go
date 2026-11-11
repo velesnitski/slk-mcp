@@ -61,8 +61,14 @@ var (
 // empty set, so VIP ordering degrades to the normal order rather than
 // failing the tool.
 func (h *Hub) vips(ctx context.Context) vipSet {
+	if h.client == nil {
+		return vipSet{}
+	}
 	entries := h.cfg.VIPUsers
-	if len(entries) == 0 || h.client == nil {
+	// Slack's own VIP list, read and kept locally (ADR 143), joins the
+	// configured one: Slack's is the source, the config adds to it.
+	fromSlack := h.slackPrefs(ctx, h.workspaceName()).VIPs
+	if len(entries) == 0 && len(fromSlack) == 0 {
 		return vipSet{}
 	}
 	vipCacheMu.Lock()
@@ -75,7 +81,14 @@ func (h *Hub) vips(ctx context.Context) vipSet {
 	users, err := h.Users().List(ctx)
 	set, ttl := vipSet{}, vipFailRetryTime
 	if err == nil {
-		set, ttl = resolveVIPs(entries, users), vipCacheTTL
+		set, ttl = resolveVIPs(append(append([]string(nil), fromSlack...), entries...), users), vipCacheTTL
+	} else if len(fromSlack) > 0 {
+		// No roster: Slack's IDs need no matching, only names.
+		set = vipSet{ids: map[string]string{}}
+		names := h.Users().NamesFor(ctx, fromSlack)
+		for _, id := range fromSlack {
+			set.ids[id] = firstNonEmpty(names[id], id)
+		}
 	}
 	vipCacheMu.Lock()
 	vipCache[h.client] = vipCacheEntry{set: set, at: time.Now(), ttl: ttl}

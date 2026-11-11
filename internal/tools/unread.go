@@ -697,6 +697,8 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	for _, r := range results {
 		vipOf[r] = unreadHasVIP(r, vips)
 	}
+	// Conversations starred in Slack come next (ADR 143).
+	starred := h.starredSet(ctx, h.workspaceName())
 	sort.SliceStable(results, func(i, j int) bool {
 		// Priority channels lead regardless of score: the operator named
 		// them, and under max_chars the tail is what gets dropped.
@@ -705,6 +707,9 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		}
 		if vipOf[results[i]] != vipOf[results[j]] {
 			return vipOf[results[i]]
+		}
+		if si, sj := starred[results[i].Channel.ID], starred[results[j].Channel.ID]; si != sj {
+			return si
 		}
 		return digest.RankUnread(results[i], selfID, now, p.urg) > digest.RankUnread(results[j], selfID, now, p.urg)
 	})
@@ -757,10 +762,12 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		}
 		if vipOf[r] {
 			label = "⭐ VIP · " + label
+		} else if starred[r.Channel.ID] {
+			label = "☆ " + label
 		}
 		isGit := p.logMode != "off" && digest.DetectGitChannel(r)
 		isLog := !isGit && p.logMode != "off" && digest.DetectLogChannel(r)
-		lowSignal := !isGit && !isLog && !r.Priority && !vipOf[r] && digest.DetectLowSignalChannel(r)
+		lowSignal := !isGit && !isLog && !r.Priority && !vipOf[r] && !starred[r.Channel.ID] && digest.DetectLowSignalChannel(r)
 		// skip_git_mode / skip_log_mode hide the bot feed, not a human
 		// reply in it: a channel that carries thread replies keeps them.
 		skipped := (p.skipGit && isGit) || (p.skipLog && isLog)

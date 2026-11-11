@@ -24,6 +24,9 @@ func headlessEnv(t *testing.T, readOnly bool) {
 	t.Setenv("DISABLED_TOOLS", "")
 	t.Setenv("SLACK_LOG_FILE", "")
 	t.Setenv("SLACK_READ_ONLY", strconv.FormatBool(readOnly))
+	t.Setenv("SLACK_STATE_DIR", "off") // never the operator's real state
+	t.Setenv("SLACK_VIP_USERS", "")
+	t.Setenv("SLACK_MEETING_ITEMS_CMD", "")
 }
 
 func registeredTools(t *testing.T) []mcp.Tool {
@@ -76,7 +79,7 @@ func TestHeadless_ExitCodes(t *testing.T) {
 	}{
 		{"no tool", false, []string{"run"}, exitUsage, "usage:"},
 		{"unknown tool", false, []string{"run", "nope"}, exitUsage, `unknown tool "nope"`},
-		{"unknown argument", false, []string{"run", "get_my_actions", "bogus=1"}, exitUsage, "takes: days, due"},
+		{"unknown argument", false, []string{"run", "get_my_actions", "bogus=1"}, exitUsage, "takes: days, drafts, due"},
 		{"not a number", false, []string{"run", "get_my_actions", "days=abc"}, exitUsage, "not a number"},
 		{"required argument", false, []string{"run", "read_canvas"}, exitUsage, "needs channel="},
 		{"read-only hides writes", true, []string{"run", "post_message", "channel=x", "text=y"}, exitUsage, "SLACK_READ_ONLY"},
@@ -139,5 +142,33 @@ func TestTrailingCursor(t *testing.T) {
 	}
 	if trailingCursor("no cursor here") != "" {
 		t.Fatal("no cursor, no field")
+	}
+}
+
+func TestNothingToReport(t *testing.T) {
+	for text, want := range map[string]bool{
+		"all caught up — 0 unread": true,
+		"# My actions — due today\n\n## [a]\nnothing due — no open commitment\n\n## [b]\nnothing due — x": true,
+		"# My actions\n## [a]\nnothing due — x\n## [b]\n### On you (1)\n- item":                           false,
+		"3 channels, 5 top-level": false,
+		"   ":                     true,
+	} {
+		if got := nothingToReport(text); got != want {
+			t.Errorf("%q → %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestSlackSized(t *testing.T) {
+	if s := slackSized("short"); s != "short" {
+		t.Fatalf("got %q", s)
+	}
+	long := strings.Repeat("line of text\n", 4000) // 52 000 chars
+	got := slackSized(long)
+	if n := len([]rune(got)); n > 40000 {
+		t.Fatalf("still too long: %d", n)
+	}
+	if !strings.HasSuffix(got, "run the tool for the rest") || strings.Contains(got, "line of te\n") {
+		t.Fatalf("must cut at a line break and say so: …%q", got[len(got)-80:])
 	}
 }

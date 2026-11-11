@@ -261,6 +261,7 @@ func rosterMatch(name string, users []goslack.User) (goslack.User, bool) {
 type meetingVerdict struct {
 	item        meetingItem
 	counterpart string // display name for the line
+	handle      string // the counterpart's Slack handle, when found
 	duplicate   bool   // the same commitment is already a Slack item
 	evidence    *goslack.SearchMessage
 	workspace   string
@@ -331,6 +332,9 @@ func judgeOne(ctx context.Context, it meetingItem, rosters []wsRoster) meetingVe
 				return v
 			}
 		}
+	}
+	if ws != nil {
+		v.handle = who.Name
 	}
 	if ws == nil || who.Name == "" || len(itemStems) == 0 {
 		return v
@@ -415,6 +419,12 @@ func renderMeetings(verdicts []meetingVerdict, p actionParams, multi bool) strin
 		for _, v := range open {
 			b.WriteString(meetingLine(v, p))
 			b.WriteByte('\n')
+			if p.drafts {
+				if d := meetingDraft(v); d != "" {
+					b.WriteString(d)
+					b.WriteByte('\n')
+				}
+			}
 		}
 		b.WriteByte('\n')
 	}

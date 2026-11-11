@@ -271,6 +271,7 @@ func (h *Hub) RegisterAll(s *server.MCPServer) {
 	h.registerUnreadTools(s)
 	h.registerUserTools(s)
 	h.registerUserGroupTools(s)
+	h.registerPrefsTools(s)
 }
 
 // toolDef is the table-driven shape used to register a tool with the

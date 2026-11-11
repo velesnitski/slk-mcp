@@ -118,7 +118,7 @@ func headlessTools(ctx context.Context, srv *server.MCPServer, args []string, st
 // or - for stdin); pairs override the object.
 func headlessRun(ctx context.Context, srv *server.MCPServer, args []string, stdin io.Reader, stdout io.Writer) (int, error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return 0, usageError{"usage: slk-mcp run <tool> [key=value ...] [--args JSON|-] [--json] [--timeout 5m]"}
+		return 0, usageError{"usage: slk-mcp run <tool> [key=value ...] [--args JSON|-] [--json] [--timeout 5m] [--post @me|#channel] [--post-empty]"}
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
@@ -126,6 +126,8 @@ func headlessRun(ctx context.Context, srv *server.MCPServer, args []string, stdi
 	asJSON := fs.Bool("json", false, "print the result as one JSON object")
 	argsJSON := fs.String("args", "", "tool arguments as a JSON object, or - to read it from stdin")
 	timeout := fs.Duration("timeout", 5*time.Minute, "give up after this long")
+	postTo := fs.String("post", "", "also post the result to Slack: @me (your own DM) or a channel")
+	postEmpty := fs.Bool("post-empty", false, "post even when there is nothing to report")
 	pairs, err := parseInterleaved(fs, args[1:])
 	if err != nil {
 		return 0, usageError{err.Error()}
@@ -169,7 +171,60 @@ func headlessRun(ctx context.Context, srv *server.MCPServer, args []string, stdi
 	if res.IsError {
 		return exitToolError, nil
 	}
+	if *postTo != "" && (*postEmpty || !nothingToReport(text)) {
+		if err := postResult(ctx, srv, *postTo, name, text); err != nil {
+			return 0, err
+		}
+	}
 	return exitOK, nil
+}
+
+// postResult sends a tool's text to Slack through the server's own
+// post_message, so SLACK_READ_ONLY and DISABLED_TOOLS apply exactly as
+// they do to a client. Mentions are not resolved: a digest that names
+// people must not ping them (ADR 144).
+func postResult(ctx context.Context, srv *server.MCPServer, target, tool, text string) error {
+	res, err := callTool(ctx, srv, "post_message", map[string]any{
+		"channel":          target,
+		"text":             slackSized(text),
+		"resolve_mentions": false,
+	})
+	if err != nil {
+		return fmt.Errorf("--post: %w", err)
+	}
+	if res.IsError {
+		return fmt.Errorf("--post %s: %s", target, resultText(res))
+	}
+	return nil
+}
+
+// slackMaxText is below chat.postMessage's 40 000-character limit, leaving
+// room for the note that says the rest was cut.
+const slackMaxText = 39000
+
+// slackSized cuts a text Slack would refuse, at a line break, and says so.
+func slackSized(text string) string {
+	r := []rune(text)
+	if len(r) <= slackMaxText {
+		return text
+	}
+	cut := string(r[:slackMaxText])
+	if i := strings.LastIndexByte(cut, '\n'); i > 0 {
+		cut = cut[:i]
+	}
+	return cut + "\n… cut to fit a Slack message; run the tool for the rest"
+}
+
+// nothingToReport recognises the tools' "all clear" answers, so a
+// scheduled post does not fill the DM with empty digests.
+func nothingToReport(text string) bool {
+	t := strings.ToLower(text)
+	for _, s := range []string{"all caught up", "nothing due —", "nothing due -"} {
+		if strings.Contains(t, s) && !strings.Contains(t, "### ") {
+			return true
+		}
+	}
+	return strings.TrimSpace(text) == ""
 }
 
 // headlessResult is the --json shape: stable field names a scheduler can

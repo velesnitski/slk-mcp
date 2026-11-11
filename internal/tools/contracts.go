@@ -147,6 +147,8 @@ type CanvasClient interface {
 	// Edits run as the operator (user token only) — ADR 124.
 	EditCanvas(ctx context.Context, canvasID string, edits []slack.CanvasEdit) error
 	LookupCanvasSections(ctx context.Context, canvasID, contains string, types []string) ([]string, error)
+	// FetchPrefs reads Slack's VIP list and starred conversations (ADR 143).
+	FetchPrefs(ctx context.Context) (slack.SlackPrefs, error)
 }
 
 // Compile-time assertions: if the concrete services in

@@ -36,6 +36,7 @@ func (h *Hub) registerActionTools(s *server.MCPServer) {
 			mcp.WithNumber("stale_hours", mcp.Description("An undated ask or request with no reply for this long is listed for a ping (default: 24)")),
 			mcp.WithNumber("limit", mcp.Description("Max commitments checked per workspace, newest first (default: 60)")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
+			mcp.WithBoolean("drafts", mcp.Description("Under each listed item you can act on, add a short draft – a reminder to whoever you promised, a nudge to whoever owes you, an acknowledgement to whoever asked – with the post_message arguments to send it. Nothing is sent (default: false).")),
 			mcp.WithBoolean("include_meetings", mcp.Description("Also list what you promised on calls, from the meeting-notes command in SLACK_MEETING_ITEMS_CMD (default: true when it is set). A meeting item already restated in Slack is counted, not repeated; one a later DM to its addressee seems to deliver is listed as probably done, with that message.")),
 		},
 		RequiresUserToken: true,
@@ -50,6 +51,7 @@ type actionParams struct {
 	limit      int
 	now        time.Time
 	meetings   meetingSource // nil: meetings not included
+	drafts     bool          // add a reply draft under each item to act on (ADR 144)
 }
 
 func (h *Hub) handleMyActions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -79,6 +81,7 @@ func (h *Hub) handleMyActions(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if p.limit <= 0 {
 		p.limit = 60
 	}
+	p.drafts = req.GetBool("drafts", false)
 	if req.GetBool("include_meetings", true) {
 		p.meetings = commandMeetingSource(h.cfg.MeetingItemsCmd)
 	}
@@ -791,6 +794,12 @@ func (h *Hub) renderActions(ctx context.Context, items []*actionItem, p actionPa
 		for _, it := range list {
 			b.WriteString(actionLine(it, p, names, selfID))
 			b.WriteByte('\n')
+			if p.drafts {
+				if d := slackDraft(it, names); d != "" {
+					b.WriteString(d)
+					b.WriteByte('\n')
+				}
+			}
 		}
 		b.WriteByte('\n')
 	}

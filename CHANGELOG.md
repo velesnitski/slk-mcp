@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.76.0] - 2026-11-11
+
+### Added
+
+- **Slack's own VIP list and stars.** `sync_slack_prefs` reads your
+  Slack VIP list and starred conversations and keeps them locally (IDs
+  only, owner-only file, refreshed daily on its own). VIPs join
+  `SLACK_VIP_USERS`; starred conversations follow VIP ones in
+  `get_unread_summary`, marked `☆`. Slack's client endpoints are not a
+  documented API, so every source is reported and any refusal skipped.
+  See ADR 143.
+- **Morning digest to your DM.** `slk-mcp run get_my_actions --post @me`
+  also posts the result to your own DM, with mentions left as text; an
+  all-clear result is not posted unless `--post-empty`.
+- **`post_message` to `@me` and `@handle`.** Your own DM, or a person's
+  DM by handle or user ID.
+- **Follow-up drafts.** `get_my_actions drafts=true` adds under each
+  item a short draft – a reminder, a nudge or an acknowledgement – with
+  the `post_message` arguments for its DM or thread. Nothing is sent.
+  See ADR 144.
+
 ## [1.75.0] - 2026-11-11
 
 ### Added

@@ -209,7 +209,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 		s.AddTool(
 			mcp.NewTool("post_message",
 				mcp.WithDescription("Post a message to a channel. Supports thread replies. With several workspaces configured, pass `workspace` to target a non-primary one (default: primary). Pass `skip_if_recent` (minutes) to suppress a duplicate — if you already posted the identical text in that channel within the window, the post is skipped instead of repeated."),
-				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
+				mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name or ID; @handle or a user ID for that person's DM; @me for your own DM")),
 				mcp.WithString("text", mcp.Required(), mcp.Description("Message text (Slack markdown)")),
 				mcp.WithString("thread_ts", mcp.Description("Optional thread timestamp to reply in thread")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
@@ -361,9 +361,23 @@ func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, thre
 	if errRes != nil {
 		return errRes
 	}
-	channelID, err := scoped.Channels().ResolveID(ctx, channel)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error())
+	var channelID string
+	if isSelfTarget(channel) {
+		// "@me": the operator's own DM – a note to self, a digest, a draft
+		// to copy from. chat.postMessage takes the user ID for it.
+		self, err := scoped.Unread().Self(ctx)
+		if err != nil || self == "" {
+			return mcp.NewToolResultError("@me needs a user token to know who you are")
+		}
+		channelID = self
+	} else {
+		// A channel name, a conversation ID, @handle or a user ID: the last
+		// two open (or resume) the DM with that person.
+		id, err := scoped.resolveConversation(ctx, channel)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error())
+		}
+		channelID = id
 	}
 	// Typed @names become real mentions against this workspace's roster,
 	// before the dedup guard so it compares what Slack will store. A
@@ -434,6 +448,16 @@ func (h *Hub) recentSelfDuplicate(ctx context.Context, channelID, text string, w
 		if m.User == self && strings.TrimSpace(m.Text) == want {
 			return true
 		}
+	}
+	return false
+}
+
+// isSelfTarget reports whether a channel argument means the operator's own
+// DM.
+func isSelfTarget(channel string) bool {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case "@me", "me", "@self", "self":
+		return true
 	}
 	return false
 }
