@@ -53,6 +53,13 @@ func runHeadless(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "slk-mcp:", err)
 		return exitUsage
 	}
+	return headlessWith(cfg, args, stdin, stdout, stderr)
+}
+
+// headlessWith runs one headless command against a loaded configuration.
+// Split from runHeadless so tests can point it at a fake Slack through
+// cfg.APIURL, which no environment variable can set.
+func headlessWith(cfg *config.Config, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Logs go to stderr; a scheduler wants only the result on stdout, so
 	// the default level is quieter than the server's.
 	log := logger.SetupWithFile(envOr("SLACK_LOG_LEVEL", "warn"), os.Getenv("SLACK_LOG_FILE"))

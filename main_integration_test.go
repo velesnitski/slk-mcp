@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -218,5 +220,76 @@ func TestIntegration_BadArgumentsAreAToolErrorNotAProtocolFailure(t *testing.T) 
 
 	if !isErr {
 		t.Fatalf("an unparseable permalink must be reported as a tool error, got: %s", out)
+	}
+}
+
+// ADR 136: the command line is the MCP server, not a second
+// implementation. The same tool, called over the protocol and through
+// `run`, against the same Slack, returns the same text byte for byte –
+// and fails the same way: the fake does not serve search, so
+// get_my_actions errors on both paths.
+func TestIntegration_HeadlessMatchesTheProtocol(t *testing.T) {
+	fake := newITSlack(t)
+	c := itServe(t, fake.srv.URL, true)
+	cases := []struct {
+		tool    string
+		args    map[string]any
+		cli     []string
+		wantErr bool
+	}{
+		{"get_channel_digest", map[string]any{"channel": "#general", "hours": 4.0}, []string{"channel=#general", "hours=4"}, false},
+		{"get_my_actions", map[string]any{"due": "all"}, []string{"due=all"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			want, isErr := itCall(t, c, tc.tool, tc.args)
+			if isErr != tc.wantErr {
+				t.Fatalf("protocol call: error %v, want %v: %s", isErr, tc.wantErr, want)
+			}
+
+			cfg := config.Load()
+			cfg.APIURL = fake.srv.URL + "/"
+			var out, errOut bytes.Buffer
+			args := append([]string{"run", tc.tool, "--json"}, tc.cli...)
+			code := headlessWith(cfg, args, strings.NewReader(""), &out, &errOut)
+			var res headlessResult
+			if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+				t.Fatalf("exit %d, not JSON: %v\nstdout: %s\nstderr: %s", code, err, out.String(), errOut.String())
+			}
+			wantCode := exitOK
+			if tc.wantErr {
+				wantCode = exitToolError
+			}
+			if code != wantCode || res.OK == tc.wantErr {
+				t.Fatalf("exit %d ok=%v, want exit %d: %s %s", code, res.OK, wantCode, res.Text, errOut.String())
+			}
+			if res.Text != want {
+				t.Fatalf("headless and protocol differ\n--- protocol\n%s\n--- headless\n%s", want, res.Text)
+			}
+		})
+	}
+}
+
+// The unread summary hands its delta over in a trailing cursor line; the
+// --json result lifts it out so a scheduler can feed the next run.
+func TestIntegration_HeadlessCarriesTheUnreadCursor(t *testing.T) {
+	fake := newITSlack(t)
+	_ = itServe(t, fake.srv.URL, true) // sets the environment
+	cfg := config.Load()
+	cfg.APIURL = fake.srv.URL + "/"
+	var out, errOut bytes.Buffer
+	code := headlessWith(cfg, []string{"run", "get_unread_summary", "--json"}, strings.NewReader(""), &out, &errOut)
+	var res headlessResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || code != exitOK {
+		t.Fatalf("exit %d: %v\n%s\n%s", code, err, out.String(), errOut.String())
+	}
+	if !strings.Contains(res.Text, "release is green") {
+		t.Fatalf("the fake channel's messages are in the summary:\n%s", res.Text)
+	}
+	if res.Cursor == "" || !strings.Contains(res.Text, "cursor: "+res.Cursor) {
+		t.Fatalf("cursor %q not lifted from:\n%s", res.Cursor, res.Text)
+	}
+	if !fake.called("conversations.history") {
+		t.Fatal("the run reached the fake Slack")
 	}
 }

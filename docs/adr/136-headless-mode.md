@@ -45,6 +45,10 @@ calls one.
   write tools entirely rather than trusting the caller.
 - The command runs one call and exits; anything stateful between runs
   (the cursor) is the caller's to keep.
-- The in-process call skips the transport, so a protocol-level bug in a
-  transport is not exercised here; the integration tests still cover
-  the transports.
+- The in-process call skips the transport. `TestIntegration_Headless…`
+  calls the same tools over the streamable-HTTP transport and through
+  `run`, against one fake Slack, and requires the same text byte for
+  byte – for a success and for a tool error – plus the unread cursor
+  lifted into `--json`. `headlessWith` takes the configuration so the
+  test can point it at the fake; `APIURL` stays unreachable from the
+  environment.
