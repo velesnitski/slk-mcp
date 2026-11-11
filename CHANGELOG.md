@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.72.0] - 2026-11-11
+
+### Added
+
+- **`post_message` tags people written as `@name`.** A handle, display
+  name or real name after `@` becomes a real Slack mention that
+  notifies the person; before, it was sent as plain text and notified
+  nobody. The longest matching name wins, a name two people share is
+  left as typed, and e-mail addresses, code, existing mentions and
+  `@here`/`@channel`/`@everyone` are never touched. The result lists
+  who was tagged and any `@word` left as text. `resolve_mentions=false`
+  turns it off. See ADR 137.
+
 ## [1.71.1] - 2026-11-11
 
 ### Fixed

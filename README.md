@@ -131,7 +131,7 @@ Or via config file (`~/.claude.json`):
 | `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
 | `get_user_messages` | Recent messages from a specific user |
 | `list_users` | Active workspace users with Slack ID, handle, real name, title and role flags; `with_email` adds emails, `email_domain` filters by domain |
-| `post_message` | Post a message (disabled in `SLACK_READ_ONLY`) |
+| `post_message` | Post a message; `@handle` or `@Full Name` becomes a real mention (disabled in `SLACK_READ_ONLY`) |
 | `add_reaction` | Add an emoji reaction (disabled in `SLACK_READ_ONLY`) |
 | `delete_message` | Delete a message by permalink or channel+ts — only ones this token posted (disabled in `SLACK_READ_ONLY`) |
 | `set_status` | Set/clear your custom status (text + emoji + auto-expiry) and optional presence; you-global by default (disabled in `SLACK_READ_ONLY`, needs user token) |

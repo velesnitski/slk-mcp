@@ -696,7 +696,7 @@ func TestRunPostMessage_ChannelResolutionFailureIsReported(t *testing.T) {
 	tmChannelList(f, map[string]string{"beta": "C2"})
 	h := newFakeHub(t, f)
 
-	res := h.runPostMessage(context.Background(), "", "alpha", "hi", "", 0)
+	res := h.runPostMessage(context.Background(), "", "alpha", "hi", "", 0, true)
 	if res == nil || !res.IsError {
 		t.Fatalf("an unresolvable channel must error, got %+v", res)
 	}

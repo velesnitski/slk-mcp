@@ -238,7 +238,7 @@ func TestRunPostMessage_UnknownWorkspaceIsError(t *testing.T) {
 	hub := twoWorkspaceHub(t)
 	// workspaceTarget returns nil before any Slack call, so this exercises
 	// the routing error path with no network.
-	res := hub.runPostMessage(context.Background(), "ghost", "general", "hi", "", 0)
+	res := hub.runPostMessage(context.Background(), "ghost", "general", "hi", "", 0, true)
 	if res == nil || !res.IsError {
 		t.Fatalf("unknown workspace should produce an error result, got %+v", res)
 	}

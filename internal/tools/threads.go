@@ -214,6 +214,7 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 				mcp.WithString("thread_ts", mcp.Description("Optional thread timestamp to reply in thread")),
 				mcp.WithString("workspace", mcp.Description(workspaceArgSingle)),
 				mcp.WithNumber("skip_if_recent", mcp.Description("Dedup guard (minutes, default 0=off). If >0, skip posting when the authenticated user already posted the identical text in this channel within the last N minutes. Best-effort: needs a user token to identify self; if it can't, it posts.")),
+				mcp.WithBoolean("resolve_mentions", mcp.Description("Turn @handle, @Display Name and @Real Name in the text into real Slack mentions that notify the person (default: true). The result lists who was tagged and any @word left as text because nobody, or more than one person, has that name. @here, @channel, @everyone, e-mail addresses and text in `code` are never touched.")),
 			),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				channel, err := req.RequireString("channel")
@@ -228,7 +229,8 @@ func (h *Hub) registerThreadTools(s *server.MCPServer) {
 					req.GetString("workspace", ""),
 					channel, text,
 					req.GetString("thread_ts", ""),
-					int(req.GetFloat("skip_if_recent", 0))), nil
+					int(req.GetFloat("skip_if_recent", 0)),
+					req.GetBool("resolve_mentions", true)), nil
 			},
 		)
 	}
@@ -354,7 +356,7 @@ func deleteErrorHint(err error) string {
 // arg is empty), then posts into it. Factored out of the tool closure so
 // the workspace-routing — including the unknown-label error path, which
 // returns before any Slack call — is unit-testable without a live server.
-func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, threadTS string, skipIfRecentMin int) *mcp.CallToolResult {
+func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, threadTS string, skipIfRecentMin int, mentions bool) *mcp.CallToolResult {
 	scoped, wsName, errRes := h.scopedWorkspace(workspace)
 	if errRes != nil {
 		return errRes
@@ -362,6 +364,26 @@ func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, thre
 	channelID, err := scoped.Channels().ResolveID(ctx, channel)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error())
+	}
+	// Typed @names become real mentions against this workspace's roster,
+	// before the dedup guard so it compares what Slack will store. A
+	// roster that can't be read sends the text as typed and says so: a
+	// message without pings beats no message. ADR 137.
+	note := ""
+	if mentions && strings.Contains(text, "@") {
+		users, err := scoped.Users().List(ctx)
+		if err != nil {
+			note = "mentions not resolved, the user list could not be read: " + err.Error()
+		} else {
+			m := resolveMentions(text, users)
+			text, note = m.text, mentionNote(m)
+		}
+	}
+	withNote := func(s string) string {
+		if note == "" {
+			return s
+		}
+		return s + "\n" + note
 	}
 	// Dedup guard: skip when the authenticated user already posted the
 	// identical text here within the window. Best-effort — fails open
@@ -373,7 +395,7 @@ func (h *Hub) runPostMessage(ctx context.Context, workspace, channel, text, thre
 	if err != nil {
 		return mcp.NewToolResultError(err.Error())
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("posted to #%s%s (ts: %s)", channel, h.wsLabel(wsName), ts))
+	return mcp.NewToolResultText(withNote(fmt.Sprintf("posted to #%s%s (ts: %s)", channel, h.wsLabel(wsName), ts)))
 }
 
 // recentSelfDuplicate reports whether the authenticated user already
