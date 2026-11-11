@@ -64,8 +64,13 @@ heading a daily report — are not deadlines.
 **Status** comes from what followed, read once per thread and once per
 DM from its oldest commitment on: a done reaction, or a later message
 from the responsible side that says done or carries a file, closes it;
-any reply answers a question; any other reply from the responsible side
-only acknowledges it, and the item stays open showing that reply. In
+any reply answers a question, and an answer that does not just accept
+the work ("ок", "сделаю", "да, сейчас") settles an ask put as a question
+("к пятнице надо слайды?" – "перенесли, пока не нужно"); any other reply
+from the responsible side only acknowledges it, and the item stays open
+showing that reply. A DM message with a thread under it is judged from
+the thread's replies as well as the DM's history: the answer is often
+posted in the thread, which the history does not hold. In
 one DM or thread, an item's follow-ups stop at the next item of the
 same kind from the same person that the other side answered something
 before: a reply after the operator's next request answers that request,

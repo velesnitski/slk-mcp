@@ -249,3 +249,37 @@ func TestRunMyActions_ClarificationIsTheSameTurn(t *testing.T) {
 		t.Fatalf("the question was answered after the clarification:\n%s", out)
 	}
 }
+
+// ADR 133: a reply in a DM's thread answers the DM message it hangs
+// under; the DM's history alone does not hold it.
+func TestRunMyActions_ReadsDMThreads(t *testing.T) {
+	f := uaNewFakeSlack(t)
+	f.On("auth.test", uaAuthOK)
+	f.uaUsers(map[string]string{"U2": "alice"})
+	askTS := uaTS(-30*3600, 100) // my request, 30h ago
+	replyTS := uaTS(-29*3600, 101)
+	f.uaSearchByQuery(t, map[string][]map[string]any{
+		"from:me": {uaHit("D2", "U2", askTS, "U1", "Алиса, дай пожалуйста доступ к дашборду", "")},
+	})
+	f.uaHistory(t, map[string][]map[string]any{
+		"D2": {uaMsg(askTS, "U1", "Алиса, дай пожалуйста доступ к дашборду", map[string]any{"reply_count": 1, "thread_ts": askTS})},
+	})
+	f.uaReplies(t, map[string][]map[string]any{
+		askTS: {
+			uaMsg(askTS, "U1", "Алиса, дай пожалуйста доступ к дашборду", map[string]any{"thread_ts": askTS}),
+			uaMsg(replyTS, "U2", "доступы выдаёт Боб, спроси у него", map[string]any{"thread_ts": askTS}),
+		},
+	})
+	h := uaHub(t, f)
+
+	out := resultText(h.runMyActions(context.Background(), actionDefaults(), ""))
+	if strings.Contains(out, "no reply") {
+		t.Fatalf("the reply in the thread was missed:\n%s", out)
+	}
+	p := actionDefaults()
+	p.due = "all"
+	all := resultText(h.runMyActions(context.Background(), p, ""))
+	if !strings.Contains(all, "alice replied") || !strings.Contains(all, "доступы выдаёт Боб") {
+		t.Fatalf("the thread reply is the one shown:\n%s", all)
+	}
+}

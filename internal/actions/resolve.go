@@ -2,6 +2,7 @@ package actions
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -49,8 +50,10 @@ type Outcome struct {
 // For a promise, an ask or a question the operator is responsible; for a
 // waiting item it is anyone else. A done reaction on the item, or a
 // follow-up from the responsible side that says done or carries a file,
-// closes it. Any reply settles a question. Otherwise a reply from the
-// responsible side only acknowledges it, and silence leaves it open.
+// closes it. Any reply settles a question, and an answer that does not
+// just accept the work settles an ask put as a question. Otherwise a
+// reply from the responsible side only acknowledges it, and silence
+// leaves it open.
 func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 	responsible := func(user string) bool {
 		if user == "USLACKBOT" {
@@ -88,11 +91,35 @@ func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 		case kind == Question:
 			out.Status = Answered
 			return out
+		case kind == Ask && strings.Contains(item.Text, "?") && !accepts(m.Text):
+			// "надо презентацию на завтра?" asks a question with a request
+			// word in it; "подвинул на пару недель" answers it. Accepting
+			// the work ("ок", "сделаю") still leaves it to do.
+			out.Status = Answered
+			return out
 		default:
 			out.Status = Acked
 		}
 	}
 	return out
+}
+
+// affirmatives are the short replies that accept a request rather than
+// answer it: "да", "ага, сейчас".
+var affirmatives = map[string]bool{
+	"да": true, "ага": true, "угу": true, "конечно": true, "давай": true, "+": true,
+	"yes": true, "yep": true, "yeah": true, "sure": true,
+}
+
+// accepts reports whether a reply takes the work on – "ок", "сделаю",
+// "да, сейчас" – rather than answering the question the ask was put as.
+func accepts(text string) bool {
+	t := normalize(text)
+	if Ack(t) || promiseRe.MatchString(t) {
+		return true
+	}
+	fields := strings.FieldsFunc(t, func(r rune) bool { return r == ' ' || r == ',' || r == '!' || r == '.' })
+	return len(fields) > 0 && len(fields) <= 3 && affirmatives[fields[0]]
 }
 
 // AnsweredByOther settles an ask or a question put to several people

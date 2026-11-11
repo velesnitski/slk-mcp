@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.71.1] - 2026-11-11
+
+### Fixed
+
+- **`get_my_actions` reads replies in a DM's threads.** A request sent
+  in a DM and answered in the thread under it was listed as "no reply":
+  the DM's history does not hold thread replies. Such threads are now
+  read too.
+- **An ask put as a question is settled by an answer.** "Do we need
+  slides for tomorrow?" carries a request word, so it is an ask; a reply
+  that answers it ("moved by two weeks, not needed yet") now closes it,
+  while one that only accepts the work ("ok", "will do", "yes, on it")
+  still leaves it open. See ADR 133.
+
 ## [1.71.0] - 2026-11-11
 
 ### Added

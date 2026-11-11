@@ -421,21 +421,32 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 		}
 	}
 	close(jobs)
-	const workers = 4
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobs {
-				if ctx.Err() != nil {
-					continue
-				}
-				job()
+	runJobs(ctx, jobs)
+
+	// A DM message can carry a thread, and the answer is then a reply in
+	// it, which the DM's history does not hold: read those threads too.
+	dmThreads := make(chan func(), len(items))
+	for _, it := range items {
+		if !it.dm || it.root != it.hit.Timestamp || !hasReplies(dmMsgs[it.channel()], it.hit.Timestamp) {
+			continue
+		}
+		k := key{it.channel(), it.root}
+		if _, seen := threadMsgs[k]; seen {
+			continue
+		}
+		threadMsgs[k] = nil // queued
+		dmThreads <- func() {
+			msgs, err := h.Messages().ThreadReplies(ctx, k.channel, k.root)
+			if err != nil {
+				return
 			}
-		}()
+			mu.Lock()
+			threadMsgs[k] = msgs
+			mu.Unlock()
+		}
 	}
-	wg.Wait()
+	close(dmThreads)
+	runJobs(ctx, dmThreads)
 
 	candidates := nextTurnCandidates(items)
 	for _, it := range items {
@@ -443,6 +454,7 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 		var ok bool
 		if it.dm && it.root == it.hit.Timestamp {
 			msgs, ok = dmMsgs[it.channel()]
+			msgs = withThread(msgs, threadMsgs[key{it.channel(), it.root}])
 		} else {
 			msgs, ok = threadMsgs[key{it.channel(), it.root}]
 		}
@@ -478,6 +490,52 @@ func (h *Hub) resolveItems(ctx context.Context, items []*actionItem, selfID stri
 		}
 		it.checked = true
 	}
+}
+
+// runJobs runs jobs on a few workers and waits for them; once ctx is done
+// the rest are skipped.
+func runJobs(ctx context.Context, jobs <-chan func()) {
+	const workers = 4
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				job()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// hasReplies reports whether the message ts in a history page has a
+// thread under it.
+func hasReplies(msgs []goslack.Message, ts string) bool {
+	for _, m := range msgs {
+		if m.Timestamp == ts {
+			return m.ReplyCount > 0
+		}
+	}
+	return false
+}
+
+// withThread adds a DM thread's replies to the DM's history, skipping the
+// root, which the history already holds.
+func withThread(history, thread []goslack.Message) []goslack.Message {
+	if len(thread) == 0 {
+		return history
+	}
+	out := append([]goslack.Message(nil), history...)
+	for _, m := range thread {
+		if m.Timestamp != m.ThreadTimestamp {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // channelAnswerWindow is how soon after a top-level channel question the
