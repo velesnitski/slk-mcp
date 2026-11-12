@@ -253,6 +253,19 @@ func TestUserMatchesFilter_SearchesEveryNameField(t *testing.T) {
 			t.Errorf("%q should match", needle)
 		}
 	}
+	// A raw ID copied from a message finds the person (ADR 146); the
+	// caller lowercases the needle.
+	if !userMatchesFilter(u, strings.ToLower(u.ID)) {
+		t.Errorf("the Slack ID %q should match", u.ID)
+	}
+	// Only the whole ID: a short filter must not hit random letters
+	// inside an ID.
+	p := goslack.User{ID: "U0X0PMEXMPL", Name: "sam", RealName: "Sam"}
+	for _, needle := range []string{"pm", "u0", "x0pm"} {
+		if userMatchesFilter(p, needle) {
+			t.Errorf("%q must not match inside the ID %s", needle, p.ID)
+		}
+	}
 	if userMatchesFilter(u, "devops") {
 		t.Error("an unrelated needle must not match")
 	}

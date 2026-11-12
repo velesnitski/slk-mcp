@@ -9,6 +9,7 @@ import (
 
 	goslack "github.com/slack-go/slack"
 	"github.com/velesnitski/slk-mcp/internal/config"
+	"github.com/velesnitski/slk-mcp/internal/format"
 )
 
 func TestParseChannelList_TrimsSigilsAndDropsBlanks(t *testing.T) {
@@ -231,6 +232,25 @@ func TestResolveRefs_ResolvesAuthorsAndMentionedChannels(t *testing.T) {
 	}
 	if got["C0ALPHA01"] != "alpha" {
 		t.Errorf("mentioned channel should resolve to its name, got %q", got["C0ALPHA01"])
+	}
+}
+
+// A person who is only mentioned – never an author in the batch – must
+// still resolve; before ADR 146 the mention rendered as a raw ID.
+func TestResolveRefs_ResolvesMentionedNonAuthor(t *testing.T) {
+	f := usNewFakeSlack(t)
+	f.On("users.info", `{"ok":true,"user":{"id":"U0MENTION1","name":"sam","real_name":"Sam"}}`)
+	h := f.hub(t)
+
+	msgs := []goslack.Message{
+		{Msg: goslack.Msg{User: "U0AUTHOR01", Text: "assign to <@U0MENTION1>"}},
+	}
+	got := h.resolveRefs(context.Background(), msgs)
+	if name, ok := got["U0MENTION1"]; !ok || name == "U0MENTION1" {
+		t.Fatalf("mentioned non-author should resolve to a name, got %q (present=%v)", name, ok)
+	}
+	if out := format.RenderText(msgs[0].Text, got); strings.Contains(out, "U0MENTION1") {
+		t.Fatalf("rendered text still carries the raw ID: %q", out)
 	}
 }
 

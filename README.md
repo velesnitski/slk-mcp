@@ -132,7 +132,7 @@ Or via config file (`~/.claude.json`):
 | `get_thread` | Full thread replies |
 | `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
 | `get_user_messages` | Recent messages from a specific user |
-| `list_users` | Active workspace users with Slack ID, handle, real name, title and role flags; `with_email` adds emails, `email_domain` filters by domain |
+| `list_users` | Active workspace users with Slack ID, handle, real name, title and role flags; `with_email` adds emails, `email_domain` filters by domain; `filter` also matches a whole Slack ID |
 | `sync_slack_prefs` | Try to read your Slack VIP list and starred conversations and keep them locally (IDs only); Slack refuses most apps, and the tool says so – `SLACK_VIP_USERS` and `SLACK_STARRED_CHANNELS` set the same by hand |
 | `list_usergroups` | User groups (the `@handle` that tags a team at once) with their members |
 | `manage_usergroup` | Create a user group or set, add or remove its members by handle or name (disabled in `SLACK_READ_ONLY`) |

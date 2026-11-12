@@ -22,7 +22,7 @@ func (h *Hub) registerUserTools(s *server.MCPServer) {
 			mcp.WithDescription("List active workspace users with Slack ID, handle, real name, job title, role flags, and profile-update date; with_email adds each email and email_domain keeps only addresses on a domain (e.g. ru). The ID is what messages and API payloads carry, so it is the column that turns a raw <@U…> back into a person. Optionally include last-message date. With multiple workspaces configured, empty workspace lists every one under a [label] heading."),
 			mcp.WithBoolean("include_bots", mcp.Description("Include bot/integration accounts (default: false)")),
 			mcp.WithBoolean("with_activity", mcp.Description("Fetch each user's last-message date via search (slower; one search.messages call per user, run in parallel) (default: false)")),
-			mcp.WithString("filter", mcp.Description("Case-insensitive substring filter — matches against handle, real name, and job title. Useful for 'marketing', 'qa', 'devops' etc.")),
+			mcp.WithString("filter", mcp.Description("Case-insensitive substring filter — matches against Slack ID, handle, real name, and job title. Useful for 'marketing', 'qa', 'devops' etc., or a raw U… id from a message.")),
 			mcp.WithBoolean("with_email", mcp.Description("Add each user's email (default: false). Slack only returns emails to a token with the users:read.email scope; without it the column says so instead of looking empty.")),
 			mcp.WithString("email_domain", mcp.Description("Keep only users whose email is on this domain or a subdomain of it — 'ru' matches x@mail.ru and x@corp.example.ru, 'example.net' matches x@example.net. Implies with_email.")),
 			mcp.WithString("workspace", mcp.Description(workspaceArgAll)),
@@ -196,6 +196,12 @@ func renderUserRows(users []goslack.User, lastPost map[string]string, opts userR
 // userMatchesFilter returns true if needle (already lowercased) is a
 // substring of the user's handle, real name, display name, or job title.
 func userMatchesFilter(u goslack.User, needle string) bool {
+	// A raw <@U…> from a message finds its person, but only as the whole
+	// ID: IDs are random letters, so a substring match would let "pm" or
+	// "ad" hit people whose ID merely contains them (ADR 146).
+	if needle == strings.ToLower(u.ID) {
+		return true
+	}
 	hay := strings.ToLower(u.Name + " " + u.RealName + " " + u.Profile.RealName + " " + u.Profile.DisplayName + " " + u.Profile.Title)
 	return strings.Contains(hay, needle)
 }

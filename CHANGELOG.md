@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.78.0] - 2026-11-12
+
+### Fixed
+
+- **Mentions of people who did not post now resolve.** `get_thread`,
+  `get_message` and the other readers looked up names only for message
+  authors, so someone mentioned in a thread they never posted in showed
+  as a raw ID. Mentioned users are now resolved too. See ADR 146.
+
+### Added
+
+- **`list_users filter=` matches the Slack ID** (whole ID only), so a raw `U…` copied
+  from a message finds the person.
+
 ## [1.77.0] - 2026-11-11
 
 ### Changed
