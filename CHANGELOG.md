@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.79.0] - 2026-11-12
+
+### Fixed
+
+- **A DM no longer disappears into the max_chars footer.** When the
+  sweep runs out of budget, each DM that did not fit still shows its
+  newest message from the other side (cut to 200 characters) and the
+  call to read it. A long, already-read DM had pushed a new DM into the
+  footer as a bare count. See ADR 147.
+
+### Changed
+
+- **DMs with something new from the other side come first** in
+  `get_unread_summary`, after priority, VIP and starred conversations.
+- **Read DMs brought in by `dm_window_hours` show their last 5
+  messages**, not 50, so they no longer use up the budget.
+
 ## [1.78.0] - 2026-11-12
 
 ### Fixed

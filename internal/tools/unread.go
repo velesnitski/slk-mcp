@@ -699,6 +699,10 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	}
 	// Conversations starred in Slack come next (ADR 143).
 	starred := h.starredSet(ctx, h.workspaceName())
+	pendingDM := make(map[*slack.ChannelUnread]bool, len(results))
+	for _, r := range results {
+		pendingDM[r] = dmPending(r, selfID)
+	}
 	sort.SliceStable(results, func(i, j int) bool {
 		// Priority channels lead regardless of score: the operator named
 		// them, and under max_chars the tail is what gets dropped.
@@ -710,6 +714,12 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 		}
 		if si, sj := starred[results[i].Channel.ID], starred[results[j].Channel.ID]; si != sj {
 			return si
+		}
+		// A DM with something new from the other side outranks everything
+		// scored: a long conversation the operator has already read must
+		// not push it past the budget (ADR 147).
+		if pi, pj := pendingDM[results[i]], pendingDM[results[j]]; pi != pj {
+			return pi
 		}
 		return digest.RankUnread(results[i], selfID, now, p.urg) > digest.RankUnread(results[j], selfID, now, p.urg)
 	})
@@ -801,6 +811,11 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 			perChannel := p.maxPer
 			if slack.IsDirectMessage(r.Channel) {
 				perChannel = dmCap(p.maxPer)
+				// Nothing new from the other side: the DM is here only for
+				// the dm_window, so its newest few lines are enough (ADR 147).
+				if !pendingDM[r] {
+					perChannel = readDMMessages
+				}
 				// DMs are the actionable layer — few, human-length, and the
 				// place amounts/deadlines/asks live. Render them fuller than
 				// the 280-char channel preview so the sweep stops truncating
@@ -845,6 +860,16 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 			continue
 		}
 		if !budgetAppend(&b, rendered, p.maxChars) {
+			// A DM keeps one line past the cap – its newest message from
+			// the other side – instead of a bare name in the footer: that
+			// line is what says whether to open it (ADR 147). Bounded at
+			// dmOverflowLimit, so a sweep with many DMs stays small.
+			if slack.IsDirectMessage(r.Channel) && !skipped {
+				b.WriteString(dmOverflowLine(label, r, users, selfID,
+					readMoreHint(r.Channel.ID, sw.ws, len(h.workspaceNames()) > 1)))
+				b.WriteString("\n\n")
+				continue
+			}
 			// Carry the volume: a bare name doesn't say whether the
 			// channel is worth a drill-in call.
 			dropped = append(dropped, fmt.Sprintf("%s (%s)", label, omittedCount(r)))
