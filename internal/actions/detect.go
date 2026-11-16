@@ -238,10 +238,24 @@ func clause(t string, i, j int, seps string) string {
 	return t[start:]
 }
 
+// normalize lowers the text and drops link targets. A URL is an address,
+// not words: a "?" in its query made a links-only FYI read as a question,
+// and a date or a "today" in its path could read as a deadline. A link's
+// label is kept – it is what the writer typed (ADR 148).
 func normalize(s string) string {
+	s = slackLinkRe.ReplaceAllString(s, "$1")
+	s = bareURLRe.ReplaceAllString(s, "")
 	s = strings.ToLower(strings.TrimSpace(s))
 	return strings.ReplaceAll(s, "ё", "е")
 }
+
+var (
+	// slackLinkRe is a Slack link: <https://x>, <https://x|label>,
+	// <mailto:a@b|a@b>. User and channel references (<@U1>, <#C1|name>)
+	// are not links and stay.
+	slackLinkRe = regexp.MustCompile(`<(?:https?|mailto|ftp):[^>|]*(?:\|([^>]*))?>`)
+	bareURLRe   = regexp.MustCompile(`(?i)\bhttps?://\S+`)
+)
 
 func midnight(t time.Time) time.Time {
 	y, m, d := t.Date()

@@ -124,7 +124,7 @@ func (h *Hub) registerUnreadTools(s *server.MCPServer) {
 				mcp.WithNumber("log_samples_per_band", mcp.Description("Max sample messages shown per severity band in log mode (default: 1; raise for more inline samples)")),
 				mcp.WithBoolean("skip_log_mode", mcp.Description("If true, omit log-mode channels (alert/error feeds) entirely. Cheap way to shrink the output when bot channels dominate (default: false)")),
 				mcp.WithBoolean("skip_git_mode", mcp.Description("If true, omit git-mode channels (CI / git-bot feeds) entirely. Cheap way to shrink the output when git activity dominates (default: false)")),
-				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters), per workspace. Channels are emitted in urgency order; once the cap is reached, remaining channels are listed in a footer instead of inlined. Omit (default) to auto-cap to a total budget split across workspaces so a large backlog can't overflow the result. Pass 0 for unlimited, or a positive N for a hard per-workspace cap.")),
+				mcp.WithNumber("max_chars", mcp.Description("Soft cap on rendered body size (in characters), per workspace. Channels are emitted in urgency order; once the cap is reached, remaining channels are listed after it instead of inlined: each DM and the first 8 channels with one line (the newest message by someone else), the rest by name and count. Omit (default) to auto-cap to a total budget split across workspaces so a large backlog can't overflow the result. Pass 0 for unlimited, or a positive N for a hard per-workspace cap.")),
 				mcp.WithNumber("priority_hours", mcp.Description("Window for the configured priority channels (SLACK_PRIORITY_CHANNELS / priority_channels per workspace): they are shown for this many hours whether or not you have read them, first in the output and marked ★. With `after`, everything newer than the cursor is shown instead. Default: 24; 0 = off.")),
 				mcp.WithNumber("dm_window_hours", mcp.Description("If > 0, also include DM and multi-party-DM conversations with activity in the last N hours, regardless of last_read. Surfaces threads the operator has already opened (decisions made in DMs, exec sync that has been read). 0 = disabled (default), DMs surface only when actually unread.")),
 				mcp.WithNumber("thread_mention_hours", mcp.Description("If > 0, additionally surface channels where the operator was @-mentioned in a thread reply within the last N hours, even when the thread parent is already read. Closes a silent-miss gap in the unread sweep — Slack pings the operator, but UnreadAll's reply fetch only covers replies to NEW top-level messages. Default: 24 (recommended).")),
@@ -763,7 +763,7 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	b.WriteByte('\n')
 
 	logChannels := 0
-	var dropped []string
+	var dropped, previews []string
 	for _, r := range results {
 		users := h.resolveRefsWithReplies(ctx, r)
 		label := channelDisplayLabel(ctx, r.Channel, h.Users())
@@ -870,6 +870,16 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 				b.WriteString("\n\n")
 				continue
 			}
+			// The first few channels in rank order keep one line – the
+			// newest thing someone else said there – so a person's
+			// message is not reduced to a count. Feeds (git, log,
+			// low-signal) and skipped channels stay counts (ADR 148).
+			if len(previews) < channelPreviewLines && !skipped && !isGit && !isLog && !lowSignal {
+				if line, ok := channelPreviewLine(label, r, users, selfID); ok {
+					previews = append(previews, line)
+					continue
+				}
+			}
 			// Carry the volume: a bare name doesn't say whether the
 			// channel is worth a drill-in call.
 			dropped = append(dropped, fmt.Sprintf("%s (%s)", label, omittedCount(r)))
@@ -879,9 +889,20 @@ func (h *Hub) sweepUnread(ctx context.Context, sw *sweep, p unreadParams) (body,
 	if logChannels > 0 {
 		h.log.Debug("log mode applied", "channels", logChannels)
 	}
+	if len(previews) > 0 {
+		fmt.Fprintf(&b, "+ %d channels cut by max_chars cap, newest line from someone else:\n%s\n",
+			len(previews), strings.Join(previews, "\n"))
+		if len(dropped) == 0 {
+			b.WriteString("  (use get_channel_digest to drill in)\n\n")
+		}
+	}
 	if len(dropped) > 0 {
-		fmt.Fprintf(&b, "+ %d channels omitted by max_chars cap, with unread counts: %s\n  (use get_channel_digest to drill in)\n\n",
-			len(dropped), strings.Join(dropped, ", "))
+		more := ""
+		if len(previews) > 0 {
+			more = "more "
+		}
+		fmt.Fprintf(&b, "+ %d %schannels omitted by max_chars cap, with unread counts: %s\n  (use get_channel_digest to drill in)\n\n",
+			len(dropped), more, strings.Join(dropped, ", "))
 	}
 	if p.includeRefs {
 		if footer := digest.RenderReferences(digest.CollectReferences(results)); footer != "" {

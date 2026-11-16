@@ -51,6 +51,8 @@ func TestDue_NoDeadline(t *testing.T) {
 		"в среде разработки всё ок",
 		"встреча в 10.11",
 		"FYI, in process",
+		"<https://reports.example/daily/today/2026-11-20|report>",
+		"see https://reports.example/until-friday/plan",
 		"",
 	} {
 		if got := Due(text, mon); !got.IsZero() {
@@ -86,6 +88,13 @@ func TestClassify(t *testing.T) {
 		{"норм, дедлайн до завтра) мерси!", false, true, true, None},
 		{"спасибо, пришли пожалуйста до завтра", false, true, true, Ask},
 		{"беру отгул в пятницу, посмотри пожалуйста за меня", true, true, false, None},
+		// Links only: a "?" in a query string is not a question (ADR 148).
+		{"<@U1> <https://www.figma.com/design/x/Board?node-id=1-2&t=abc|Board> <https://tracker.example/agiles/1?query=open>", false, true, false, None},
+		{"<@U1> gantt: https://docs.example/d/1?usp=sharing", false, true, false, None},
+		// A link's label is still read, and a real question still counts.
+		{"<@U1> <https://tracker.example/x?a=1|что скажешь?>", false, true, false, Question},
+		{"<@U1> это по <https://docs.example/d?x=1|плану>?", false, true, false, Question},
+		{"<@U1> посмотри пожалуйста <https://docs.example/d?x=1>", false, true, false, Ask},
 	}
 	for _, c := range cases {
 		if got := Classify(c.text, c.own, c.addr, c.dated); got != c.want {

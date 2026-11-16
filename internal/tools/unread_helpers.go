@@ -776,8 +776,6 @@ func newestTS(results []*slack.ChannelUnread) string {
 	return maxTS
 }
 
-// dmCap is the per-conversation cap for a DM in the unread sweep: the
-// caller's cap, but never below slack.DMMinMessages (ADR 128). Pure.
 // omittedCount is the volume a channel cut by the max_chars cap is
 // listed with: its messages and thread replies. Counting only top-level
 // messages listed a channel whose news was all in threads as "(0)".
@@ -795,6 +793,8 @@ func omittedCount(r *slack.ChannelUnread) string {
 	return fmt.Sprintf("%d+%d replies", len(r.Messages), replies)
 }
 
+// dmCap is the per-conversation cap for a DM in the unread sweep: the
+// caller's cap, but never below slack.DMMinMessages (ADR 128). Pure.
 func dmCap(maxPer int) int {
 	if maxPer < slack.DMMinMessages {
 		return slack.DMMinMessages

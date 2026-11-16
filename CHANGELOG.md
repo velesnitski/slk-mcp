@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.80.0] - 2026-11-16
+
+### Fixed
+
+- **A links-only mention is no longer a question.** `get_my_actions`
+  read the `?` in a URL's query string as a question mark, so an FYI
+  with links was listed as waiting for an answer. Link targets are now
+  dropped before the phrase and deadline rules; a link's label is still
+  read. See ADR 148.
+
+### Changed
+
+- **Channels cut by `max_chars` keep one line.** The first 8 capped
+  channels show their volume and the newest message by someone other
+  than the operator (a mention of the operator first), cut to 160
+  characters. Feeds and channels only the operator or bots wrote in
+  stay counts in the footer. See ADR 148.
+
 ## [1.79.0] - 2026-11-12
 
 ### Fixed

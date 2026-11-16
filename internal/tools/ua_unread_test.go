@@ -278,11 +278,13 @@ func TestRunUnreadSummary_MaxCharsCapListsOmittedChannelsWithCounts(t *testing.T
 	p.maxChars = 260
 	out := resultText(h.runUnreadSummary(context.Background(), p, ""))
 
-	if !strings.Contains(out, "channels omitted by max_chars cap, with unread counts:") {
-		t.Fatalf("capped channels must be named in a footer, not silently dropped:\n%s", out)
+	// A capped channel where someone else wrote keeps one preview line
+	// with its volume (ADR 148), never silently dropped.
+	if !strings.Contains(out, "channels cut by max_chars cap, newest line from someone else:") {
+		t.Fatalf("capped channels must be listed after the cap, not silently dropped:\n%s", out)
 	}
-	if !strings.Contains(out, "(1)") {
-		t.Fatalf("footer must carry the per-channel volume:\n%s", out)
+	if !strings.Contains(out, "(1): ") || !strings.Contains(out, "Sam") {
+		t.Fatalf("each capped line must carry the volume and the writer:\n%s", out)
 	}
 	if !strings.Contains(out, "4 channels, 4 top-level") {
 		t.Fatalf("header must still count everything found:\n%s", out)
