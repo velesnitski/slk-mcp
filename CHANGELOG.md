@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.80.1] - 2026-11-20
+
+### Fixed
+
+- **An ask for an answer is settled by the answer.** `get_my_actions`
+  kept "give us an answer by tomorrow" open after the operator replied
+  with the answer, because an ask without "?" was only acknowledged by
+  any reply. Asks for an answer, status or update are now Answered by a
+  reply that does not just accept them, or by one of ten words or more
+  (ADR 149).
+
 ## [1.80.0] - 2026-11-16
 
 ### Fixed

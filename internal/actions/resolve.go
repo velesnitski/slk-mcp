@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -97,12 +98,38 @@ func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 			// the work ("ок", "сделаю") still leaves it to do.
 			out.Status = Answered
 			return out
+		case kind == Ask && AsksForAnswer(item.Text) && (!accepts(m.Text) || substantive(m.Text)):
+			// "Дайте ответ завтра" asks for the reply itself. A real answer
+			// often mentions work in progress ("взяли в работу, срок –
+			// декабрь"), so a reply of some length settles it even when it
+			// contains an acceptance word; a bare "ок" does not.
+			out.Status = Answered
+			return out
 		default:
 			out.Status = Acked
 		}
 	}
 	return out
 }
+
+// answerRe matches asks whose deliverable is the reply itself – an answer,
+// a status, information – rather than work: "дайте плз ответ завтра",
+// "подскажи статус", "let me know". "Пришли отчёт" is work and stays out.
+var answerRe = regexp.MustCompile(`(?i)` +
+	`(^|[^\p{L}])(дай|дайте|пришли|пришлите|скинь|скиньте|напиши|напишите|give|send)(\s+\S+){0,2}?\s+` +
+	`(ответ|статус|апдейт|инфо|информаци|фидбек|обратн\S* связь|answer|status|update|feedback)` +
+	`|(^|[^\p{L}])(ответь|ответьте|подскажи|подскажите|дай знать|дайте знать|сообщи|сообщите)([^\p{L}]|$)` +
+	`|let me know|get back to (me|us)|what'?s the status|какой статус`)
+
+// AsksForAnswer reports whether an ask is settled by a reply that answers
+// it, not only by a "done".
+func AsksForAnswer(text string) bool { return answerRe.MatchString(normalize(text)) }
+
+// substantiveWords is the length from which a reply to an ask for an answer
+// counts as the answer, whatever acceptance words it also carries.
+const substantiveWords = 10
+
+func substantive(text string) bool { return len(strings.Fields(text)) >= substantiveWords }
 
 // affirmatives are the short replies that accept a request rather than
 // answer it: "да", "ага, сейчас".
