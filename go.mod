@@ -3,8 +3,8 @@ module github.com/velesnitski/slk-mcp
 go 1.26.0
 
 require (
-	github.com/mark3labs/mcp-go v1.5.0
-	github.com/slack-go/slack v0.35.0
+	github.com/mark3labs/mcp-go v1.6.0
+	github.com/slack-go/slack v0.36.0
 )
 
 require (
