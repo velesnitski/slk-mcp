@@ -59,10 +59,20 @@ type Deadline struct {
 	// пятницу" also narrates ("доклад завтра", "открыли в пятницу"), so
 	// only a strong deadline makes a message an ask on its own.
 	Strong bool
+	// Dated marks that a date phrase was found besides any urgency word.
+	Dated bool
 }
 
 // IsZero reports whether no deadline was found.
 func (d Deadline) IsZero() bool { return d.Day.IsZero() }
+
+// OnlyUrgent reports whether the deadline comes from an urgency word alone
+// ("горит", "asap") and no date. Such a word describes a situation as
+// often as it asks for something: "а сейчас горит))) Ну работаем) Все ок"
+// is a remark, not a request (ADR 150).
+func (d Deadline) OnlyUrgent() bool {
+	return d.Urgent && !d.Dated
+}
 
 // Classify says what the message commits to. own is whether the operator
 // wrote it; addressed is whether it was written to someone in particular
@@ -134,6 +144,7 @@ func due(text string, at time.Time, request bool) Deadline {
 	// The earliest strong deadline wins; a weak one counts only when
 	// there is no strong one.
 	var best Deadline
+	dated, fromUrgent := false, false
 	consider := func(d time.Time, phrase string, strong bool) {
 		if d.IsZero() || d.Before(day) {
 			return
@@ -141,13 +152,18 @@ func due(text string, at time.Time, request bool) Deadline {
 		if request && !strong && weakNarrates(t, phrase) {
 			return
 		}
+		if !fromUrgent {
+			dated = true
+		}
 		if best.IsZero() || (strong && !best.Strong) || (strong == best.Strong && d.Before(best.Day)) {
 			best = Deadline{Day: d, Phrase: strings.TrimSpace(phrase), Urgent: best.Urgent, Strong: strong}
 		}
 	}
 
 	if m := urgentRe.FindString(t); m != "" {
+		fromUrgent = true
 		consider(day, m, true)
+		fromUrgent = false
 		best.Urgent = true
 	}
 	for _, r := range relativeDays {
@@ -198,6 +214,7 @@ func due(text string, at time.Time, request bool) Deadline {
 			consider(day, m, false)
 		}
 	}
+	best.Dated = dated
 	return best
 }
 
@@ -330,6 +347,11 @@ var (
 		`скинул`, `скинула`, `прислал`, `прислала`, `выкатил`, `залил`, `закрыл`, `закрыто`,
 		`починил`, `исправил`, `держи`, `done`, `sent`, `shipped`, `fixed`, `merged`, `ready`,
 		`deployed`, `here it is`, `here you go`, `attached`, `resolved`, `closed`,
+		// Delivery said in the plural or as a deploy (ADR 150): "разобрались,
+		// затолкали, деплой в прод живой" closed nothing before.
+		`сделали`, `отправили`, `скинули`, `прислали`, `закрыли`, `починили`, `исправили`,
+		`выкатили`, `выкатила`, `залили`, `залила`, `задеплоил\p{L}*`, `затолкал\p{L}*`,
+		`протолкнул\p{L}*`, `pushed to prod`, `released`,
 	)
 	ackRe = words(
 		`принял`, `приняла`, `ок`, `окей`, `хорошо`, `понял`, `поняла`, `договорились`, `беру`,

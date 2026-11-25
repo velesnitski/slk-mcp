@@ -68,6 +68,38 @@ func TestDue_Urgent(t *testing.T) {
 	}
 }
 
+// An urgency word alone is a remark; with a date or a request word it
+// still makes an ask (ADR 150).
+func TestOnlyUrgent(t *testing.T) {
+	remark := "Хотелось бы раньше эскалацию))) А сейчас горит))) Ну работаем) Все ок)))"
+	d := Due(remark, mon)
+	if !d.OnlyUrgent() {
+		t.Fatalf("remark: %+v", d)
+	}
+	if got := Classify(remark, false, true, d.Strong && !d.OnlyUrgent()); got != None {
+		t.Fatalf("remark classified %v", got)
+	}
+	dated := Due("горит, нужно до пятницы", mon)
+	if dated.OnlyUrgent() {
+		t.Fatalf("dated: %+v", dated)
+	}
+	ask := "горит, глянь пж"
+	if got := Classify(ask, false, true, Due(ask, mon).Strong && !Due(ask, mon).OnlyUrgent()); got != Ask {
+		t.Fatalf("ask with a request word classified %v", got)
+	}
+}
+
+func TestDone_Delivery(t *testing.T) {
+	for _, s := range []string{"разобрались, затолкали", "выкатили на прод", "залили", "задеплоили", "pushed to prod"} {
+		if !Done(s) {
+			t.Errorf("Done(%q) = false", s)
+		}
+	}
+	if Done("проблема на проде") {
+		t.Error("a problem on prod is not a delivery")
+	}
+}
+
 func TestClassify(t *testing.T) {
 	cases := []struct {
 		text             string

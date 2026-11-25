@@ -722,8 +722,14 @@ func forwardedText(a goslack.Attachment, users map[string]string) string {
 // none. limit caps each forwarded text in runes; limit <= 0 renders it
 // whole.
 func renderForwards(msg goslack.Message, users map[string]string, limit int) string {
+	return renderForwardAttachments(msg.Attachments, users, limit)
+}
+
+// renderForwardAttachments is renderForwards over a bare attachment list,
+// shared with search hits, whose type carries the same attachments.
+func renderForwardAttachments(atts []goslack.Attachment, users map[string]string, limit int) string {
 	var parts []string
-	for _, a := range msg.Attachments {
+	for _, a := range atts {
 		if !IsForwardedAttachment(a) {
 			continue
 		}
@@ -1373,6 +1379,12 @@ func ThreadContextLine(marker string, m goslack.Message, displayName string) str
 
 func searchResultLine(m goslack.SearchMessage, fullText bool, names map[string]string) string {
 	body := collapseWhitespace(m.Text)
+	// A forwarded message carries its text in an attachment; without it
+	// the hit printed an empty body. Only an empty body is filled, so a
+	// message that also unfurls a pasted link reads as before.
+	if body == "" {
+		body = renderForwardAttachments(m.Attachments, names, 0)
+	}
 	if !fullText {
 		if cut, dropped := truncateRunes(body, searchBodyLimit); dropped > 0 {
 			body = cut + "..."

@@ -127,7 +127,7 @@ Or via config file (`~/.claude.json`):
 | `read_canvas` | Read canvases in a channel/DM (tab + shared); `date`/`match` select per-meeting notes, `list_only` lists them |
 | `get_multi_channel_digest` | Digest across multiple channels |
 | `get_morning_recap` | Decisions + activity across channels |
-| `search_messages` | Workspace search (Slack syntax) |
+| `search_messages` | Workspace search (Slack syntax); a forwarded message shows the original's author and text |
 | `find_decisions` | Messages that look like decisions (keywords + reactions) |
 | `get_thread` | Full thread replies |
 | `get_message` | One message verbatim with metadata; `reactors=true` names who reacted, per emoji and as one roster |
@@ -154,7 +154,7 @@ Or via config file (`~/.claude.json`):
 |---|---|
 | `get_unread_summary` | Unread messages across all joined channels and every configured workspace, most urgent first with DMs on top; returns a delta cursor so the next call shows only what is new, and skips conversations idle since you last read them |
 | `get_mentions` | Messages that mention you; `summary=true` returns load stats (by sender / channel, DM split) instead of the list |
-| `get_my_actions` | Your open commitments: what you promised, what others asked of you, and what you asked of others — with the deadline each names ("until tomorrow" said yesterday is due today), judged open or done from what followed; `due=today` (default) also lists what needs a ping; with `SLACK_MEETING_ITEMS_CMD` set, also what you promised on calls, marked when Slack already holds it or a later DM seems to deliver it |
+| `get_my_actions` | Your open commitments: what you promised, what others asked of you, and what you asked of others — with the deadline each names ("until tomorrow" said yesterday is due today), judged open or done from what followed (a delivery like "deployed" or a posted task id closes it; an urgency word alone such as "горит" is a remark, not an ask); `due=today` (default) also lists what needs a ping; with `SLACK_MEETING_ITEMS_CMD` set, also what you promised on calls, marked when Slack already holds it or a later DM seems to deliver it |
 | `mark_read` | Mark a channel read through a given timestamp |
 | `edit_canvas` | Edit a canvas as you: append/prepend, insert before/after, replace or delete a section found by its text, replace the whole canvas, rename; `dry_run` previews (disabled in `SLACK_READ_ONLY`, needs `canvases:write`) |
 | `get_list_items` | Read the items of a Slack List by its `list_id` (needs `lists:read`) |

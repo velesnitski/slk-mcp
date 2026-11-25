@@ -92,6 +92,12 @@ func Resolve(kind Kind, item Msg, follow []Msg, self string) Outcome {
 		case kind == Question:
 			out.Status = Answered
 			return out
+		case kind == Waiting && AsksForRef(item.Text) && HasRef(m.Text):
+			// "нужен taskid pls" is settled by whoever posts the key or the
+			// link, not by a "done" (ADR 150).
+			out.Status = Answered
+			out.By, out.Reply, out.At = m.User, m.Text, m.TS
+			return out
 		case kind == Ask && strings.Contains(item.Text, "?") && !accepts(m.Text):
 			// "надо презентацию на завтра?" asks a question with a request
 			// word in it; "подвинул на пару недель" answers it. Accepting
@@ -124,6 +130,19 @@ var answerRe = regexp.MustCompile(`(?i)` +
 // AsksForAnswer reports whether an ask is settled by a reply that answers
 // it, not only by a "done".
 func AsksForAnswer(text string) bool { return answerRe.MatchString(normalize(text)) }
+
+// refAskRe matches a request for a reference: a task id, a ticket, a link.
+var refAskRe = regexp.MustCompile(`(?i)(task ?id|ticket|link|номер задачи|номер тикета|тикет|ссылк|айди задачи|id задачи|\bid\b)`)
+
+// refRe is a tracker key (PROJ-123) or a link.
+var refRe = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,15}-\d+\b|https?://\S+`)
+
+// AsksForRef reports whether a request asks for a task id or a link.
+func AsksForRef(text string) bool { return refAskRe.MatchString(normalize(text)) }
+
+// HasRef reports whether a reply carries a tracker key or a link. The raw
+// text is used: keys are upper-case and links are dropped by normalize.
+func HasRef(text string) bool { return refRe.MatchString(text) }
 
 // substantiveWords is the length from which a reply to an ask for an answer
 // counts as the answer, whatever acceptance words it also carries.

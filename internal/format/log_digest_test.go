@@ -325,6 +325,22 @@ func TestSearchResult_RendersChannelAuthorAndBody(t *testing.T) {
 	}
 }
 
+// A forwarded message has no text of its own; the hit shows the original
+// with its author instead of an empty body.
+func TestSearchResult_ForwardedMessageShowsOriginal(t *testing.T) {
+	m := sgHit("alpha", "Alex", "1700000000.000100", "")
+	m.Attachments = []goslack.Attachment{{
+		AuthorName: "Bob",
+		Text:       "the original text",
+		FromURL:    "https://example.slack.com/archives/C1/p1700000000000001",
+		Ts:         "1700000000.000001",
+	}}
+	got := SearchResult(m)
+	if !strings.Contains(got, "↪ Bob: the original text") {
+		t.Fatalf("forwarded body missing: %q", got)
+	}
+}
+
 func TestSearchResult_LongBodyTruncated(t *testing.T) {
 	got := SearchResult(sgHit("alpha", "Alex", "1700000000.000100", strings.Repeat("a", 400)))
 	if !strings.HasSuffix(got, "...") {

@@ -304,7 +304,9 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 			addressed = true
 		}
 		due := actions.Due(m.Text, at)
-		kind := actions.Classify(m.Text, isOwn, addressed, due.Strong)
+		// An urgency word without a date or a request word is a remark,
+		// not an ask (ADR 150); a request word still makes it one.
+		kind := actions.Classify(m.Text, isOwn, addressed, due.Strong && !due.OnlyUrgent())
 		if kind == actions.None {
 			return
 		}
