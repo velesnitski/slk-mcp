@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.82.0] - 2026-11-27
+
+### Added
+
+- **US date order.** `SLACK_DATE_ORDER=mdy` (or `en-US`) reads "by
+  12/3" in `get_my_actions` as December 3 and prints dates as
+  `Fri 11/27`; default `dmy` is unchanged. Per workspace: `date_order` in
+  `SLACK_WORKSPACES`. Dotted dates stay day-first; a date valid only one
+  way ("12/25", "25/12") is read that way in either order (ADR 152).
+- **Ordinal dates.** "by Dec 3rd", "by Nov. 21st", "until the 22nd of
+  November" now set a deadline.
+
+### Fixed
+
+- **A redirect is not a request.** Your "ask the ops team" or "по
+  доступам обратись к devops" no longer lists as waiting on a reply;
+  "ask me", "обратись ко мне", a question, or a request left after the
+  redirect ("ask ops and let me know") still do.
+
 ## [1.81.0] - 2026-11-27
 
 ### Added

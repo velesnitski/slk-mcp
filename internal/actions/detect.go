@@ -89,7 +89,7 @@ func Classify(text string, own, addressed, dated bool) Kind {
 		if absenceRe.MatchString(t) {
 			return None // "возьму полдня больничного" takes time off, owes nothing
 		}
-		if addressed && requestRe.MatchString(t) {
+		if addressed && requestRe.MatchString(t) && !onlyRedirect(t) {
 			return Waiting
 		}
 		if promiseRe.MatchString(t) {
@@ -114,6 +114,32 @@ func Classify(text string, own, addressed, dated bool) Kind {
 	return None
 }
 
+// onlyRedirect reports whether the operator's request only sends the
+// other person elsewhere ("по доступам обратись pls к devops", "ask the
+// ops team"): nothing is owed back to the operator, so it is not waiting
+// on a reply. Pointing someone at the operator ("обратись ко мне", "ask
+// me") is not a redirect, and any request left once the redirect and
+// politeness words are removed ("ask ops and let me know") still waits.
+func onlyRedirect(t string) bool {
+	found := false
+	rest := t
+	for _, re := range redirectRes {
+		for _, m := range re.FindAllStringSubmatch(rest, -1) {
+			if selfTargetRe.MatchString(m[1]) {
+				return false
+			}
+			found = true
+		}
+		rest = re.ReplaceAllString(rest, " ")
+	}
+	if !found {
+		return false
+	}
+	rest = politeRe.ReplaceAllString(rest, " ")
+	// A question ("can you check with legal?") expects the answer back.
+	return !requestRe.MatchString(rest) && !strings.Contains(t, "?")
+}
+
 // Done reports whether a follow-up message says the work is finished.
 func Done(text string) bool { return doneRe.MatchString(normalize(text)) }
 
@@ -129,16 +155,75 @@ var DoneReactions = map[string]bool{
 
 // Due finds the earliest deadline the text names, read relative to when
 // it was written: "до завтра" said yesterday is due today.
-func Due(text string, at time.Time) Deadline { return due(text, at, false) }
+func Due(text string, at time.Time) Deadline { return due(text, at, false, DayFirst) }
+
+// DueIn is Due with an explicit order for numeric dates: "by 12/3" is
+// 12 March day-first and December 3 month-first (ADR 152).
+func DueIn(text string, at time.Time, order DateOrder) Deadline {
+	return due(text, at, false, order)
+}
 
 // DueOfRequest is Due for a request — an ask, a question or the
 // operator's own request of someone — where a weak date often belongs to
 // something other than the request: the writer's own plan ("завтра
 // вышлю файл, посмотри") or the topic of a question ("обзор завтра?").
 // Such a weak date is not a deadline; strong ones stand.
-func DueOfRequest(text string, at time.Time) Deadline { return due(text, at, true) }
+func DueOfRequest(text string, at time.Time) Deadline { return due(text, at, true, DayFirst) }
 
-func due(text string, at time.Time, request bool) Deadline {
+// DueOfRequestIn is DueOfRequest with an explicit numeric date order.
+func DueOfRequestIn(text string, at time.Time, order DateOrder) Deadline {
+	return due(text, at, true, order)
+}
+
+// DateOrder is how a numeric date like 12/3 is read.
+type DateOrder int
+
+const (
+	// DayFirst reads 12/3 and 12.3 as 12 March (most of the world).
+	DayFirst DateOrder = iota
+	// MonthFirst reads 12/3 as December 3 (US). A dotted 12.3 stays
+	// day-first: dots are the European form even in US-written text.
+	MonthFirst
+)
+
+// ParseDateOrder reads a SLACK_DATE_ORDER value: "dmy" or "mdy", or a
+// locale whose convention implies one ("en-US" is month-first). Empty is
+// day-first.
+func ParseDateOrder(s string) (DateOrder, bool) {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), "_", "-")) {
+	case "", "dmy", "day-first", "d/m":
+		return DayFirst, true
+	case "mdy", "month-first", "m/d", "us", "en-us":
+		return MonthFirst, true
+	}
+	return DayFirst, false
+}
+
+// String is the setting value for o.
+func (o DateOrder) String() string {
+	if o == MonthFirst {
+		return "mdy"
+	}
+	return "dmy"
+}
+
+// numericDate reads a numeric date in order. When that reading is
+// impossible (12/25 day-first, 25/12 month-first) the other one is used:
+// a date that exists only one way is not ambiguous.
+func numericDate(day time.Time, a, sep, b, yy string, order DateOrder) time.Time {
+	if order == MonthFirst && sep == "/" {
+		if d := dateOf(day, b, a, yy); !d.IsZero() {
+			return d
+		}
+		return dateOf(day, a, b, yy)
+	}
+	if d := dateOf(day, a, b, yy); !d.IsZero() {
+		return d
+	}
+	return dateOf(day, b, a, yy)
+}
+
+func due(text string, at time.Time, request bool, order DateOrder) Deadline {
 	t := normalize(text)
 	day := midnight(at)
 	// The earliest strong deadline wins; a weak one counts only when
@@ -197,7 +282,7 @@ func due(text string, at time.Time, request bool) Deadline {
 		}
 	}
 	for _, m := range numericDateRe.FindAllStringSubmatch(t, -1) {
-		consider(dateOf(day, m[2], m[3], m[4]), m[0], true)
+		consider(numericDate(day, m[2], m[3], m[4], m[5], order), m[0], true)
 	}
 	for _, m := range monthDayRe.FindAllStringSubmatch(t, -1) {
 		if mon, ok := monthOf(m[3]); ok {
@@ -362,7 +447,16 @@ var (
 	// "беру") but commits to nothing.
 	absenceRe = words(`больничн\p{L}*`, `отгул\p{L}*`, `отпуск\p{L}*`, `выходн\p{L}*`, `day off`, `sick leave`, `sick day`, `pto`, `vacation`, `out of office`)
 	thanksRe  = words(`спасибо`, `спс`, `мерси`, `благодарю`, `thanks`, `thank you`, `thx`, `ty`)
-	urgentRe  = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
+	// redirectRes send someone to another person or team; group 1 is the
+	// target, checked against selfTargetRe.
+	redirectRes = []*regexp.Regexp{
+		regexp.MustCompile(wb + `(?:обратись|обратитесь|обращайся|обращайтесь|спроси|спросите|пиши|пишите|напиши|напишите|пингани|пингуй|пингуйте|сходи|сходите|иди|идите|уточни|уточните)(?:\s+\p{L}+){0,3}?\s+(?:к|ко|в|у)\s+(\S+)`),
+		regexp.MustCompile(wb + `это(?:\s+вопрос)?\s+(?:к|ко|для)\s+(\S+)`),
+		regexp.MustCompile(wb + `(?:ask|ping|reach out to|talk to|check with|contact|go to)\s+(?:the\s+)?(\S+)`),
+	}
+	selfTargetRe = regexp.MustCompile(`^(?:мне|нам|меня|нас|me|us|myself)` + web)
+	politeRe     = words(`please`, `pls`, `plz`, `пожалуйста`, `пж`, `плз`, `can you`, `could you`, `would you`, `можешь`, `можете`)
+	urgentRe     = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
 
 	relativeDays = []struct {
 		re     *regexp.Regexp
@@ -386,13 +480,15 @@ var (
 	// monthEndRe is an explicit end: the month's last day.
 	monthEndRe = words(`до конца месяца`, `к концу месяца`, `end of (?:the |this )?month`, `eom`)
 
+	// ordinal is an English day suffix: "Dec 3rd", "the 1st of June".
+	ordinal   = `(?:st|nd|rd|th)?`
 	prep      = `(?:до|к|ко|в|во|на|by|until|till|til|before|on|this|next|deadline|дедлайн|срок)`
 	datePrep  = `(?:до|к|ко|by|until|till|til|before|on|deadline|дедлайн|срок)`
 	weekdayRe = regexp.MustCompile(wb + `(` + prep + `)\s+(понедельник\p{L}*|вторник\p{L}*|сред[ауы]|четверг\p{L}*|пятниц\p{L}*|суббот\p{L}*|воскресень\p{L}*|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fr+i(?:day)?|sat(?:urday)?|sun(?:day)?)` + web)
 
-	numericDateRe = regexp.MustCompile(wb + `(` + datePrep + `)\s*:?\s*(\d{1,2})[./](\d{1,2})(?:[./](\d{2}|\d{4}))?` + web)
-	monthDayRe    = regexp.MustCompile(wb + `(` + datePrep + `)\s+(\d{1,2})\s+(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[яй]|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*|jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)` + web)
-	dayMonthEnRe  = regexp.MustCompile(wb + `(?:by|until|till|before|on)\s+(jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)\s+(\d{1,2})` + web)
+	numericDateRe = regexp.MustCompile(wb + `(` + datePrep + `)\s*:?\s*(\d{1,2})([./])(\d{1,2})(?:[./](\d{2}|\d{4}))?` + web)
+	monthDayRe    = regexp.MustCompile(wb + `(` + datePrep + `)\s+(?:the\s+)?(\d{1,2})` + ordinal + `\s+(?:of\s+)?(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[яй]|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*|jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)` + web)
+	dayMonthEnRe  = regexp.MustCompile(wb + `(?:by|until|till|before|on)\s+(jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)\.?\s+(\d{1,2})` + ordinal + `,?` + web)
 )
 
 // isStrongPrep reports whether a weekday's preposition sets a deadline

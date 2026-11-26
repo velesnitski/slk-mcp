@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/velesnitski/slk-mcp/internal/actions"
 )
 
 // Config is the loaded runtime configuration for slk-mcp.
@@ -92,6 +94,12 @@ type Config struct {
 	// does not give its own starred list to apps (ADR 143).
 	StarredChannels []string
 
+	// DateOrder is how get_my_actions reads and prints numeric dates:
+	// "dmy" (default; 12/3 is 12 March) or "mdy" (12/3 is December 3,
+	// as in the US). SLACK_DATE_ORDER; "en-US" is accepted as "mdy".
+	// Per workspace: "date_order" in a SLACK_WORKSPACES entry. ADR 152.
+	DateOrder string
+
 	// StateDir holds what slk-mcp keeps between runs: the VIP list and
 	// starred conversations read from Slack (ADR 143). Default: the user
 	// cache directory + "/slk-mcp"; SLACK_STATE_DIR overrides it, "off"
@@ -141,6 +149,9 @@ type WorkspaceConfig struct {
 	UserToken        string
 	Channels         []string
 	PriorityChannels []string
+	// DateOrder overrides Config.DateOrder for this workspace; empty
+	// inherits it.
+	DateOrder string
 }
 
 // WorkspaceView pairs a workspace label with a fully-derived *Config
@@ -180,6 +191,7 @@ func Load() *Config {
 		VIPUsers:              parseCSV(os.Getenv("SLACK_VIP_USERS")),
 		StarredChannels:       parseCSV(os.Getenv("SLACK_STARRED_CHANNELS")),
 		StateDir:              stateDir(os.Getenv("SLACK_STATE_DIR")),
+		DateOrder:             strings.TrimSpace(os.Getenv("SLACK_DATE_ORDER")),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",
@@ -223,6 +235,8 @@ type wsJSON struct {
 	// PriorityChannels is an optional comma-separated list, same shape as
 	// channels — see Config.PriorityChannels.
 	PriorityChannels string `json:"priority_channels"`
+	// DateOrder is the per-workspace SLACK_DATE_ORDER ("dmy" or "mdy").
+	DateOrder string `json:"date_order"`
 }
 
 // ParseWorkspaces parses the SLACK_WORKSPACES JSON array. A blank value
@@ -245,6 +259,7 @@ func ParseWorkspaces(s string) ([]WorkspaceConfig, error) {
 			UserToken:        strings.TrimSpace(r.UserToken),
 			Channels:         parseCSV(r.Channels),
 			PriorityChannels: parseCSV(r.PriorityChannels),
+			DateOrder:        strings.TrimSpace(r.DateOrder),
 		})
 	}
 	return out, nil
@@ -294,6 +309,9 @@ func (c *Config) WorkspaceViews() []WorkspaceView {
 		wc.UserToken = ws.UserToken
 		wc.Channels = ws.Channels
 		wc.PriorityChannels = ws.PriorityChannels
+		if ws.DateOrder != "" {
+			wc.DateOrder = ws.DateOrder
+		}
 		wc.Workspaces = nil
 		wc.workspacesErr = nil
 		views = append(views, WorkspaceView{Name: ws.Name, Cfg: &wc})
@@ -316,6 +334,12 @@ func (c *Config) Validate() error {
 		if ws.BotToken == "" && ws.UserToken == "" {
 			return fmt.Errorf("workspace %d (%q): %w", i, ws.Name, ErrMissingToken)
 		}
+		if _, ok := actions.ParseDateOrder(ws.DateOrder); !ok {
+			return fmt.Errorf("workspace %d (%q): date_order %q: want dmy or mdy", i, ws.Name, ws.DateOrder)
+		}
+	}
+	if _, ok := actions.ParseDateOrder(c.DateOrder); !ok {
+		return fmt.Errorf("SLACK_DATE_ORDER %q: want dmy or mdy", c.DateOrder)
 	}
 	return nil
 }

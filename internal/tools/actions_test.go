@@ -117,7 +117,7 @@ func TestClassifyHits_SkipsNoise(t *testing.T) {
 		hit("G1", "mpdm-a--b", true, "U2", "<@U1> пришли пожалуйста билеты"),
 		hit("D2", "U2", false, "U2", "У коллег доклад завтра"), // narrative date, no request
 	}
-	got := classifyHits(own, toMe, "U1", bots)
+	got := classifyHits(own, toMe, "U1", bots, 0)
 	if len(got) != 1 || !strings.Contains(got[0].hit.Text, "билеты") {
 		var texts []string
 		for _, it := range got {

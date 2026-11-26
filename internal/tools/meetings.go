@@ -437,7 +437,7 @@ func renderMeetings(verdicts []meetingVerdict, p actionParams, multi bool) strin
 			if r := []rune(text); len(r) > 80 {
 				text = string(r[:80]) + "…"
 			}
-			fmt.Fprintf(&b, " · ✅ you wrote %s %s: \"%s\"", e.Channel.Name, format.ParseTS(e.Timestamp).Format("02.01 15:04"), text)
+			fmt.Fprintf(&b, " · ✅ you wrote %s %s: \"%s\"", e.Channel.Name, stampLabel(format.ParseTS(e.Timestamp), p.order), text)
 			if e.Permalink != "" {
 				b.WriteString(" · " + e.Permalink)
 			}
@@ -479,7 +479,7 @@ func meetingLine(v meetingVerdict, p actionParams) string {
 		fmt.Fprintf(&b, " “%s”", title)
 	}
 	if !it.start.IsZero() {
-		b.WriteString(" " + it.start.Local().Format("02.01 15:04"))
+		b.WriteString(" " + stampLabel(it.start.Local(), p.order))
 	}
 	text := strings.Join(strings.Fields(it.Text), " ")
 	if r := []rune(text); len(r) > 160 {
@@ -512,7 +512,7 @@ func meetingDueBadge(it meetingItem, p actionParams) string {
 	case days == -1:
 		return "📅 due tomorrow"
 	}
-	return "📅 due " + approx + it.due.Format("Mon 02.01")
+	return "📅 due " + approx + dayLabel(it.due, p.order)
 }
 
 // meetingsSection fetches, judges and renders the meeting commitments.

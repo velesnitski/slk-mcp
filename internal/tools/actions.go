@@ -50,8 +50,9 @@ type actionParams struct {
 	staleHours int
 	limit      int
 	now        time.Time
-	meetings   meetingSource // nil: meetings not included
-	drafts     bool          // add a reply draft under each item to act on (ADR 144)
+	meetings   meetingSource     // nil: meetings not included
+	drafts     bool              // add a reply draft under each item to act on (ADR 144)
+	order      actions.DateOrder // how numeric dates are read and printed (ADR 152)
 }
 
 func (h *Hub) handleMyActions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -62,6 +63,7 @@ func (h *Hub) handleMyActions(ctx context.Context, req mcp.CallToolRequest) (*mc
 		limit:      int(req.GetFloat("limit", 60)),
 		now:        time.Now(),
 	}
+	p.order, _ = actions.ParseDateOrder(h.cfg.DateOrder)
 	switch p.due {
 	case "", "today":
 		p.due = "today"
@@ -109,7 +111,9 @@ func (h *Hub) runMyActions(ctx context.Context, p actionParams, workspace string
 			return wsActions{noToken: true}
 		}
 		sw := newSweep(fetchCtx, scoped.log, "get_my_actions", ws.Name)
-		body, items, err := scoped.myActions(ctx, sw, p)
+		wp := p
+		wp.order = h.dateOrderFor(ws.Name, p.order)
+		body, items, err := scoped.myActions(ctx, sw, wp)
 		return wsActions{body: body, items: items, hub: scoped, err: err}
 	})
 
@@ -141,7 +145,7 @@ func (h *Hub) runMyActions(ctx context.Context, p actionParams, workspace string
 	if m := h.meetingsSection(fetchCtx, p, rosters, multi); m != "" {
 		sections = append(sections, "## Meetings\n"+m)
 	}
-	header := fmt.Sprintf("# My actions — %s · %s", dueLabel(p.due), p.now.Format("Mon 02.01"))
+	header := fmt.Sprintf("# My actions — %s · %s", dueLabel(p.due), dayLabel(p.now, p.order))
 	out := header + "\n\n" + strings.Join(sections, "\n\n")
 	if note := excludedNote(excluded); note != "" {
 		out = strings.TrimRight(out, "\n") + "\n\n" + note
@@ -213,7 +217,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 	}
 	toMe = filterOwnMessages(toMe, selfID)
 
-	items := classifyHits(hits[0], toMe, selfID, h.botIDs(ctx))
+	items := classifyHits(hits[0], toMe, selfID, h.botIDs(ctx), p.order)
 	sort.Slice(items, func(i, j int) bool { return items[i].ts > items[j].ts })
 	if len(items) > p.limit {
 		items = items[:p.limit]
@@ -234,7 +238,7 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 		if i == 0 {
 			what = "your messages"
 		}
-		truncated = append(truncated, fmt.Sprintf("%s only since %s", what, oldestHit(hs).Format("02.01 15:04")))
+		truncated = append(truncated, fmt.Sprintf("%s only since %s", what, stampLabel(oldestHit(hs), p.order)))
 	}
 	return h.renderActions(ctx, items, p, selfID, truncated) + sw.note(false), items, nil
 }
@@ -271,7 +275,7 @@ func oldestHit(hits []goslack.SearchMessage) time.Time {
 // promise or request, and messages to the operator that ask. bots are
 // the workspace's bot and app users, whose messages and DMs commit
 // nobody.
-func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[string]bool) []*actionItem {
+func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[string]bool, order actions.DateOrder) []*actionItem {
 	var out []*actionItem
 	add := func(m goslack.SearchMessage, isOwn bool) {
 		if m.User == "" || bots[m.User] {
@@ -303,7 +307,7 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 		default:
 			addressed = true
 		}
-		due := actions.Due(m.Text, at)
+		due := actions.DueIn(m.Text, at, order)
 		// An urgency word without a date or a request word is a remark,
 		// not an ask (ADR 150); a request word still makes it one.
 		kind := actions.Classify(m.Text, isOwn, addressed, due.Strong && !due.OnlyUrgent())
@@ -311,7 +315,7 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 			return
 		}
 		if kind != actions.Promise && !due.Strong {
-			due = actions.DueOfRequest(m.Text, at)
+			due = actions.DueOfRequestIn(m.Text, at, order)
 		}
 		out = append(out, &actionItem{
 			kind: kind, hit: m, ts: ts, at: at, root: format.ExtractThreadTS(m), dm: dm, due: due,
@@ -907,7 +911,37 @@ func dueBadge(it *actionItem, p actionParams) string {
 	case days == -1:
 		return prefix + "📅 due tomorrow"
 	}
-	return prefix + "📅 due " + it.due.Day.Format("Mon 02.01")
+	return prefix + "📅 due " + dayLabel(it.due.Day, p.order)
+}
+
+// dayLabel prints a day in the workspace's date order: "Fri 27.11"
+// day-first, "Fri 11/27" month-first (ADR 152).
+func dayLabel(t time.Time, order actions.DateOrder) string {
+	if order == actions.MonthFirst {
+		return t.Format("Mon 01/02")
+	}
+	return t.Format("Mon 02.01")
+}
+
+// stampLabel is dayLabel's day and a 24-hour time, without the weekday.
+func stampLabel(t time.Time, order actions.DateOrder) string {
+	if order == actions.MonthFirst {
+		return t.Format("01/02 15:04")
+	}
+	return t.Format("02.01 15:04")
+}
+
+// dateOrderFor is a workspace's date order: its own date_order, else
+// fallback (SLACK_DATE_ORDER).
+func (h *Hub) dateOrderFor(name string, fallback actions.DateOrder) actions.DateOrder {
+	for _, ws := range h.cfg.Workspaces {
+		if ws.Name == name && ws.DateOrder != "" {
+			if o, ok := actions.ParseDateOrder(ws.DateOrder); ok {
+				return o
+			}
+		}
+	}
+	return fallback
 }
 
 func ageLabel(hours int) string {
