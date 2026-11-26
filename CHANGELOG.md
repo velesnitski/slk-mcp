@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.83.0] - 2026-11-27
+
+### Added
+
+- **Full US-English coverage in get_my_actions.** Follow-up nudges
+  ("any update?", "ETA?", "just following up", "gentle reminder"),
+  softer asks ("can u", "do you mind", "when you get a chance"), promises
+  ("I'm gonna", "working on it", "leave it with me"), completion words
+  ("finished", "all set", "LGTM", "it's live"), acks ("sounds good",
+  "roger", :+1:), time off ("OOO", "out sick"), thanks ("appreciate it",
+  "cheers") and urgency ("P0", "blocker", "time-sensitive").
+- **English deadlines:** COB/EOB, "by noon", "by 5pm", "this afternoon",
+  "first thing in the morning", "in a couple of days", "in a few days",
+  "Thursday morning", "Friday EOD" (Friday, not today).
+- **Status asks are settled by the answer:** "any update?", "what's the
+  ETA", "keep me posted", "where are we on …".
+
+### Changed
+
+- The phrase lists live in one table per language (`lexicon_ru.go`,
+  `lexicon_en.go`); golden-phrase tests pin each category (ADR 153).
+
 ## [1.82.0] - 2026-11-27
 
 ### Added

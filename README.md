@@ -383,6 +383,19 @@ slk-mcp/
 
 Services are composed on `slack.Client`; each tool handler depends only on what it needs. Rate-limiting wraps every API call. `context.Context` propagates from tool handlers to the Slack SDK.
 
+## Languages
+
+`get_my_actions` finds commitments by phrase rules in **Russian and
+English (US)**, both always on, since one workspace and often one message
+mix them. Each language is one table in `internal/actions` (`lexicon_ru.go`,
+`lexicon_en.go`) covering promises, requests, follow-up nudges ("any
+update?", "ETA?"), completion and acknowledgement words, time off, thanks,
+urgency (asap, P0, blocker) and redirects ("ask the ops team"). Deadlines
+include EOD/COB, "by 5pm", "Friday EOD", "in a couple of days" and ordinal
+dates; numeric dates follow `SLACK_DATE_ORDER`. Golden-phrase tests pin
+every category per language, and a new language must fill every category.
+ADR 153.
+
 ## Decision detection
 
 `find_decisions` and `get_morning_recap` detect decisions by:

@@ -251,8 +251,20 @@ func due(text string, at time.Time, request bool, order DateOrder) Deadline {
 		fromUrgent = false
 		best.Urgent = true
 	}
+	// "Friday EOD" is Friday's end of day, not today's: a relative phrase
+	// inside a weekday-part phrase belongs to the weekday.
+	parts := weekdayPartRe.FindAllStringIndex(t, -1)
+	inPart := func(loc []int) bool {
+		for _, p := range parts {
+			if loc[0] >= p[0] && loc[1] <= p[1] {
+				return true
+			}
+		}
+		return false
+	}
 	for _, r := range relativeDays {
-		if m := r.re.FindString(t); m != "" {
+		if loc := r.re.FindStringIndex(t); loc != nil && !inPart(loc) {
+			m := t[loc[0]:loc[1]]
 			consider(day.AddDate(0, 0, r.days), m, r.strong || strongPrepRe.MatchString(t[:strings.Index(t, m)+len(m)]))
 		}
 	}
@@ -275,6 +287,12 @@ func due(text string, at time.Time, request bool, order DateOrder) Deadline {
 	if m := monthEndRe.FindString(t); m != "" {
 		// Day 0 of next month is the last day of this one.
 		consider(time.Date(day.Year(), day.Month()+1, 0, 0, 0, 0, 0, day.Location()), m, true)
+	}
+	for _, m := range weekdayPartRe.FindAllStringSubmatch(t, -1) {
+		if wd, ok := weekdayOf(m[1]); ok {
+			// "Friday EOD" names an end; "Monday morning" only a time.
+			consider(weekdayOnOrAfter(day, wd), m[0], eodRe.MatchString(m[0]))
+		}
 	}
 	for _, m := range weekdayRe.FindAllStringSubmatch(t, -1) {
 		if wd, ok := weekdayOf(m[2]); ok {
@@ -410,53 +428,18 @@ func words(alts ...string) *regexp.Regexp {
 }
 
 var (
-	promiseRe = words(
-		`сделаю`, `пришлю`, `подготовлю`, `посмотрю`, `проверю`, `отправлю`, `напишу`,
-		`скину`, `дам знать`, `вернусь`, `займусь`, `беру`, `возьму`, `уточню`, `уточняю`,
-		`разберусь`, `доделаю`, `допишу`, `соберу`, `оформлю`, `передам`, `подготовим`,
-		`сделаем`, `пришлем`, `посмотрим`, `отправим`, `вышлем`, `вышлю`, `скинем`, `напишем`, `сообщим`, `сообщу`, `проверим`, `в процессе`, `в работе`, `принял`,
-		`i'?ll`, `i will`, `we'?ll`, `we will`, `will (?:do|send|check|look|investigate|prepare|share|update|follow up|get back|ping|fix|review|come back)`,
-		`on it`, `let me (?:check|look|see)`, `in process`, `in progress`, `will do`,
-	)
-	requestRe = words(
-		`прошу`, `просьба`, `пожалуйста`, `пж`, `плз`, `можешь`, `можете`, `сможешь`, `сможете`,
-		`подскажи(?:те)?`, `посмотри(?:те)?`, `проверь(?:те)?`, `сделай(?:те)?`, `пришли(?:те)?`,
-		`скинь(?:те)?`, `глянь(?:те)?`, `ответь(?:те)?`, `согласуй(?:те)?`, `подготовь(?:те)?`,
-		`напиши(?:те)?`, `помоги(?:те)?`, `дай(?:те)?`, `нужно`, `надо`, `нужен`, `нужна`, `нужны`,
-		`требуется`, `жду`,
-		`please`, `pls`, `plz`, `can you`, `could you`, `would you`, `need`, `needs`, `let me know`,
-		`lmk`, `give me`, `think about`, `send me`, `make sure`,
-	)
-	doneRe = words(
-		`готово`, `готов`, `готова`, `сделал`, `сделала`, `сделано`, `отправил`, `отправила`,
-		`скинул`, `скинула`, `прислал`, `прислала`, `выкатил`, `залил`, `закрыл`, `закрыто`,
-		`починил`, `исправил`, `держи`, `done`, `sent`, `shipped`, `fixed`, `merged`, `ready`,
-		`deployed`, `here it is`, `here you go`, `attached`, `resolved`, `closed`,
-		// Delivery said in the plural or as a deploy (ADR 150): "разобрались,
-		// затолкали, деплой в прод живой" closed nothing before.
-		`сделали`, `отправили`, `скинули`, `прислали`, `закрыли`, `починили`, `исправили`,
-		`выкатили`, `выкатила`, `залили`, `залила`, `задеплоил\p{L}*`, `затолкал\p{L}*`,
-		`протолкнул\p{L}*`, `pushed to prod`, `released`,
-	)
-	ackRe = words(
-		`принял`, `приняла`, `ок`, `окей`, `хорошо`, `понял`, `поняла`, `договорились`, `беру`,
-		`в процессе`, `в работе`, `посмотрю`, `ok`, `okay`, `got it`, `on it`, `will do`,
-		`will investigate`, `noted`, `sure`, `in process`, `in progress`,
-	)
-	// absenceRe is a notice of time off: it reuses promise verbs ("возьму",
-	// "беру") but commits to nothing.
-	absenceRe = words(`больничн\p{L}*`, `отгул\p{L}*`, `отпуск\p{L}*`, `выходн\p{L}*`, `day off`, `sick leave`, `sick day`, `pto`, `vacation`, `out of office`)
-	thanksRe  = words(`спасибо`, `спс`, `мерси`, `благодарю`, `thanks`, `thank you`, `thx`, `ty`)
+	promiseRe = join(func(l lexicon) []string { return l.promise })
+	requestRe = join(func(l lexicon) []string { return l.request })
+	doneRe    = join(func(l lexicon) []string { return l.done })
+	ackRe     = join(func(l lexicon) []string { return l.ack })
+	absenceRe = join(func(l lexicon) []string { return l.absence })
+	thanksRe  = join(func(l lexicon) []string { return l.thanks })
+	urgentRe  = join(func(l lexicon) []string { return l.urgent })
+	politeRe  = join(func(l lexicon) []string { return l.polite })
 	// redirectRes send someone to another person or team; group 1 is the
 	// target, checked against selfTargetRe.
-	redirectRes = []*regexp.Regexp{
-		regexp.MustCompile(wb + `(?:обратись|обратитесь|обращайся|обращайтесь|спроси|спросите|пиши|пишите|напиши|напишите|пингани|пингуй|пингуйте|сходи|сходите|иди|идите|уточни|уточните)(?:\s+\p{L}+){0,3}?\s+(?:к|ко|в|у)\s+(\S+)`),
-		regexp.MustCompile(wb + `это(?:\s+вопрос)?\s+(?:к|ко|для)\s+(\S+)`),
-		regexp.MustCompile(wb + `(?:ask|ping|reach out to|talk to|check with|contact|go to)\s+(?:the\s+)?(\S+)`),
-	}
-	selfTargetRe = regexp.MustCompile(`^(?:мне|нам|меня|нас|me|us|myself)` + web)
-	politeRe     = words(`please`, `pls`, `plz`, `пожалуйста`, `пж`, `плз`, `can you`, `could you`, `would you`, `можешь`, `можете`)
-	urgentRe     = words(`asap`, `срочно`, `горит`, `urgent`, `немедленно`, `прямо сейчас`)
+	redirectRes  = redirects()
+	selfTargetRe = regexp.MustCompile(`^(?:` + strings.Join(collect(func(l lexicon) []string { return l.self }), "|") + `)` + web)
 
 	relativeDays = []struct {
 		re     *regexp.Regexp
@@ -465,7 +448,12 @@ var (
 	}{
 		{words(`послезавтра`, `day after tomorrow`), 2, false},
 		{regexp.MustCompile(wb + `(?:завтра|завтрашн\p{L}*|tomorrow|tomorow|tmrw|tmr|tmrow)` + web), 1, false},
-		{words(`tonight`, `eod`, `end of day`, `до конца дня`, `к концу дня`, `до вечера`, `к вечеру`, `до сегодня`, `by today`), 0, true},
+		{words(`tonight`, `eod`, `end of day`, `до конца дня`, `к концу дня`, `до вечера`, `к вечеру`, `до сегодня`, `by today`,
+			`cob`, `eob`, `close of business`, `end of business`, `by noon`, `by \d{1,2}(?::\d{2})?\s*(?:am|pm)`), 0, true},
+		{words(`this afternoon`, `later today`), 0, false},
+		{words(`first thing in the morning`), 1, false},
+		{words(`через пару дней`, `in a couple(?: of)? days`), 2, true},
+		{words(`через несколько дней`, `in a few days`), 3, false},
 	}
 	// strongPrepRe finds a deadline preposition right before the end of
 	// the text it is given: "до завтра", "until tmrw", "к завтрашнему".
@@ -481,10 +469,15 @@ var (
 	monthEndRe = words(`до конца месяца`, `к концу месяца`, `end of (?:the |this )?month`, `eom`)
 
 	// ordinal is an English day suffix: "Dec 3rd", "the 1st of June".
-	ordinal   = `(?:st|nd|rd|th)?`
-	prep      = `(?:до|к|ко|в|во|на|by|until|till|til|before|on|this|next|deadline|дедлайн|срок)`
-	datePrep  = `(?:до|к|ко|by|until|till|til|before|on|deadline|дедлайн|срок)`
-	weekdayRe = regexp.MustCompile(wb + `(` + prep + `)\s+(понедельник\p{L}*|вторник\p{L}*|сред[ауы]|четверг\p{L}*|пятниц\p{L}*|суббот\p{L}*|воскресень\p{L}*|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fr+i(?:day)?|sat(?:urday)?|sun(?:day)?)` + web)
+	ordinal      = `(?:st|nd|rd|th)?`
+	weekdayNames = `понедельник\p{L}*|вторник\p{L}*|сред[ауы]|четверг\p{L}*|пятниц\p{L}*|суббот\p{L}*|воскресень\p{L}*|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fr+i(?:day)?|sat(?:urday)?|sun(?:day)?`
+	prep         = `(?:до|к|ко|в|во|на|by|until|till|til|before|on|this|next|deadline|дедлайн|срок)`
+	datePrep     = `(?:до|к|ко|by|until|till|til|before|on|deadline|дедлайн|срок)`
+	weekdayRe    = regexp.MustCompile(wb + `(` + prep + `)\s+(` + weekdayNames + `)` + web)
+	// weekdayPartRe is a weekday with a part of the day and no preposition,
+	// "Monday morning", "Friday EOD": a weak date.
+	eodRe         = words(`eod`, `end of day`)
+	weekdayPartRe = regexp.MustCompile(wb + `(` + weekdayNames + `)\s+(?:morning|afternoon|evening|eod|end of day|утром|днем|вечером)` + web)
 
 	numericDateRe = regexp.MustCompile(wb + `(` + datePrep + `)\s*:?\s*(\d{1,2})([./])(\d{1,2})(?:[./](\d{2}|\d{4}))?` + web)
 	monthDayRe    = regexp.MustCompile(wb + `(` + datePrep + `)\s+(?:the\s+)?(\d{1,2})` + ordinal + `\s+(?:of\s+)?(январ\p{L}*|феврал\p{L}*|март\p{L}*|апрел\p{L}*|ма[яй]|июн\p{L}*|июл\p{L}*|август\p{L}*|сентябр\p{L}*|октябр\p{L}*|ноябр\p{L}*|декабр\p{L}*|jan\p{L}*|feb\p{L}*|mar\p{L}*|apr\p{L}*|may|jun\p{L}*|jul\p{L}*|aug\p{L}*|sep\p{L}*|oct\p{L}*|nov\p{L}*|dec\p{L}*)` + web)

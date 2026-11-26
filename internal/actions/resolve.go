@@ -125,7 +125,8 @@ var answerRe = regexp.MustCompile(`(?i)` +
 	`(^|[^\p{L}])(дай|дайте|пришли|пришлите|скинь|скиньте|напиши|напишите|give|send)(\s+\S+){0,2}?\s+` +
 	`(ответ|статус|апдейт|инфо|информаци|фидбек|обратн\S* связь|answer|status|update|feedback)` +
 	`|(^|[^\p{L}])(ответь|ответьте|подскажи|подскажите|дай знать|дайте знать|сообщи|сообщите)([^\p{L}]|$)` +
-	`|let me know|get back to (me|us)|what'?s the status|какой статус`)
+	`|let me know|get back to (me|us)|what'?s the status|какой статус` +
+	`|any updates?|(^|[^\p{L}])eta([^\p{L}]|$)|keep me posted|fill me in|how'?s it going|where are we (on|with)`)
 
 // AsksForAnswer reports whether an ask is settled by a reply that answers
 // it, not only by a "done".
