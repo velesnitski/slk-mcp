@@ -905,6 +905,37 @@ func TimeZoneNote() string {
 	return fmt.Sprintf("times: %s (UTC%s%02d:%02d)", name, sign, offset/3600, (offset%3600)/60)
 }
 
+// clock12 prints times as "3:04 PM" (SLACK_CLOCK=12h or a 12-hour
+// SLACK_LOCALE); set once at startup by SetClock12. ADR 154.
+var clock12 bool
+
+// SetClock12 chooses the 12-hour clock for every rendered time.
+func SetClock12(on bool) { clock12 = on }
+
+// monthFirst prints digest days as "11/26" instead of "26.11"
+// (SLACK_DATE_ORDER=mdy or a month-first SLACK_LOCALE for the primary
+// workspace). get_my_actions applies each workspace's own order.
+var monthFirst bool
+
+// SetMonthFirst chooses the month-first day for digest timestamps.
+func SetMonthFirst(on bool) { monthFirst = on }
+
+// Day renders a calendar day in the configured order: "26.11" or "11/26".
+func Day(t time.Time) string {
+	if monthFirst {
+		return t.Format("01/02")
+	}
+	return t.Format("02.01")
+}
+
+// Clock renders a time of day in the configured clock: "15:04" or "3:04 PM".
+func Clock(t time.Time) string {
+	if clock12 {
+		return t.Format("3:04 PM")
+	}
+	return t.Format("15:04")
+}
+
 // clockNow is the reference "now" for ClockLabel; a var so tests pin it.
 var clockNow = time.Now
 
@@ -922,9 +953,9 @@ func ClockLabel(t time.Time) string {
 	ty, tm, td := t.Date()
 	ny, nm, nd := now.In(t.Location()).Date()
 	if ty == ny && tm == nm && td == nd {
-		return t.Format("15:04")
+		return Clock(t)
 	}
-	return t.Format("02.01 15:04")
+	return Day(t) + " " + Clock(t)
 }
 
 // ParseTS converts a Slack "1234567890.123456" timestamp to time.Time.

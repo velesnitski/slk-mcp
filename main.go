@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/velesnitski/slk-mcp/internal/actions"
 	"github.com/velesnitski/slk-mcp/internal/config"
+	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/lifecycle"
 	"github.com/velesnitski/slk-mcp/internal/logger"
 	"github.com/velesnitski/slk-mcp/internal/slack"
@@ -27,7 +29,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "1.83.0"
+var version = "1.84.0"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -108,6 +110,10 @@ func run() error {
 // server. It is the whole of startup minus flags and transport, so the
 // integration test drives exactly what the binary serves. See ADR 118.
 func buildServer(cfg *config.Config, log *slog.Logger) (*server.MCPServer, []slack.Workspace) {
+	format.SetClock12(cfg.Clock12) // ADR 154
+	if o, _ := actions.ParseDateOrder(cfg.DateOrder); o == actions.MonthFirst {
+		format.SetMonthFirst(true)
+	}
 	registry := slack.NewRegistry(cfg, log)
 	// Self-reported server name embeds the version so MCP hosts that
 	// only render the name (Claude Code's /mcp listing, error banners,

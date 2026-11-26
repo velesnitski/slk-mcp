@@ -280,7 +280,7 @@ slk-mcp run get_my_actions due=today drafts=true --post @me   # morning digest i
 | `SLACK_TOKEN` | one of | Bot User OAuth Token (`xoxb-...`). |
 | `SLACK_USER_TOKEN` | one of | User OAuth Token (`xoxp-...`). Required for unread/mentions. At least one of `SLACK_TOKEN` / `SLACK_USER_TOKEN` must be set. |
 | `SLACK_WORKSPACE_NAME` | No | Cosmetic label for the primary workspace, shown in merged digests (default: `primary`). |
-| `SLACK_WORKSPACES` | No | JSON array of *additional* workspaces. Each entry: `{"name","bot_token","user_token","channels","priority_channels","date_order"}` (all but at least one token optional). Tokens are workspace-scoped, so each extra Slack space needs its own token pair. Labels live in the JSON values — no per-workspace env keys. See [Multiple workspaces](#multiple-workspaces). |
+| `SLACK_WORKSPACES` | No | JSON array of *additional* workspaces. Each entry: `{"name","bot_token","user_token","channels","priority_channels","date_order","locale"}` (all but at least one token optional). Tokens are workspace-scoped, so each extra Slack space needs its own token pair. Labels live in the JSON values — no per-workspace env keys. See [Multiple workspaces](#multiple-workspaces). |
 | `SLACK_CHANNELS` | No | Default channels for digest/recap (comma-separated). If unset, tools auto-discover the channels you've joined. |
 | `SLACK_PRIORITY_CHANNELS` | No | Channels (names or IDs, comma-separated) that `get_unread_summary` always shows for its window, even when you have already read them — first in the output, marked `★`, with `· read` when nothing in them is new to you. Window: `priority_hours` (default 24) or everything after the `after` cursor. Channels it cannot find are named in the output. Per extra workspace: `priority_channels`. ADR 112. |
 | `SLACK_AUTODISCOVER_LIMIT` | No | Cap on auto-discovered channel count when `SLACK_CHANNELS` is unset (default: `50`) |
@@ -292,6 +292,8 @@ slk-mcp run get_my_actions due=today drafts=true --post @me   # morning digest i
 | `SLACK_STARRED_CHANNELS` | No | Channels (names or IDs) that come right after VIP conversations in `get_unread_summary`, marked `☆` – Slack does not give its own starred list to apps |
 | `SLACK_STATE_DIR` | No | Where slk-mcp keeps your Slack VIP list and starred conversations between runs (default: the user cache directory + `/slk-mcp`; `off` disables it) |
 | `SLACK_MEETING_ITEMS_CMD` | No | Command printing your meeting commitments as JSON for `get_my_actions`, run without a shell with `since=<days>d` appended, e.g. `/path/to/wispr-mcp run list_action_items owner=me format=json --json` |
+| `SLACK_LOCALE` | No | A locale such as `en-US`, `en-GB`, `ru-RU` (`en_US.UTF-8` also accepted). Sets defaults only: `en-US` means month-first dates and a 12-hour clock; `en-GB`/`ru-RU` day-first and 24-hour; `en-AU`/`en-CA`/`en-IN` day-first and 12-hour. `SLACK_DATE_ORDER` and `SLACK_CLOCK` override each part. The machine's `LANG` is deliberately not read. Per extra workspace: `locale` (date order only). ADR 154. |
+| `SLACK_CLOCK` | No | `24h` (default) or `12h`: how every tool prints times (`15:04` or `3:04 PM`). Default comes from `SLACK_LOCALE`. |
 | `SLACK_DATE_ORDER` | No | How `get_my_actions` reads and prints numeric dates: `dmy` (default; "by 12/3" is 12 March, shown as `Fri 27.11`) or `mdy` (US; "by 12/3" is December 3, shown as `Fri 11/27`). `en-US` is accepted as `mdy`. Dotted dates (`12.11`) stay day-first, and a date that exists only one way ("12/25") is read that way in either order. Per extra workspace: `date_order`. ADR 152. |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
 | `SLACK_MAX_MESSAGES` | No | Cap on messages fetched per channel per call (default: `200`) |
@@ -392,7 +394,8 @@ mix them. Each language is one table in `internal/actions` (`lexicon_ru.go`,
 update?", "ETA?"), completion and acknowledgement words, time off, thanks,
 urgency (asap, P0, blocker) and redirects ("ask the ops team"). Deadlines
 include EOD/COB, "by 5pm", "Friday EOD", "in a couple of days" and ordinal
-dates; numeric dates follow `SLACK_DATE_ORDER`. Golden-phrase tests pin
+dates; numeric dates follow `SLACK_DATE_ORDER`. For a US setup,
+`SLACK_LOCALE=en-US` switches dates to `11/27` and times to `3:04 PM`. Golden-phrase tests pin
 every category per language, and a new language must fill every category.
 ADR 153.
 

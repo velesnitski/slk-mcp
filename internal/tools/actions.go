@@ -923,12 +923,13 @@ func dayLabel(t time.Time, order actions.DateOrder) string {
 	return t.Format("Mon 02.01")
 }
 
-// stampLabel is dayLabel's day and a 24-hour time, without the weekday.
+// stampLabel is dayLabel's day and a time in the configured clock,
+// without the weekday.
 func stampLabel(t time.Time, order actions.DateOrder) string {
 	if order == actions.MonthFirst {
-		return t.Format("01/02 15:04")
+		return t.Format("01/02") + " " + format.Clock(t)
 	}
-	return t.Format("02.01 15:04")
+	return t.Format("02.01") + " " + format.Clock(t)
 }
 
 // dateOrderFor is a workspace's date order: its own date_order, else

@@ -100,6 +100,15 @@ type Config struct {
 	// Per workspace: "date_order" in a SLACK_WORKSPACES entry. ADR 152.
 	DateOrder string
 
+	// Locale (SLACK_LOCALE, e.g. "en-US") supplies defaults for DateOrder
+	// and Clock12 when they are not set explicitly. ADR 154.
+	Locale string
+
+	// Clock12 prints times as "3:04 PM" instead of "15:04" (SLACK_CLOCK=12h,
+	// or a 12-hour locale). One clock for all workspaces.
+	Clock12  bool
+	clockErr string
+
 	// StateDir holds what slk-mcp keeps between runs: the VIP list and
 	// starred conversations read from Slack (ADR 143). Default: the user
 	// cache directory + "/slk-mcp"; SLACK_STATE_DIR overrides it, "off"
@@ -152,6 +161,8 @@ type WorkspaceConfig struct {
 	// DateOrder overrides Config.DateOrder for this workspace; empty
 	// inherits it.
 	DateOrder string
+	// Locale supplies this workspace's DateOrder when date_order is empty.
+	Locale string
 }
 
 // WorkspaceView pairs a workspace label with a fully-derived *Config
@@ -192,6 +203,7 @@ func Load() *Config {
 		StarredChannels:       parseCSV(os.Getenv("SLACK_STARRED_CHANNELS")),
 		StateDir:              stateDir(os.Getenv("SLACK_STATE_DIR")),
 		DateOrder:             strings.TrimSpace(os.Getenv("SLACK_DATE_ORDER")),
+		Locale:                strings.TrimSpace(os.Getenv("SLACK_LOCALE")),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",
@@ -221,6 +233,11 @@ func Load() *Config {
 		c.PriorityChannels = c.Workspaces[0].PriorityChannels
 	}
 
+	clockEnv := os.Getenv("SLACK_CLOCK")
+	if _, ok := parseClock(clockEnv); !ok {
+		c.clockErr = clockEnv
+	}
+	c.applyLocale(clockEnv)
 	return c
 }
 
@@ -237,6 +254,8 @@ type wsJSON struct {
 	PriorityChannels string `json:"priority_channels"`
 	// DateOrder is the per-workspace SLACK_DATE_ORDER ("dmy" or "mdy").
 	DateOrder string `json:"date_order"`
+	// Locale is the per-workspace SLACK_LOCALE (date order only).
+	Locale string `json:"locale"`
 }
 
 // ParseWorkspaces parses the SLACK_WORKSPACES JSON array. A blank value
@@ -260,6 +279,7 @@ func ParseWorkspaces(s string) ([]WorkspaceConfig, error) {
 			Channels:         parseCSV(r.Channels),
 			PriorityChannels: parseCSV(r.PriorityChannels),
 			DateOrder:        strings.TrimSpace(r.DateOrder),
+			Locale:           strings.TrimSpace(r.Locale),
 		})
 	}
 	return out, nil
@@ -337,6 +357,15 @@ func (c *Config) Validate() error {
 		if _, ok := actions.ParseDateOrder(ws.DateOrder); !ok {
 			return fmt.Errorf("workspace %d (%q): date_order %q: want dmy or mdy", i, ws.Name, ws.DateOrder)
 		}
+		if _, ok := NormalizeLocale(ws.Locale); !ok {
+			return fmt.Errorf("workspace %d (%q): locale %q: want a tag like en-US", i, ws.Name, ws.Locale)
+		}
+	}
+	if _, ok := NormalizeLocale(c.Locale); !ok {
+		return fmt.Errorf("SLACK_LOCALE %q: want a tag like en-US", c.Locale)
+	}
+	if c.clockErr != "" {
+		return fmt.Errorf("SLACK_CLOCK %q: want 12h or 24h", c.clockErr)
 	}
 	if _, ok := actions.ParseDateOrder(c.DateOrder); !ok {
 		return fmt.Errorf("SLACK_DATE_ORDER %q: want dmy or mdy", c.DateOrder)

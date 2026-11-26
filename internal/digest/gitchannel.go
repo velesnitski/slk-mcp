@@ -458,7 +458,7 @@ func formatTimeRange(firstTS, lastTS string) string {
 		return "?"
 	}
 	if last.IsZero() || first.Equal(last) {
-		return first.Format("15:04")
+		return format.Clock(first)
 	}
-	return first.Format("15:04") + "–" + last.Format("15:04")
+	return format.Clock(first) + "–" + format.Clock(last)
 }

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.84.0] - 2026-11-27
+
+### Added
+
+- **`SLACK_LOCALE`** (e.g. `en-US`, `en-GB`, `ru-RU`) sets the date order
+  and clock in one setting: `en-US` gives `11/27` dates, `3:04 PM` times
+  and reads "by 12/3" as December 3. `SLACK_DATE_ORDER` and the new
+  `SLACK_CLOCK` (`12h`/`24h`) override each part; per workspace:
+  `locale`. The machine's `LANG` is not read, so nothing changes unless
+  it is set (ADR 154).
+- **12-hour clock** for every rendered time (digests, git-channel spans,
+  get_my_actions). Digest days follow the primary workspace's order.
+
 ## [1.83.0] - 2026-11-27
 
 ### Added

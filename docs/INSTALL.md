@@ -106,7 +106,9 @@ unset SLACK_USER_TOKEN
 ```
 
 (Paste the token, press Enter.) For the read-only app add
-`-e SLACK_READ_ONLY=true` before `--`.
+`-e SLACK_READ_ONLY=true` before `--`. For US date and time formats
+(`11/27`, `3:04 PM`, "by 12/3" read as December 3) add
+`-e SLACK_LOCALE=en-US`.
 
 Other clients take the same command and environment in their JSON config;
 see the [MCP client list](https://modelcontextprotocol.io/clients). The shape:
