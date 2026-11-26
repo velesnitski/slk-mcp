@@ -1,8 +1,9 @@
 services:
   slack-mcp:
-    image: velesnitski/slk-mcp
+    build: .
+    image: slk-mcp
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     environment:
       - SLACK_USER_TOKEN=xoxp-your-user-token
       # Optional:

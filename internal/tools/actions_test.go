@@ -23,12 +23,12 @@ func TestRunMyActions(t *testing.T) {
 	f.On("auth.test", uaAuthOK)
 	f.uaUsers(map[string]string{"U2": "alice", "U3": "bob", "U4": "carol"})
 
-	askTS := uaTS(-26*3600, 100)   // yesterday: "until tmrw" → due today
-	waitTS := uaTS(-30*3600, 200)  // a request of mine, no reply for 30h
-	promTS := uaTS(-20*3600, 300)  // a promise marked done with a reaction
-	chAskTS := uaTS(-5*3600, 400)  // a channel ask I answered "done"
-	chDoneTS := uaTS(-4*3600, 401) // my reply in its thread
-	ackTS := uaTS(-3*3600, 500)    // an ask I only acknowledged
+	askTS := uaTS(uaYesterdayNoon(), 100) // yesterday: "until tmrw" → due today
+	waitTS := uaTS(-30*3600, 200)         // a request of mine, no reply for 30h
+	promTS := uaTS(-20*3600, 300)         // a promise marked done with a reaction
+	chAskTS := uaTS(-5*3600, 400)         // a channel ask I answered "done"
+	chDoneTS := uaTS(-4*3600, 401)        // my reply in its thread
+	ackTS := uaTS(-3*3600, 500)           // an ask I only acknowledged
 	ackReplyTS := uaTS(-2*3600, 501)
 
 	f.uaSearchByQuery(t, map[string][]map[string]any{

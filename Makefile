@@ -1,6 +1,6 @@
 BINARY := slk-mcp
 
-.PHONY: build test fuzz mutate sync-label install sweep sweep-history hooks
+.PHONY: build test fuzz mutate sync-label install manifest-url sweep sweep-history hooks
 
 ## build: compile the server binary (version embedded via -ldflags)
 build:
@@ -44,6 +44,13 @@ sync-label:
 ## label is read from the config key at session start). Kept separate from
 ## `build` so plain builds never touch ~/.claude.json.
 install: build sync-label
+
+## manifest-url: print a one-click "create Slack app" link with the manifest
+## pre-filled (docs/INSTALL.md). MANIFEST=slack-app-manifest.readonly.yaml
+## for the read-only app.
+MANIFEST ?= slack-app-manifest.yaml
+manifest-url:
+	@python3 -c 'import sys,urllib.parse;print("https://api.slack.com/apps?new_app=1&manifest_yaml="+urllib.parse.quote(open(sys.argv[1]).read()))' $(MANIFEST)
 
 sweep:
 	./scripts/sweep.sh

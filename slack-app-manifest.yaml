@@ -1,0 +1,56 @@
+# Slack app manifest for slk-mcp: the full tool set on a user token.
+#
+# Create the app from this file: https://api.slack.com/apps -> Create New App
+# -> From a manifest -> pick the workspace -> paste this file. Every scope the
+# server can use is listed, so no tool fails later on a missing scope.
+# Step-by-step guide (written for people and for coding agents):
+# docs/INSTALL.md. Read-only variant: slack-app-manifest.readonly.yaml.
+#
+# A test (manifest_test.go) fails when the code starts using a scope this
+# file does not grant, so the two cannot drift apart.
+display_information:
+  name: slk-mcp
+  description: Personal Slack MCP server - unread digests, commitments, search, posting.
+  background_color: "#2c2d30"
+oauth_config:
+  scopes:
+    user:
+      # Read conversations: public, private, DMs, group DMs
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      # Mark read, archive/unarchive, open a DM
+      - channels:write
+      - groups:write
+      - im:write
+      - mpim:write
+      # People
+      - users:read
+      - users:read.email
+      # Search, files, reactions, canvases, lists, user groups
+      - search:read
+      - files:read
+      - reactions:read
+      - reactions:write
+      - canvases:read
+      - canvases:write
+      - lists:read
+      - usergroups:read
+      - usergroups:write
+      # Post and delete your own messages
+      - chat:write
+      # Status, presence, do-not-disturb
+      - users.profile:write
+      - users:write
+      - dnd:write
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  # Rotating tokens expire every 12 hours; an MCP server reads its token once
+  # at start, so rotation would break it daily.
+  token_rotation_enabled: false

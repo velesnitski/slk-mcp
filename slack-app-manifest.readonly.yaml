@@ -1,0 +1,38 @@
+# Slack app manifest for slk-mcp, read-only: digests, search, threads,
+# commitments and voice-note transcription, with nothing that can post,
+# react, archive or change your status. Pair it with SLACK_READ_ONLY=true so
+# the write tools are not even registered.
+#
+# Create the app: https://api.slack.com/apps -> Create New App -> From a
+# manifest -> paste this file. Guide: docs/INSTALL.md.
+display_information:
+  name: slk-mcp (read-only)
+  description: Personal Slack MCP server - read-only digests, search and commitments.
+  background_color: "#2c2d30"
+oauth_config:
+  scopes:
+    user:
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - users:read
+      - users:read.email
+      - search:read
+      - files:read
+      - reactions:read
+      - canvases:read
+      - lists:read
+      - usergroups:read
+      # The one write scope: opening a DM by @handle (conversations.open) so
+      # transcribe_audio can find the latest voice note from a person. It
+      # sends nothing. Remove it if you never use that mode.
+      - im:write
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

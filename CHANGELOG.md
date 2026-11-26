@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.81.0] - 2026-11-27
+
+### Added
+
+- **Slack app manifests.** `slack-app-manifest.yaml` (full tool set) and
+  `slack-app-manifest.readonly.yaml` create the app with every scope in
+  one step; `make manifest-url` prints a pre-filled one-click link. A test
+  fails when the code uses a scope the manifest lacks (ADR 151).
+- **docs/INSTALL.md**, a from-scratch guide a coding agent can follow:
+  which steps are the person's, token entry that never passes through the
+  chat, verification and troubleshooting.
+
+### Fixed
+
+- **Install commands no longer pull an unpublished image.** Quick start
+  uses `go install`; Docker and compose build the image locally and bind
+  to `127.0.0.1`.
+- **Missing scopes in Quick start.** The hand-kept list lacked several
+  scopes tools need; the manifest replaces it.
+
 ## [1.80.2] - 2026-11-25
 
 ### Fixed

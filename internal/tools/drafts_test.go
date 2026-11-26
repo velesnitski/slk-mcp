@@ -77,7 +77,7 @@ func TestRunMyActions_Drafts(t *testing.T) {
 	f := uaNewFakeSlack(t)
 	f.On("auth.test", uaAuthOK)
 	f.uaUsers(map[string]string{"U2": "alice"})
-	askTS := uaTS(-26*3600, 100)
+	askTS := uaTS(uaYesterdayNoon(), 100)
 	f.uaSearchByQuery(t, map[string][]map[string]any{
 		"to:me": {uaHit("D1", "U2", askTS, "U2", "and until tmrw the full write-up", "https://x.slack.com/archives/D1/p3")},
 	})

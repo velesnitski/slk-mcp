@@ -262,6 +262,15 @@ func uaTS(offsetSeconds int64, usec int) string {
 	return fmt.Sprintf("%d.%06d", time.Now().Unix()+offsetSeconds, usec)
 }
 
+// uaYesterdayNoon is the offset from now to yesterday 12:00 local, for a
+// fixture that must read as "said yesterday" at any hour: a fixed -26h lands
+// on the day before yesterday when the suite runs just after midnight.
+func uaYesterdayNoon() int64 {
+	now := time.Now()
+	y := time.Date(now.Year(), now.Month(), now.Day()-1, 12, 0, 0, 0, now.Location())
+	return int64(y.Sub(now) / time.Second)
+}
+
 // uaNowUnix is the wall clock the fixtures above are anchored to.
 func uaNowUnix() int64 { return time.Now().Unix() }
 

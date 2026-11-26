@@ -15,9 +15,13 @@ Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copi
 
 ## Quick start
 
+> **Installing with a coding agent?** Give it this repo and point it at
+> **[docs/INSTALL.md](docs/INSTALL.md)**: a from-scratch guide that says
+> which steps the agent runs and which happen in your browser, generates a
+> one-click "create Slack app" link, and keeps the token out of the chat.
+
 ### 1. Create a Slack App
 
-Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**.
 Pick **one** of the setups below depending on how you want slk-mcp to act.
 
 #### Setup A — user token only (recommended for personal use)
@@ -26,20 +30,14 @@ Use this if you want slk-mcp to act as **you**: posts appear under your name,
 DMs and private channels work out of the box, full unread/mentions support.
 You don't need to invite anything to channels.
 
-Under **OAuth & Permissions → User Token Scopes**, add:
-
-- `channels:history`, `channels:read`
-- `groups:history`, `groups:read`
-- `im:history`, `im:read`, `mpim:history`, `mpim:read`
-- `users:read`
-- `users:read.email` (optional — email column in `list_users with_email` / `email_domain`)
-- `usergroups:read` (optional — for `list_usergroups`, and `@group` mentions in `post_message`)
-- `usergroups:write` (optional — for `manage_usergroup`)
-- `search:read`
-- `chat:write` (optional — for `post_message`)
-- `reactions:write` (optional — for `add_reaction`)
-- `reactions:read` (optional — completes long reactor lists in `get_message reactors=true`)
-- `canvases:write` (optional — for `edit_canvas`)
+Create the app from a manifest, so every scope is set in one step:
+[api.slack.com/apps](https://api.slack.com/apps) → **Create New App** →
+**From a manifest** → paste
+[`slack-app-manifest.yaml`](slack-app-manifest.yaml) (full tool set) or
+[`slack-app-manifest.readonly.yaml`](slack-app-manifest.readonly.yaml)
+(nothing that writes; pair with `SLACK_READ_ONLY=true`). `make manifest-url`
+prints a link with the manifest pre-filled. A test keeps the full manifest
+in step with every scope the code uses.
 
 **Install to Workspace**, copy the **User OAuth Token** (`xoxp-...`) → `SLACK_USER_TOKEN`.
 
@@ -72,14 +70,21 @@ Invite the bot to channels: `/invite @your-bot`.
 
 ### 2. Install in Claude Code
 
-**Setup A (user token only — recommended):**
+Build the binary (Go 1.26+):
 
 ```bash
-claude mcp add slack \
-  -e SLACK_USER_TOKEN=xoxp-your-user-token \
-  -- docker run --rm -i \
-     -e SLACK_USER_TOKEN \
-     velesnitski/slk-mcp -transport stdio
+go install github.com/velesnitski/slk-mcp@latest   # → $(go env GOPATH)/bin/slk-mcp
+```
+
+**Setup A (user token only — recommended).** `read -s` keeps the token out
+of the screen and shell history:
+
+```bash
+read -rs SLACK_USER_TOKEN && \
+claude mcp add slack --scope user \
+  -e SLACK_USER_TOKEN="$SLACK_USER_TOKEN" \
+  -- "$(go env GOPATH)/bin/slk-mcp" -transport stdio; \
+unset SLACK_USER_TOKEN
 ```
 
 Or via config file (`~/.claude.json`):
@@ -88,11 +93,8 @@ Or via config file (`~/.claude.json`):
 {
   "mcpServers": {
     "slack": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i",
-               "-e", "SLACK_USER_TOKEN",
-               "velesnitski/slk-mcp",
-               "-transport", "stdio"],
+      "command": "/absolute/path/to/slk-mcp",
+      "args": ["-transport", "stdio"],
       "env": {
         "SLACK_USER_TOKEN": "xoxp-your-user-token"
       }
@@ -100,6 +102,8 @@ Or via config file (`~/.claude.json`):
   }
 }
 ```
+
+Restart Claude Code afterwards; it reads the server list at session start.
 
 **Setup B (bot token):** add `-e SLACK_TOKEN=xoxb-...` instead of (or alongside) the user token. Bot must be invited to each channel; unread/mentions/DM tools stay hidden unless a user token is also set.
 
@@ -326,12 +330,18 @@ primary; a permalink picks its workspace by itself.
 
 ## Docker
 
+No image is published to a registry; build it from this repo:
+
 ```bash
+docker build -t slk-mcp .
 docker run -d --name slack-mcp \
   -e SLACK_USER_TOKEN=xoxp-your-user-token \
-  -p 8001:8000 \
-  velesnitski/slk-mcp
+  -p 127.0.0.1:8001:8000 \
+  slk-mcp
 ```
+
+The port is bound to `127.0.0.1`: the server holds your token, so it should
+not listen on other interfaces.
 
 Add `-e SLACK_TOKEN=xoxb-...` alongside if you also want a bot token (Setup B).
 

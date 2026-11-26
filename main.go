@@ -27,7 +27,7 @@ import (
 )
 
 // version is stamped at build time via -ldflags "-X main.version=x.y.z".
-var version = "1.80.2"
+var version = "1.81.0"
 
 const shutdownTimeout = 10 * time.Second
 
