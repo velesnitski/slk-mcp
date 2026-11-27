@@ -13,11 +13,35 @@ link and told "install this Slack MCP for me". Each step says who does it.
 
 ## Cowork or Claude Desktop: ask Claude to set it up
 
-No terminal needed. Paste this into a Cowork task (or a Desktop chat):
+No terminal needed. Paste this into a Cowork task (or a Desktop chat); it
+verifies the download first, then walks you through the install. It is
+not tied to any version, so it works for anyone you send the repo to:
 
-> Set up the Slack MCP from https://github.com/velesnitski/slk-mcp for me:
-> follow docs/INSTALL.md, section "Cowork or Claude Desktop", and walk me
-> through the steps only I can do.
+```text
+Install the Slack MCP from https://github.com/velesnitski/slk-mcp for me.
+Follow docs/INSTALL.md, sections "Cowork or Claude Desktop" and
+"Verify the download".
+
+Rules: don't install anything yourself, never ask for my Slack token,
+and keep it out of the chat.
+
+1. Download the latest slk-mcp.mcpb and SHA256SUMS from the releases
+   page, check the SHA-256, and show me what's inside the bundle and its
+   manifest.
+2. Check the build provenance (gh attestation verify, or the GitHub API
+   route). If your sandbox can't, give me the exact command to run in my
+   own terminal, with the hash I should expect.
+3. Ask me whether I want the full or the read-only app (suggest
+   read-only), then give me the matching "Create the Slack app" link and
+   the clicks in Slack.
+4. Tell me how to open the .mcpb and what to put in the install form:
+   I paste the token myself, tick Read-only if I chose it, and set the
+   locale (en-US for US dates).
+5. Then I'll start a new task and ask for my unread Slack messages. If it
+   fails, use the troubleshooting table in the guide.
+
+End with a one-line verdict on whether the file checked out.
+```
 
 **Agent, in Cowork or Desktop:** you cannot install an extension into the
 app, click buttons in Slack, or read the token, and you must not ask for

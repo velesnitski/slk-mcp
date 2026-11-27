@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.86.4] - 2026-11-27
+
+### Changed
+
+- docs/INSTALL.md: the Cowork / Claude Desktop prompt is now one
+  version-free message that verifies the download (checksum, provenance,
+  bundle) and then walks through the install, so it can be sent to
+  anyone along with the repo link.
+
 ## [1.86.3] - 2026-11-27
 
 ### Added
