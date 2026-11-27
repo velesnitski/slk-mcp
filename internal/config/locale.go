@@ -37,6 +37,13 @@ func NormalizeLocale(s string) (string, bool) {
 	return s, localeRe.MatchString(s)
 }
 
+// LocaleMonthFirst reports whether a locale (any form NormalizeLocale
+// takes) writes month-first dates.
+func LocaleMonthFirst(loc string) bool {
+	n, _ := NormalizeLocale(loc)
+	return monthFirstLocales[n]
+}
+
 // localeDateOrder is the date order a locale implies: "mdy" or "dmy".
 func localeDateOrder(loc string) string {
 	if monthFirstLocales[loc] {

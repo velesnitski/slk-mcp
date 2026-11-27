@@ -293,6 +293,7 @@ slk-mcp run get_my_actions due=today drafts=true --post @me   # morning digest i
 | `SLACK_STATE_DIR` | No | Where slk-mcp keeps your Slack VIP list and starred conversations between runs (default: the user cache directory + `/slk-mcp`; `off` disables it) |
 | `SLACK_MEETING_ITEMS_CMD` | No | Command printing your meeting commitments as JSON for `get_my_actions`, run without a shell with `since=<days>d` appended, e.g. `/path/to/wispr-mcp run list_action_items owner=me format=json --json` |
 | `SLACK_LOCALE` | No | A locale such as `en-US`, `en-GB`, `ru-RU` (`en_US.UTF-8` also accepted). Sets defaults only: `en-US` means month-first dates and a 12-hour clock; `en-GB`/`ru-RU` day-first and 24-hour; `en-AU`/`en-CA`/`en-IN` day-first and 12-hour. `SLACK_DATE_ORDER` and `SLACK_CLOCK` override each part. The machine's `LANG` is deliberately not read. Per extra workspace: `locale` (date order only). ADR 154. |
+| `SLACK_AUTHOR_DATE_ORDER` | No | `true` (default) reads each message's numeric dates in its **author's** order when their Slack profile makes it clear: a month-first locale (en-US) **and** a US time zone means month-first; any other deliberately chosen locale (en-GB, ru-RU, uk-UA…) means day-first. Slack's default locale is en-US, so en-US outside the US says nothing and the workspace order applies. `false` reads every message in the workspace order. ADR 155. |
 | `SLACK_CLOCK` | No | `24h` (default) or `12h`: how every tool prints times (`15:04` or `3:04 PM`). Default comes from `SLACK_LOCALE`. |
 | `SLACK_DATE_ORDER` | No | How `get_my_actions` reads and prints numeric dates: `dmy` (default; "by 12/3" is 12 March, shown as `Fri 27.11`) or `mdy` (US; "by 12/3" is December 3, shown as `Fri 11/27`). `en-US` is accepted as `mdy`. Dotted dates (`12.11`) stay day-first, and a date that exists only one way ("12/25") is read that way in either order. Per extra workspace: `date_order`. ADR 152. |
 | `SLACK_DIGEST_HOURS` | No | Default digest lookback (default: `24`) |
@@ -395,7 +396,10 @@ update?", "ETA?"), completion and acknowledgement words, time off, thanks,
 urgency (asap, P0, blocker) and redirects ("ask the ops team"). Deadlines
 include EOD/COB, "by 5pm", "Friday EOD", "in a couple of days" and ordinal
 dates; numeric dates follow `SLACK_DATE_ORDER`. For a US setup,
-`SLACK_LOCALE=en-US` switches dates to `11/27` and times to `3:04 PM`. Golden-phrase tests pin
+`SLACK_LOCALE=en-US` switches dates to `11/27` and times to `3:04 PM`. In a
+bilingual workspace, an American's "by 12/3" (December 3) and a European
+colleague's (12 March) are each read their own way, from the author's
+Slack locale and time zone (`SLACK_AUTHOR_DATE_ORDER`). Golden-phrase tests pin
 every category per language, and a new language must fill every category.
 ADR 153.
 

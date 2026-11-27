@@ -100,6 +100,12 @@ type Config struct {
 	// Per workspace: "date_order" in a SLACK_WORKSPACES entry. ADR 152.
 	DateOrder string
 
+	// AuthorDateOrder reads a message's numeric dates in its author's own
+	// order when their Slack locale and time zone show it (default on;
+	// SLACK_AUTHOR_DATE_ORDER=off reads every message in the workspace's
+	// order). ADR 155.
+	AuthorDateOrder bool
+
 	// Locale (SLACK_LOCALE, e.g. "en-US") supplies defaults for DateOrder
 	// and Clock12 when they are not set explicitly. ADR 154.
 	Locale string
@@ -204,6 +210,7 @@ func Load() *Config {
 		StateDir:              stateDir(os.Getenv("SLACK_STATE_DIR")),
 		DateOrder:             strings.TrimSpace(os.Getenv("SLACK_DATE_ORDER")),
 		Locale:                strings.TrimSpace(os.Getenv("SLACK_LOCALE")),
+		AuthorDateOrder:       parseBoolDefault(os.Getenv("SLACK_AUTHOR_DATE_ORDER"), true),
 
 		DecisionKeywords: []string{
 			"decided", "approved", "let's go with", "agreed",

@@ -15,6 +15,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/velesnitski/slk-mcp/internal/actions"
+	"github.com/velesnitski/slk-mcp/internal/config"
 	"github.com/velesnitski/slk-mcp/internal/format"
 	"github.com/velesnitski/slk-mcp/internal/slack"
 )
@@ -217,7 +218,8 @@ func (h *Hub) myActions(ctx context.Context, sw *sweep, p actionParams) (string,
 	}
 	toMe = filterOwnMessages(toMe, selfID)
 
-	items := classifyHits(hits[0], toMe, selfID, h.botIDs(ctx), p.order)
+	bots, authors := h.roster(ctx)
+	items := classifyHits(hits[0], toMe, selfID, bots, orderByAuthor(authors, p.order, h.cfg.AuthorDateOrder))
 	sort.Slice(items, func(i, j int) bool { return items[i].ts > items[j].ts })
 	if len(items) > p.limit {
 		items = items[:p.limit]
@@ -275,7 +277,7 @@ func oldestHit(hits []goslack.SearchMessage) time.Time {
 // promise or request, and messages to the operator that ask. bots are
 // the workspace's bot and app users, whose messages and DMs commit
 // nobody.
-func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[string]bool, order actions.DateOrder) []*actionItem {
+func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[string]bool, orderOf func(user string) actions.DateOrder) []*actionItem {
 	var out []*actionItem
 	add := func(m goslack.SearchMessage, isOwn bool) {
 		if m.User == "" || bots[m.User] {
@@ -307,6 +309,7 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 		default:
 			addressed = true
 		}
+		order := orderOf(m.User)
 		due := actions.DueIn(m.Text, at, order)
 		// An urgency word without a date or a request word is a remark,
 		// not an ask (ADR 150); a request word still makes it one.
@@ -330,20 +333,89 @@ func classifyHits(own, toMe []goslack.SearchMessage, selfID string, bots map[str
 	return out
 }
 
-// botIDs returns the workspace's bot and app users. A failed roster read
-// yields none: bot messages are then judged by their text like any other.
-func (h *Hub) botIDs(ctx context.Context) map[string]bool {
+// roster reads the workspace's users once: its bot and app users, whose
+// messages and DMs commit nobody, and each person's own date order where
+// their Slack profile shows it (ADR 155). A failed read yields neither:
+// bot messages are then judged by their text, and dates by the
+// workspace's order.
+func (h *Hub) roster(ctx context.Context) (map[string]bool, map[string]actions.DateOrder) {
 	users, err := h.Users().List(ctx)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	out := map[string]bool{"USLACKBOT": true}
+	bots := map[string]bool{"USLACKBOT": true}
+	authors := map[string]actions.DateOrder{}
 	for _, u := range users {
 		if u.IsBot || u.IsAppUser {
-			out[u.ID] = true
+			bots[u.ID] = true
+			continue
+		}
+		if o, ok := authorDateOrder(u.Locale, u.TZ); ok {
+			authors[u.ID] = o
 		}
 	}
-	return out
+	return bots, authors
+}
+
+// orderByAuthor reads each message's numeric dates in its author's order
+// when known (and enabled), else in the workspace's.
+func orderByAuthor(authors map[string]actions.DateOrder, workspace actions.DateOrder, enabled bool) func(string) actions.DateOrder {
+	return func(user string) actions.DateOrder {
+		if enabled {
+			if o, ok := authors[user]; ok {
+				return o
+			}
+		}
+		return workspace
+	}
+}
+
+// authorDateOrder is a person's date order from their Slack locale and
+// time zone, when the two make it clear. Slack's default UI locale is
+// en-US, so en-US alone says nothing: plenty of people who write 27.11
+// never change it. Month-first therefore needs a month-first locale AND a
+// time zone where that convention is used; any other locale was chosen
+// on purpose, and is day-first. Everything else is unknown.
+func authorDateOrder(locale, tz string) (actions.DateOrder, bool) {
+	loc, ok := config.NormalizeLocale(locale)
+	if !ok || loc == "" {
+		return actions.DayFirst, false
+	}
+	if config.LocaleMonthFirst(loc) {
+		if monthFirstZone(tz) {
+			return actions.MonthFirst, true
+		}
+		return actions.DayFirst, false
+	}
+	if loc == "en" {
+		return actions.DayFirst, false // bare "en" names no region
+	}
+	return actions.DayFirst, true
+}
+
+// monthFirstZone reports whether an IANA zone is in the US (with its
+// territories) or the Philippines, where month-first dates are the norm.
+func monthFirstZone(tz string) bool {
+	switch tz {
+	case "Pacific/Honolulu", "Pacific/Guam", "Pacific/Saipan", "Pacific/Pago_Pago",
+		"America/Puerto_Rico", "America/St_Thomas", "Asia/Manila":
+		return true
+	}
+	if !strings.HasPrefix(tz, "America/") {
+		return false
+	}
+	return usZones[strings.TrimPrefix(tz, "America/")] ||
+		strings.HasPrefix(tz, "America/Indiana/") || strings.HasPrefix(tz, "America/Kentucky/") ||
+		strings.HasPrefix(tz, "America/North_Dakota/")
+}
+
+// usZones are the America/* zones inside the US; the rest of the
+// Americas mostly writes day-first.
+var usZones = map[string]bool{
+	"New_York": true, "Detroit": true, "Chicago": true, "Menominee": true, "Denver": true,
+	"Boise": true, "Phoenix": true, "Los_Angeles": true, "Anchorage": true, "Juneau": true,
+	"Sitka": true, "Metlakatla": true, "Yakutat": true, "Nome": true, "Adak": true,
+	"Indianapolis": true, "Louisville": true,
 }
 
 // direct reports whether a commitment was made to the operator alone: a

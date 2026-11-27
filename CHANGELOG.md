@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.85.0] - 2026-11-27
+
+### Added
+
+- **Dates read in their author's order.** In a workspace that mixes US
+  and European writers, `get_my_actions` reads "by 12/3" as December 3
+  from an author whose Slack profile has a month-first locale and a US
+  time zone, and as 12 March from one with a day-first locale. Authors
+  whose profile says nothing clear (Slack's default en-US outside the
+  US) keep the workspace order. One users.list read per workspace, the
+  same one that finds bot users. `SLACK_AUTHOR_DATE_ORDER=false` turns
+  it off (ADR 155).
+
 ## [1.84.0] - 2026-11-27
 
 ### Added
