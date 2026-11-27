@@ -201,6 +201,48 @@ release (`shasum -a 256 slk-mcp.mcpb` on macOS,
 `Get-FileHash slk-mcp.mcpb` in PowerShell); that proves only that the
 download is intact, not where it came from.
 
+**Without the GitHub CLI** (a Cowork sandbox, for instance), GitHub's
+public API returns the attestation for a file's digest, no sign-in
+needed:
+`https://api.github.com/repos/velesnitski/slk-mcp/attestations/sha256:<SHA-256 of the file>`.
+Base64-decode `dsseEnvelope.payload` of the first attestation;
+`predicate.buildDefinition` names the workflow, the tag and the commit.
+This confirms GitHub holds an attestation for exactly this file from this
+repository's release workflow, but does not check the signature itself:
+weaker than `gh attestation verify`, enough for a reasonable decision.
+
+**Ask Cowork to verify it.** Paste this into a Cowork task:
+
+```text
+Verify the slk-mcp desktop extension before I install it. Don't install
+anything and don't ask for my Slack token.
+
+1. Download
+   https://github.com/velesnitski/slk-mcp/releases/latest/download/slk-mcp.mcpb
+   and https://github.com/velesnitski/slk-mcp/releases/latest/download/SHA256SUMS
+   into my folder, and check the file's SHA-256 against SHA256SUMS.
+2. If the gh CLI is available, run:
+   gh attestation verify slk-mcp.mcpb -R velesnitski/slk-mcp
+   Otherwise fetch
+   https://api.github.com/repos/velesnitski/slk-mcp/attestations/sha256:<the file's SHA-256>,
+   base64-decode dsseEnvelope.payload of the first attestation and read
+   predicate.buildDefinition.
+3. Report the repository and workflow that built it (should be
+   velesnitski/slk-mcp, .github/workflows/release.yml), the tag
+   (refs/tags/v…), the commit, and whether that commit matches the tag on
+   https://github.com/velesnitski/slk-mcp/releases. Say which method you used.
+4. Unzip the .mcpb and show me manifest.json: what it asks for, that the
+   token field is marked sensitive, and that the bundle holds only
+   manifest.json, LICENSE and server/.
+
+Give a one-line verdict at the end.
+```
+
+A good result: the checksum matches; the workflow is
+`velesnitski/slk-mcp/.github/workflows/release.yml` on the release tag;
+the commit equals the one the tag points to; the bundle holds only
+`manifest.json`, `LICENSE` and `server/`.
+
 **Agent:** if you can run commands, run the verification before telling
 the user to open the file, and report the commit it names. To avoid
 trusting any binary, build it yourself on a Mac: `make mcpb` (Go and
