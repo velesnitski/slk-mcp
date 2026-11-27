@@ -18,27 +18,28 @@ verifies the download first, then walks you through the install. It is
 not tied to any version, so it works for anyone you send the repo to:
 
 ```text
-Install the Slack MCP from https://github.com/velesnitski/slk-mcp for me.
-Follow docs/INSTALL.md, sections "Cowork or Claude Desktop" and
-"Verify the download".
+Walk me through installing the Slack MCP from
+https://github.com/velesnitski/slk-mcp. Follow docs/INSTALL.md, sections
+"Cowork or Claude Desktop" and "Verify the download".
 
 Rules: don't install anything yourself, never ask for my Slack token,
-and keep it out of the chat.
+keep it out of the chat.
 
-1. Download the latest slk-mcp.mcpb and SHA256SUMS from the releases
-   page, check the SHA-256, and show me what's inside the bundle and its
-   manifest.
-2. Check the build provenance (gh attestation verify, or the GitHub API
-   route). If your sandbox can't, give me the exact command to run in my
-   own terminal, with the hash I should expect.
-3. Ask me whether I want the full or the read-only app (suggest
-   read-only), then give me the matching "Create the Slack app" link and
-   the clicks in Slack.
-4. Tell me how to open the .mcpb and what to put in the install form:
-   I paste the token myself, tick Read-only if I chose it, and set the
-   locale (en-US for US dates).
-5. Then I'll start a new task and ask for my unread Slack messages. If it
-   fails, use the troubleshooting table in the guide.
+1. Download the latest slk-mcp.mcpb and SHA256SUMS, check the SHA-256,
+   and show me the bundle contents and manifest. If no folder of mine is
+   connected, give me a download link instead.
+2. Check build provenance (gh attestation verify, or the GitHub API
+   route). If the sandbox can't, give me the exact command for my
+   terminal, the hash to expect, and the commit the release tag should
+   point to.
+3. Ask whether I want the full or read-only app (suggest read-only), then
+   give the matching "Create the Slack app" link and the clicks in Slack.
+4. Tell me how to open the .mcpb and what to put in the form: I paste the
+   token myself, tick Read-only if chosen, and set the locale only if I
+   want US formats (en-US).
+5. I'll start a new task and ask for my unread Slack messages. If it
+   fails, check Settings → Extensions, the + menu, and that I used the
+   User (xoxp-) token, then the guide's troubleshooting table.
 
 End with a one-line verdict on whether the file checked out.
 ```
@@ -299,6 +300,8 @@ your Slack token. Use the desktop extension.
 | A tool says `missing_scope` and names a scope | The app was created from an older or read-only manifest | Step 6 |
 | Unread or mention tools are missing | Only a bot token is set | Set `SLACK_USER_TOKEN` |
 | Server not listed after adding | Client not restarted | Restart it |
+| Desktop/Cowork: no Slack tools in the chat or task | Extension disabled, or off for this task | **Settings → Extensions**: enable slk-mcp; in Cowork, switch it on in the task's **+** menu; start a new task |
+| Desktop/Cowork: `invalid_auth` | The Bot token (`xoxb-`) was pasted into the form | **Settings → Extensions → slk-mcp → Configure**: paste the **User** OAuth Token (`xoxp-`) |
 | `transcribe_audio` returns a file path and a hint | whisper.cpp / ffmpeg not installed | [Voice notes](../README.md#how-to-transcribe-voice-messages) |
 
 ## 6. Change scopes later (person)
