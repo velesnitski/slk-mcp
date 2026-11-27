@@ -11,6 +11,38 @@ link and told "install this Slack MCP for me". Each step says who does it.
 > token into the chat**: it would land in your context and transcript. The
 > token goes from the browser straight into the user's own terminal (step 4).
 
+## Cowork or Claude Desktop: ask Claude to set it up
+
+No terminal needed. Paste this into a Cowork task (or a Desktop chat):
+
+> Set up the Slack MCP from https://github.com/velesnitski/slk-mcp for me:
+> follow docs/INSTALL.md, section "Cowork or Claude Desktop", and walk me
+> through the steps only I can do.
+
+**Agent, in Cowork or Desktop:** you cannot install an extension into the
+app, click buttons in Slack, or read the token, and you must not ask for
+it. Do this, in order:
+
+1. Ask whether the user wants the **full** or the **read-only** app
+   (read-only if unsure).
+2. Give the matching **Create the Slack app** link from step 3 below and
+   the four clicks under *Person* there (pick workspace → Create →
+   Install → copy the User OAuth Token). Tell them to keep the token on
+   the clipboard and not paste it into the chat.
+3. If you can write files to the user's folder, download
+   `https://github.com/velesnitski/slk-mcp/releases/latest/download/slk-mcp.mcpb`
+   there and tell them to open it from Finder or Explorer. Otherwise give
+   them that link to download and open.
+4. The app shows an install dialog with a form: **Install**, then paste
+   the token into *Slack user token*; for read-only tick *Read-only*; for
+   US dates set *Date and time format* to `en-US`.
+5. Ask them to start a **new** task or chat (tools load at start) and
+   request *"summarise my unread Slack messages"*. Use the troubleshooting
+   table in step 5 if it fails.
+
+Total for the person: one link, four clicks in Slack, one file to open,
+one paste.
+
 ## What you end up with
 
 - A Slack app in your workspace that holds a **user token** (`xoxp-…`):
@@ -58,21 +90,17 @@ means: [Slack scopes reference](https://docs.slack.dev/reference/scopes).
 
 ## 3. Create and install the Slack app (person, in the browser)
 
-**Agent:** generate a one-click link with the manifest pre-filled
-([Slack supports this](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests)),
-and give it to the user:
+**One click, manifest pre-filled**
+([Slack supports this](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests)).
+**Agent:** give the user one of these two links as is:
 
-```bash
-make manifest-url                                   # full manifest
-make manifest-url MANIFEST=slack-app-manifest.readonly.yaml
-```
+- [**Create the Slack app – full tool set**](https://api.slack.com/apps?new_app=1&manifest_yaml=display_information%3A%0A%20%20name%3A%20slk-mcp%0A%20%20description%3A%20Personal%20Slack%20MCP%20server%20-%20unread%20digests%2C%20commitments%2C%20search%2C%20posting.%0A%20%20background_color%3A%20%22%232c2d30%22%0Aoauth_config%3A%0A%20%20scopes%3A%0A%20%20%20%20user%3A%0A%20%20%20%20%20%20-%20channels%3Ahistory%0A%20%20%20%20%20%20-%20channels%3Aread%0A%20%20%20%20%20%20-%20groups%3Ahistory%0A%20%20%20%20%20%20-%20groups%3Aread%0A%20%20%20%20%20%20-%20im%3Ahistory%0A%20%20%20%20%20%20-%20im%3Aread%0A%20%20%20%20%20%20-%20mpim%3Ahistory%0A%20%20%20%20%20%20-%20mpim%3Aread%0A%20%20%20%20%20%20-%20channels%3Awrite%0A%20%20%20%20%20%20-%20groups%3Awrite%0A%20%20%20%20%20%20-%20im%3Awrite%0A%20%20%20%20%20%20-%20mpim%3Awrite%0A%20%20%20%20%20%20-%20users%3Aread%0A%20%20%20%20%20%20-%20users%3Aread.email%0A%20%20%20%20%20%20-%20search%3Aread%0A%20%20%20%20%20%20-%20files%3Aread%0A%20%20%20%20%20%20-%20reactions%3Aread%0A%20%20%20%20%20%20-%20reactions%3Awrite%0A%20%20%20%20%20%20-%20canvases%3Aread%0A%20%20%20%20%20%20-%20canvases%3Awrite%0A%20%20%20%20%20%20-%20lists%3Aread%0A%20%20%20%20%20%20-%20usergroups%3Aread%0A%20%20%20%20%20%20-%20usergroups%3Awrite%0A%20%20%20%20%20%20-%20chat%3Awrite%0A%20%20%20%20%20%20-%20users.profile%3Awrite%0A%20%20%20%20%20%20-%20users%3Awrite%0A%20%20%20%20%20%20-%20dnd%3Awrite%0Asettings%3A%0A%20%20org_deploy_enabled%3A%20false%0A%20%20socket_mode_enabled%3A%20false%0A%20%20token_rotation_enabled%3A%20false%0A)
+- [**Create the Slack app – read-only**](https://api.slack.com/apps?new_app=1&manifest_yaml=display_information%3A%0A%20%20name%3A%20slk-mcp%20%28read-only%29%0A%20%20description%3A%20Personal%20Slack%20MCP%20server%20-%20read-only%20digests%2C%20search%20and%20commitments.%0A%20%20background_color%3A%20%22%232c2d30%22%0Aoauth_config%3A%0A%20%20scopes%3A%0A%20%20%20%20user%3A%0A%20%20%20%20%20%20-%20channels%3Ahistory%0A%20%20%20%20%20%20-%20channels%3Aread%0A%20%20%20%20%20%20-%20groups%3Ahistory%0A%20%20%20%20%20%20-%20groups%3Aread%0A%20%20%20%20%20%20-%20im%3Ahistory%0A%20%20%20%20%20%20-%20im%3Aread%0A%20%20%20%20%20%20-%20mpim%3Ahistory%0A%20%20%20%20%20%20-%20mpim%3Aread%0A%20%20%20%20%20%20-%20users%3Aread%0A%20%20%20%20%20%20-%20users%3Aread.email%0A%20%20%20%20%20%20-%20search%3Aread%0A%20%20%20%20%20%20-%20files%3Aread%0A%20%20%20%20%20%20-%20reactions%3Aread%0A%20%20%20%20%20%20-%20canvases%3Aread%0A%20%20%20%20%20%20-%20lists%3Aread%0A%20%20%20%20%20%20-%20usergroups%3Aread%0A%20%20%20%20%20%20-%20im%3Awrite%0Asettings%3A%0A%20%20org_deploy_enabled%3A%20false%0A%20%20socket_mode_enabled%3A%20false%0A%20%20token_rotation_enabled%3A%20false%0A)
 
-Without the repo checked out:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/velesnitski/slk-mcp/main/slack-app-manifest.yaml \
-  | python3 -c 'import sys,urllib.parse;print("https://api.slack.com/apps?new_app=1&manifest_yaml="+urllib.parse.quote(sys.stdin.read()))'
-```
+These links are the manifests above with comments removed; a test
+(`manifest_link_test.go`) fails if they drift. To regenerate:
+`make manifest-url` (add `MANIFEST=slack-app-manifest.readonly.yaml`
+for read-only).
 
 **Person:**
 

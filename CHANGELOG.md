@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.86.1] - 2026-11-27
+
+### Added
+
+- **One-click "Create the Slack app" links** (full and read-only) in
+  docs/INSTALL.md, with the manifest pre-filled; a test keeps them equal
+  to the manifest files. `make manifest-url` now drops comments so the
+  link stays short (ADR 157).
+- **"Ask Claude to set it up" for Cowork and Claude Desktop:** a prompt
+  to paste into a Cowork task and the agent's steps – the create-app
+  link, the `.mcpb` download, the token form, verification – with what
+  the agent must not do (install for the user, read the token).
+
 ## [1.86.0] - 2026-11-27
 
 ### Added

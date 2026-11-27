@@ -55,7 +55,7 @@ mcpb:
 ## for the read-only app.
 MANIFEST ?= slack-app-manifest.yaml
 manifest-url:
-	@python3 -c 'import sys,urllib.parse;print("https://api.slack.com/apps?new_app=1&manifest_yaml="+urllib.parse.quote(open(sys.argv[1]).read()))' $(MANIFEST)
+	@python3 -c 'import sys,urllib.parse;y="".join(l+"\n" for l in open(sys.argv[1]).read().splitlines() if l.strip() and not l.strip().startswith("#"));print("https://api.slack.com/apps?new_app=1&manifest_yaml="+urllib.parse.quote(y,safe=""))' $(MANIFEST)
 
 sweep:
 	./scripts/sweep.sh
