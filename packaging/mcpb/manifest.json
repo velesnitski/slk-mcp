@@ -1,0 +1,70 @@
+{
+  "manifest_version": "0.3",
+  "name": "slk-mcp",
+  "display_name": "Slack (slk-mcp)",
+  "version": "@VERSION@",
+  "description": "Slack for Claude: unread digests across workspaces, your open commitments with deadlines, search, threads, voice-note transcription and posting.",
+  "long_description": "Runs locally as a single binary and talks to the Slack Web API with your own user token. The token is entered once in the app's settings form and kept in the system keychain. Read-only mode removes every tool that can post, react or change your status.",
+  "author": {
+    "name": "Alex Velesnitski",
+    "url": "https://github.com/velesnitski"
+  },
+  "homepage": "https://github.com/velesnitski/slk-mcp",
+  "documentation": "https://github.com/velesnitski/slk-mcp/blob/main/docs/INSTALL.md",
+  "support": "https://github.com/velesnitski/slk-mcp/issues",
+  "license": "MIT",
+  "keywords": ["slack", "messages", "digest", "commitments", "search"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/slk-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/slk-mcp",
+      "args": ["-transport", "stdio"],
+      "env": {
+        "SLACK_USER_TOKEN": "${user_config.slack_user_token}",
+        "SLACK_WORKSPACES": "${user_config.extra_workspaces}",
+        "SLACK_READ_ONLY": "${user_config.read_only}",
+        "SLACK_LOCALE": "${user_config.locale}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/server/slk-mcp.exe"
+        }
+      }
+    }
+  },
+  "user_config": {
+    "slack_user_token": {
+      "type": "string",
+      "title": "Slack user token",
+      "description": "The User OAuth Token (xoxp-…) from your Slack app's OAuth & Permissions page. Create the app from the manifest in docs/INSTALL.md.",
+      "sensitive": true,
+      "required": true
+    },
+    "extra_workspaces": {
+      "type": "string",
+      "title": "More workspaces (optional)",
+      "description": "JSON array of other workspaces, e.g. [{\"name\":\"team-b\",\"user_token\":\"xoxp-…\"}]. Leave empty for one workspace.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Remove every tool that posts, reacts, archives or changes your status.",
+      "required": false,
+      "default": false
+    },
+    "locale": {
+      "type": "string",
+      "title": "Date and time format (optional)",
+      "description": "A locale such as en-US (11/27, 3:04 PM) or en-GB (27.11, 15:04). Empty keeps 27.11 and 24-hour time.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"]
+  }
+}

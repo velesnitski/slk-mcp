@@ -15,6 +15,12 @@ Slack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copi
 
 ## Quick start
 
+> **Claude Desktop or Cowork (macOS / Windows)?** Install the desktop
+> extension: download `slk-mcp-<version>.mcpb` from the
+> [latest release](https://github.com/velesnitski/slk-mcp/releases/latest),
+> open it, and paste your token into the form the app shows. See
+> [docs/INSTALL.md](docs/INSTALL.md#claude-desktop-and-cowork-macos-and-windows).
+>
 > **Installing with a coding agent?** Give it this repo and point it at
 > **[docs/INSTALL.md](docs/INSTALL.md)**: a from-scratch guide that says
 > which steps the agent runs and which happen in your browser, generates a

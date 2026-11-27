@@ -128,6 +128,35 @@ see the [MCP client list](https://modelcontextprotocol.io/clients). The shape:
 The token sits in that config file in plain text, like any MCP server's
 credentials: keep the file readable by you only.
 
+### Claude Desktop and Cowork (macOS and Windows)
+
+Desktop and Cowork have no `/mcp` command and no `claude mcp add`; they
+install local servers as **desktop extensions** (`.mcpb` files). One file
+serves both systems: it carries a universal macOS binary (Apple silicon
+and Intel) and a Windows `.exe`, and the app picks the right one.
+
+1. **Person:** download `slk-mcp-<version>.mcpb` from the
+   [latest release](https://github.com/velesnitski/slk-mcp/releases/latest)
+   (or build it on a Mac with `make mcpb`, which writes it to `dist/`).
+2. **Person:** open it (double-click), or in the app go to
+   **Settings → Extensions** and install it from there; see
+   [installing desktop extensions](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop).
+3. **Person:** the app shows a settings form. Paste the **User OAuth
+   Token** from step 3 into *Slack user token*. Optional: *More
+   workspaces* (a `SLACK_WORKSPACES` JSON array), *Read-only*, and
+   *Date and time format* (`en-US` for `11/27` and `3:04 PM`).
+   Credential fields are marked sensitive, so the app keeps them in the
+   system keychain rather than in a config file, and they never pass
+   through a chat.
+4. **Agent or person:** in a new chat or Cowork task, ask *"summarise my
+   unread Slack messages"*. In Cowork, the extension can be switched on
+   or off per task from the **+** menu in the message box.
+
+Do **not** expose slk-mcp as a remote **custom connector** (a URL) for
+Cowork: Anthropic's cloud would have to reach the server over the
+internet, the HTTP transport has no authentication, and the server holds
+your Slack token. Use the desktop extension.
+
 ## 5. Verify (agent)
 
 1. **Restart the client** (Claude Code reads its server list at session

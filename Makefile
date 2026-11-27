@@ -1,6 +1,6 @@
 BINARY := slk-mcp
 
-.PHONY: build test fuzz mutate sync-label install manifest-url sweep sweep-history hooks
+.PHONY: build test fuzz mutate sync-label install manifest-url mcpb sweep sweep-history hooks
 
 ## build: compile the server binary (version embedded via -ldflags)
 build:
@@ -44,6 +44,11 @@ sync-label:
 ## label is read from the config key at session start). Kept separate from
 ## `build` so plain builds never touch ~/.claude.json.
 install: build sync-label
+
+## mcpb: build dist/slk-mcp-<version>.mcpb, the desktop extension for
+## Claude Desktop / Cowork on macOS and Windows (ADR 156). Runs on macOS.
+mcpb:
+	./scripts/build-mcpb.sh
 
 ## manifest-url: print a one-click "create Slack app" link with the manifest
 ## pre-filled (docs/INSTALL.md). MANIFEST=slack-app-manifest.readonly.yaml
