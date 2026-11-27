@@ -238,6 +238,13 @@ anything and don't ask for my Slack token.
 Give a one-line verdict at the end.
 ```
 
+A Cowork sandbox may block both routes: `gh` then fails with "no valid
+Sigstore verifiers could be initialized", and the API call is refused by
+the sandbox proxy. Cowork can still check the checksum and the bundle;
+for the provenance it should hand you the `gh attestation verify` command
+to run in your own terminal, on the same file (compare the SHA-256 it
+reported).
+
 A good result: the checksum matches; the workflow is
 `velesnitski/slk-mcp/.github/workflows/release.yml` on the release tag;
 the commit equals the one the tag points to; the bundle holds only

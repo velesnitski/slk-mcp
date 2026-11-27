@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs/INSTALL.md: a prompt to paste into Cowork that verifies the
   desktop extension before install, and the no-CLI route through
   GitHub's public attestations API, with what it does and does not prove.
+  A Cowork sandbox may block both routes; the guide says to run the
+  provenance check in your own terminal on the same file.
 
 ## [1.86.2] - 2026-11-27
 
