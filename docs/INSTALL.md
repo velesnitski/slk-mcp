@@ -32,7 +32,8 @@ it. Do this, in order:
 3. If you can write files to the user's folder, download
    `https://github.com/velesnitski/slk-mcp/releases/latest/download/slk-mcp.mcpb`
    there and tell them to open it from Finder or Explorer. Otherwise give
-   them that link to download and open.
+   them that link to download and open. If you can run commands, verify
+   it first (see *Verify the download* below) and tell the user the result.
 4. The app shows an install dialog with a form: **Install**, then paste
    the token into *Slack user token*; for read-only tick *Read-only*; for
    US dates set *Date and time format* to `en-US`.
@@ -179,6 +180,31 @@ and Intel) and a Windows `.exe`, and the app picks the right one.
 4. **Agent or person:** in a new chat or Cowork task, ask *"summarise my
    unread Slack messages"*. In Cowork, the extension can be switched on
    or off per task from the **+** menu in the message box.
+
+#### Verify the download
+
+The `.mcpb` in each release is built by GitHub Actions from the release
+tag (not on anyone's laptop) and carries a signed
+[build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds).
+To prove a file came from this repository, at that tag, built by the
+release workflow:
+
+```bash
+gh attestation verify slk-mcp.mcpb -R velesnitski/slk-mcp
+```
+
+A pass prints the repository, the workflow and the commit it was built
+from; compare the commit with the tag on the
+[releases page](https://github.com/velesnitski/slk-mcp/releases). Without
+the GitHub CLI, compare the file's SHA-256 with `SHA256SUMS` in the same
+release (`shasum -a 256 slk-mcp.mcpb` on macOS,
+`Get-FileHash slk-mcp.mcpb` in PowerShell); that proves only that the
+download is intact, not where it came from.
+
+**Agent:** if you can run commands, run the verification before telling
+the user to open the file, and report the commit it names. To avoid
+trusting any binary, build it yourself on a Mac: `make mcpb` (Go and
+Xcode command-line tools) writes `dist/slk-mcp-<version>.mcpb`.
 
 Do **not** expose slk-mcp as a remote **custom connector** (a URL) for
 Cowork: Anthropic's cloud would have to reach the server over the

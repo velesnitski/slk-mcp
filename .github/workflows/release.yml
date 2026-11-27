@@ -46,3 +46,61 @@ jobs:
               --notes-file /tmp/notes.md \
               --verify-tag
           fi
+
+  # The desktop extension (ADR 156) is built here, from the tag, and not on
+  # a laptop: a reviewer can then prove the file in the release came from
+  # this repository at this commit (`gh attestation verify`, ADR 158).
+  # macOS because the universal binary is joined with lipo; the repository
+  # is public, so the runner costs nothing.
+  mcpb:
+    name: Build and attest desktop extension
+    needs: release
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Tag matches main.go version
+        run: |
+          v=$(grep -m1 'version = ' main.go | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but main.go says $v"
+            exit 1
+          fi
+
+      - name: Build
+        run: ./scripts/build-mcpb.sh
+
+      - name: Validate manifest
+        run: |
+          mkdir -p /tmp/unpacked
+          unzip -q "dist/slk-mcp-${GITHUB_REF_NAME#v}.mcpb" -d /tmp/unpacked
+          npx -y @anthropic-ai/mcpb@2.1.2 validate /tmp/unpacked/manifest.json
+
+      - name: Stable name and checksums
+        run: |
+          cd dist
+          cp "slk-mcp-${GITHUB_REF_NAME#v}.mcpb" slk-mcp.mcpb
+          shasum -a 256 slk-mcp-*.mcpb slk-mcp.mcpb > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/slk-mcp-*.mcpb
+            dist/slk-mcp.mcpb
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" dist/*.mcpb dist/SHA256SUMS --clobber

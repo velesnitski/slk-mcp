@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.86.2] - 2026-11-27
+
+### Changed
+
+- **The desktop extension is built and attested in CI.** The release
+  workflow builds `slk-mcp.mcpb` from the tag on a macOS runner,
+  validates its manifest, publishes `SHA256SUMS`, and attaches a build
+  provenance attestation: `gh attestation verify slk-mcp.mcpb -R
+  velesnitski/slk-mcp` proves the file came from this repository at that
+  commit. No more manual upload (ADR 158).
+- docs/INSTALL.md: a "Verify the download" section; the Cowork agent
+  verifies the file before asking you to open it.
+
 ## [1.86.1] - 2026-11-27
 
 ### Added
